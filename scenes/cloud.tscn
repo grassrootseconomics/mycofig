@@ -1,0 +1,61 @@
+[gd_scene load_steps=7 format=3 uid="uid://cjf1sat1rrpk5"]
+
+[ext_resource type="Script" path="res://scenes/cloud.gd" id="1_o65pk"]
+[ext_resource type="Texture2D" uid="uid://d31cxqp6ddjcq" path="res://graphics/cloud.png" id="2_iaxpy"]
+[ext_resource type="Texture2D" uid="uid://bd8so3hnylm4b" path="res://graphics/health-back.png" id="3_siwm0"]
+[ext_resource type="Texture2D" uid="uid://gfa5wyo71535" path="res://graphics/health-over.png" id="4_lymld"]
+[ext_resource type="Texture2D" uid="uid://bt73bfc1f07cl" path="res://graphics/health-progress.png" id="5_hsetq"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_yl0lh"]
+size = Vector2(31, 46)
+
+[node name="Cloud" type="Area2D"]
+collision_layer = 2
+collision_mask = 9
+script = ExtResource("1_o65pk")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_iaxpy")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0.5, 1)
+shape = SubResource("RectangleShape2D_yl0lh")
+
+[node name="ActionTimer" type="Timer" parent="."]
+wait_time = 0.3
+autostart = true
+
+[node name="DecayTimer" type="Timer" parent="."]
+wait_time = 3.0
+autostart = true
+
+[node name="GrowthTimer" type="Timer" parent="."]
+wait_time = 2.0
+autostart = true
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+
+[node name="Rbar" type="TextureProgressBar" parent="CanvasLayer"]
+offset_left = 28.0
+offset_top = -7.0
+offset_right = 33.0
+offset_bottom = 22.0
+max_value = 10.0
+value = 5.0
+fill_mode = 3
+texture_under = ExtResource("3_siwm0")
+texture_over = ExtResource("4_lymld")
+texture_progress = ExtResource("5_hsetq")
+tint_progress = Color(0, 0.819023, 0.247507, 1)
+metadata/_edit_use_anchors_ = true
+
+[node name="DryTimer" type="Timer" parent="."]
+wait_time = 10.0
+autostart = true
+
+[connection signal="area_entered" from="." to="." method="_on_area_entered"]
+[connection signal="body_entered" from="." to="." method="_on_body_entered"]
+[connection signal="timeout" from="ActionTimer" to="." method="_on_action_timer_timeout"]
+[connection signal="timeout" from="DecayTimer" to="." method="_on_decay_timer_timeout"]
+[connection signal="timeout" from="GrowthTimer" to="." method="_on_growth_timer_timeout"]
+[connection signal="timeout" from="DryTimer" to="." method="_on_dry_timer_timeout"]

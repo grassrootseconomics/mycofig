@@ -1,0 +1,132 @@
+[gd_scene load_steps=8 format=3 uid="uid://bxnid34mxwq14"]
+
+[ext_resource type="Script" path="res://scenes/game_over.gd" id="1_iwgga"]
+[ext_resource type="Texture2D" uid="uid://nm116edtoqj" path="res://graphics/soil_end.jpeg" id="2_qib70"]
+[ext_resource type="Texture2D" uid="uid://doe6njlxguw7e" path="res://graphics/bird1.png" id="3_pvp57"]
+[ext_resource type="Texture2D" uid="uid://btdne2kfyy05m" path="res://graphics/bird2.png" id="4_3ssjk"]
+[ext_resource type="Texture2D" uid="uid://b8f1xosg5jr2p" path="res://graphics/bird3.png" id="5_d5n28"]
+[ext_resource type="Texture2D" uid="uid://b1e3ve6aonwrf" path="res://graphics/bird4.png" id="6_iku7p"]
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_rgr7h"]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("3_pvp57")
+}, {
+"duration": 1.0,
+"texture": ExtResource("4_3ssjk")
+}, {
+"duration": 1.0,
+"texture": ExtResource("5_d5n28")
+}, {
+"duration": 1.0,
+"texture": ExtResource("6_iku7p")
+}],
+"loop": true,
+"name": &"default",
+"speed": 5.0
+}]
+
+[node name="GameOver" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_iwgga")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+position = Vector2(641, 322)
+scale = Vector2(1.2855, 1.2855)
+texture = ExtResource("2_qib70")
+
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]
+z_index = 4
+position = Vector2(281, 300)
+sprite_frames = SubResource("SpriteFrames_rgr7h")
+autoplay = "default"
+
+[node name="AnimatedSprite2D2" type="AnimatedSprite2D" parent="."]
+z_index = 4
+position = Vector2(852, 300)
+sprite_frames = SubResource("SpriteFrames_rgr7h")
+autoplay = "default"
+
+[node name="ColorRect" type="ColorRect" parent="."]
+modulate = Color(0.196078, 0, 1, 0.32549)
+layout_mode = 0
+offset_right = 1196.0
+offset_bottom = 666.0
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 60
+text = "Gardening Complete"
+horizontal_alignment = 1
+
+[node name="Label2" type="Label" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 25
+text = "Score: "
+horizontal_alignment = 1
+
+[node name="ModeLabel" type="Label" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 25
+text = "Mode"
+horizontal_alignment = 1
+
+[node name="Label3" type="Label" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 25
+text = "
+You achieved the rank of:"
+horizontal_alignment = 1
+
+[node name="RankLabel" type="Label" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 42
+text = "SEEDLING"
+horizontal_alignment = 1
+
+[node name="MarginContainer2" type="MarginContainer" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_bottom = 20
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer/VBoxContainer/MarginContainer2"]
+layout_mode = 2
+alignment = 1
+
+[node name="LinkButton3" type="LinkButton" parent="CenterContainer/VBoxContainer/MarginContainer2/VBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 30
+text = "Learn about Resource Coordination"
+uri = "https://willruddick.substack.com/p/three-sisters-meet-a-funguy"
+
+[node name="LinkButton4" type="LinkButton" parent="CenterContainer/VBoxContainer/MarginContainer2/VBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 30
+text = "Practice Social Gardening"
+uri = "https://sarafu.network"
+
+[node name="Label" type="Label" parent="CenterContainer/VBoxContainer/MarginContainer2/VBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 25
+text = "Press Space to Garden Again"

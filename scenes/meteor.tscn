@@ -1,0 +1,21 @@
+[gd_scene load_steps=4 format=3 uid="uid://de0tglxxwmbi4"]
+
+[ext_resource type="Script" path="res://scenes/meteor.gd" id="1_46igg"]
+[ext_resource type="Texture2D" uid="uid://unvng6qnw25h" path="res://graphics/city.png" id="1_cq6kw"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_yl0lh"]
+size = Vector2(63, 20)
+
+[node name="Meteor" type="Area2D"]
+collision_layer = 2
+collision_mask = 9
+script = ExtResource("1_46igg")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("1_cq6kw")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_yl0lh")
+
+[connection signal="area_entered" from="." to="." method="_on_area_entered"]
+[connection signal="body_entered" from="." to="." method="_on_body_entered"]

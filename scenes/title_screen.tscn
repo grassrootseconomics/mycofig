@@ -1,0 +1,92 @@
+[gd_scene load_steps=6 format=3 uid="uid://bldumq1sorlww"]
+
+[ext_resource type="Script" path="res://scenes/title_screen.gd" id="1_owrpj"]
+[ext_resource type="Texture2D" uid="uid://nm116edtoqj" path="res://graphics/soil_end.jpeg" id="2_8cwuh"]
+[ext_resource type="Texture2D" uid="uid://qeph5x6totjj" path="res://icon.svg" id="3_vd4ur"]
+[ext_resource type="Texture2D" uid="uid://cypit7l2enax4" path="res://graphics/rhizomorphic.png" id="4_knllo"]
+[ext_resource type="Texture2D" uid="uid://cqcp3xd8ymlh5" path="res://graphics/mushroom_32.png" id="5_l40k1"]
+
+[node name="TitleScreen" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_owrpj")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+position = Vector2(641, 322)
+scale = Vector2(1.2855, 1.2855)
+texture = ExtResource("2_8cwuh")
+
+[node name="Sprite2D2" type="Sprite2D" parent="."]
+position = Vector2(205, 551)
+scale = Vector2(0.30561, 0.30561)
+texture = ExtResource("3_vd4ur")
+
+[node name="Sprite2D3" type="Sprite2D" parent="."]
+position = Vector2(968, 299)
+texture = ExtResource("4_knllo")
+
+[node name="Sprite2D4" type="Sprite2D" parent="."]
+position = Vector2(966, 281)
+texture = ExtResource("5_l40k1")
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -283.5
+offset_top = -459.0
+offset_right = 283.5
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer"]
+layout_mode = 2
+theme_override_constants/separation = 11
+alignment = 1
+
+[node name="Label" type="Label" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 42
+text = "Mycorrhizal Finance Garden
+#MYCOFI-G"
+horizontal_alignment = 1
+
+[node name="Tutorial" type="Button" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 43
+text = "Tutorial"
+
+[node name="FreeGarden" type="Button" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 43
+text = "Free Garden"
+
+[node name="ChallengeButton" type="Button" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 43
+text = "Challenge"
+
+[node name="LinkButton" type="LinkButton" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 30
+text = "Learn about Resource Coordination"
+uri = "https://willruddick.substack.com/p/three-sisters-meet-a-funguy"
+
+[node name="LinkButton2" type="LinkButton" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 30
+text = "Practice Social Gardening"
+uri = "https://sarafu.network"
+
+[connection signal="pressed" from="CenterContainer/VBoxContainer/Tutorial" to="." method="_on_tutorial_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/FreeGarden" to="." method="_on_free_garden_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/ChallengeButton" to="." method="_on_challenge_button_pressed"]

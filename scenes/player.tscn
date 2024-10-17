@@ -1,0 +1,38 @@
+[gd_scene load_steps=5 format=3 uid="uid://cwghgyigytbmj"]
+
+[ext_resource type="Texture2D" uid="uid://d1ipyf6p0nh6s" path="res://graphics/worker_sm.png" id="1_6fjlk"]
+[ext_resource type="Script" path="res://scenes/player.gd" id="1_piroo"]
+
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_petk1"]
+radius = 5.0
+height = 18.0
+
+[sub_resource type="Environment" id="Environment_yrd46"]
+background_mode = 3
+background_energy_multiplier = 6.85
+glow_enabled = true
+glow_bloom = 0.26
+
+[node name="Player" type="CharacterBody2D"]
+self_modulate = Color(0.0235294, 1, 1, 1)
+collision_mask = 6
+script = ExtResource("1_piroo")
+
+[node name="PlayerImage" type="Sprite2D" parent="."]
+self_modulate = Color(0, 1, 1, 1)
+texture = ExtResource("1_6fjlk")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CapsuleShape2D_petk1")
+
+[node name="LaserStartPosition" type="Marker2D" parent="."]
+position = Vector2(0, -14)
+
+[node name="LaserTimer" type="Timer" parent="."]
+wait_time = 0.1
+one_shot = true
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_yrd46")
+
+[connection signal="timeout" from="LaserTimer" to="." method="_on_laser_timer_timeout"]

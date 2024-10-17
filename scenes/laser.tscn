@@ -1,0 +1,29 @@
+[gd_scene load_steps=4 format=3 uid="uid://c1t02twsregjr"]
+
+[ext_resource type="Script" path="res://scenes/laser.gd" id="1_uehey"]
+[ext_resource type="Texture2D" uid="uid://l8cwsxj0of13" path="res://graphics/cc.png" id="2_f1w7i"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_x8t53"]
+radius = 3.16228
+
+[node name="Laser" type="Area2D"]
+collision_layer = 8
+collision_mask = 2
+script = ExtResource("1_uehey")
+
+[node name="CPUParticles2D" type="CPUParticles2D" parent="."]
+amount = 29
+lifetime = 0.9
+speed_scale = 2.0
+emission_shape = 1
+emission_sphere_radius = 8.0
+gravity = Vector2(0, 15)
+scale_amount_min = 0.5
+scale_amount_max = 2.0
+color = Color(0, 0.768627, 0, 1)
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_f1w7i")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_x8t53")

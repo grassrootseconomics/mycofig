@@ -9,3 +9,4 @@ res://scenes/game_over.tscn
 res://scenes/plant.tscn
 res://scenes/bird.tscn
 res://scenes/plant.gd
+res://scenes/bird.gd

@@ -58,7 +58,10 @@ func _physics_process(delta: float) -> void:
 		#move_and_slide()
 		
 		if(the_quarry != null):
-			if((not is_instance_valid(the_quarry)) or the_quarry.dead):
+			if(not is_instance_valid(the_quarry)):
+				the_quarry = null
+				quarry_found = false
+			elif(the_quarry.dead == true):
 				the_quarry = null
 				quarry_found = false
 			

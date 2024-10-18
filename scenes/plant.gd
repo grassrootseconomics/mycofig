@@ -723,7 +723,7 @@ func _on_evaporate_timer_timeout() -> void:
 
 
 func _on_body_entered(body: Node2D) -> void:
-	if (body is Bird and self.type == Global.quarry_type):#"maize"):
+	if (body is Bird and self.type == body.quarry_type):#"maize"):
 		
 		#print("bird endered: ", body)
 		if(body.caught == false and caught_by == null):

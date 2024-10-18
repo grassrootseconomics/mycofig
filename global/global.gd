@@ -106,7 +106,7 @@ var birds_quarry = {
 }
 
 var rand_quarry = ["maize","bean","squash"]
-
+#var rand_quarry = ["bean"]
 
 var stage_text = {
 	1: "Stage 1: 
@@ -172,7 +172,8 @@ var stage_text = {
 	nutrients it needs. 
 	
 	Try to grow as much  maize as you can!
-	**Use your inventory as needed.",
+	**Use your inventory as needed.
+	**Press q to start over.",
 	7: "Stage 7: 
 	Now that the birds have migrated 
 	you should return the value 

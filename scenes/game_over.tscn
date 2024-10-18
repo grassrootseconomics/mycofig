@@ -37,19 +37,19 @@ grow_vertical = 2
 script = ExtResource("1_iwgga")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
-position = Vector2(641, 322)
-scale = Vector2(1.2855, 1.2855)
+position = Vector2(645, 345)
+scale = Vector2(1.26239, 1.44078)
 texture = ExtResource("2_qib70")
 
 [node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]
 z_index = 4
-position = Vector2(281, 300)
+position = Vector2(310, 337)
 sprite_frames = SubResource("SpriteFrames_rgr7h")
 autoplay = "default"
 
 [node name="AnimatedSprite2D2" type="AnimatedSprite2D" parent="."]
 z_index = 4
-position = Vector2(852, 300)
+position = Vector2(949, 338)
 sprite_frames = SubResource("SpriteFrames_rgr7h")
 autoplay = "default"
 
@@ -58,6 +58,7 @@ modulate = Color(0.196078, 0, 1, 0.32549)
 layout_mode = 0
 offset_right = 1196.0
 offset_bottom = 666.0
+scale = Vector2(1.07558, 1.09082)
 
 [node name="CenterContainer" type="CenterContainer" parent="."]
 layout_mode = 1

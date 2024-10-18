@@ -226,27 +226,28 @@ func _physics_process(delta):
 			tween.set_parallel(true)
 	
 func _input(event):
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT:
-			if event.pressed:
-				
-				if $Sprite2D.get_rect().has_point(to_local(event.position)):
-				
-					is_dragging = true
-					Global.active_agent = self
-					print(" clicked: ", name, " type: ", self.type)
+	if false:
+		if event is InputEventMouseButton:
+			if event.button_index == MOUSE_BUTTON_LEFT:
+				if event.pressed:
 					
-			else:
-				is_dragging = false
-	
-	if event is InputEventKey:
-		if event.pressed and event.keycode == KEY_R:
-			if is_raining == false:
-				is_raining = true
-				print("pressed raining")
-			else:
-				is_raining = false
-				print("pressed not raining")
+					if $Sprite2D.get_rect().has_point(to_local(event.position)):
+					
+						is_dragging = true
+						Global.active_agent = self
+						print(" clicked: ", name, " type: ", self.type)
+						
+				else:
+					is_dragging = false
+		
+		if event is InputEventKey:
+			if event.pressed and event.keycode == KEY_R:
+				if is_raining == false:
+					is_raining = true
+					print("pressed raining")
+				else:
+					is_raining = false
+					print("pressed not raining")
 
 func _on_area_entered(ztrade: Area2D) -> void:
 	if ztrade.end_agent == self:

@@ -366,18 +366,22 @@ func kill_it():
 		#if child.type == 'myco': 
 		
 	
-	#var children =  $"../../Agents".get_children()
-	var living = false
+	
+	
 	for child in trade_buddies:#children:
 		child.draw_lines = true
 		child.new_buddies = true
 		
-	
-		if(child.dead == false and child.type != "cloud" and child.type != "myco"):
-			living = true
+	var children =  $"../../Agents".get_children()
+	var living = false
+	for child in children:#children:
 		
-			if( living == false and Global.mode != "tutorial"):
-				get_tree().change_scene_to_file("res://scenes/game_over.tscn")
+		if(child.type != "cloud" and child.type != "myco"):
+			if(child.dead == false):
+				living = true
+		
+	if( living == false and Global.mode != "tutorial"):
+		get_tree().change_scene_to_file("res://scenes/game_over.tscn")
 
 
 func evaporate():

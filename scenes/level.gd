@@ -33,6 +33,8 @@ func _ready():
 	$UI.connect('new_agent',_on_new_agent)
 	$UI.setup()
 	DisplayServer.window_set_title("Mycofi Garden")
+	$BirdLong.play()
+	#$BirdLong.
 		 
 	$"UI/TutorialMarginContainer1".visible = false
 	if(Global.mode == "tutorial"):
@@ -190,6 +192,7 @@ func _on_update_score() -> void:
 					var z_quarry = Global.rand_quarry[0]
 					Global.quarry_type = z_quarry
 					#print(" birds are after your ", z_quarry, " !!!")
+					$BirdSound.play()
 					while iter < Global.birds[score_lvl]:
 						iter +=1
 						make_bird()
@@ -199,14 +202,19 @@ func _on_update_score() -> void:
 func _on_new_agent(agent_dict) -> void:
 	#print("found signal: ", agent_dict)
 	if agent_dict["name"]  == "squash":
+		$TwinkleSound.play()
 		make_squash(agent_dict["pos"])
 	elif agent_dict["name"]  == "bean":
+		$TwinkleSound.play()
 		make_bean(agent_dict["pos"])
 	elif agent_dict["name"]  == "maize":
+		$TwinkleSound.play()
 		make_maize(agent_dict["pos"])
 	elif agent_dict["name"]  == "myco":
+		$SquelchSound.play()
 		make_myco(agent_dict["pos"])
 	elif agent_dict["name"]  == "tree":
+		$BushSound.play()
 		make_tree(agent_dict["pos"])
 	elif agent_dict["name"]  == "cloud":
 		make_cloud(agent_dict["pos"])
@@ -428,6 +436,7 @@ func _on_tutorial_timer_timeout() -> void:
 					c_maize += 1
 			
 			var iter = 0
+			$BirdSound.play()
 			while iter < c_maize*3:
 				iter +=1
 				make_bird()
@@ -453,6 +462,7 @@ func _on_tutorial_timer_timeout() -> void:
 					c_maize += 1
 			
 			var iter = 0
+			$BirdSound.play()
 			while iter < c_maize-1:
 				iter +=1
 				make_bird()

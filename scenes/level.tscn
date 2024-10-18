@@ -1,27 +1,32 @@
-[gd_scene load_steps=8 format=3 uid="uid://cqxduy84bksgu"]
+[gd_scene load_steps=13 format=3 uid="uid://cqxduy84bksgu"]
 
 [ext_resource type="Texture2D" uid="uid://b0g4untp5lhx" path="res://graphics/soil-cutaway.png" id="1_2nhsr"]
 [ext_resource type="PackedScene" uid="uid://cwghgyigytbmj" path="res://scenes/player.tscn" id="1_60fi4"]
 [ext_resource type="Script" path="res://scenes/level.gd" id="1_76h6v"]
 [ext_resource type="PackedScene" uid="uid://bmwuxpm12gkh7" path="res://scenes/ui.tscn" id="4_c72w0"]
+[ext_resource type="AudioStream" uid="uid://vyhyw4xd3hes" path="res://audio/squelch_slayer.wav" id="5_ld565"]
+[ext_resource type="AudioStream" uid="uid://bi701uswd6us3" path="res://audio/twinkle.mp3" id="6_epj5m"]
+[ext_resource type="AudioStream" uid="uid://bksoh5ra6licd" path="res://audio/cardinal.mp3" id="6_lg0nh"]
+[ext_resource type="AudioStream" uid="uid://dlnowg5diunu5" path="res://audio/rustle-bush.mp3" id="7_t2wt4"]
+[ext_resource type="AudioStream" uid="uid://3bj7nhucvgkn" path="res://audio/binaural-birds-loop-1.wav" id="7_vfdw7"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_3ox6b"]
-size = Vector2(104, 699)
+size = Vector2(104, 766.5)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_mooif"]
-size = Vector2(1190, 132)
+size = Vector2(1239, 132)
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_618rg"]
-size = Vector2(1172.75, 34)
+size = Vector2(1231.75, 34)
 
 [node name="Level" type="Node2D"]
 script = ExtResource("1_76h6v")
 
 [node name="BG" type="Sprite2D" parent="."]
 texture_repeat = 2
-position = Vector2(582, 331)
+position = Vector2(640, 362.75)
+scale = Vector2(1.08667, 1.10624)
 texture = ExtResource("1_2nhsr")
-metadata/_edit_lock_ = true
 
 [node name="Sparkles" type="Node2D" parent="."]
 z_index = -2
@@ -49,21 +54,21 @@ metadata/_edit_lock_ = true
 collision_layer = 4
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Borders/StaticBody2D"]
-position = Vector2(1197, 333)
+position = Vector2(1256, 362.75)
 shape = SubResource("RectangleShape2D_3ox6b")
 
 [node name="StaticBody2D2" type="StaticBody2D" parent="Borders"]
 collision_layer = 4
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Borders/StaticBody2D2"]
-position = Vector2(591, 701)
+position = Vector2(615.5, 701)
 shape = SubResource("RectangleShape2D_mooif")
 
 [node name="StaticBody2D3" type="StaticBody2D" parent="Borders"]
 collision_layer = 4
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Borders/StaticBody2D3"]
-position = Vector2(583.625, -1)
+position = Vector2(613.125, -1)
 shape = SubResource("RectangleShape2D_618rg")
 
 [node name="StaticBody2D4" type="StaticBody2D" parent="Borders"]
@@ -81,6 +86,21 @@ metadata/_edit_lock_ = true
 [node name="TutorialTimer" type="Timer" parent="."]
 wait_time = 10.0
 autostart = true
+
+[node name="SquelchSound" type="AudioStreamPlayer2D" parent="."]
+stream = ExtResource("5_ld565")
+
+[node name="TwinkleSound" type="AudioStreamPlayer2D" parent="."]
+stream = ExtResource("6_epj5m")
+
+[node name="BushSound" type="AudioStreamPlayer2D" parent="."]
+stream = ExtResource("7_t2wt4")
+
+[node name="BirdSound" type="AudioStreamPlayer2D" parent="."]
+stream = ExtResource("6_lg0nh")
+
+[node name="BirdLong" type="AudioStreamPlayer2D" parent="."]
+stream = ExtResource("7_vfdw7")
 
 [connection signal="laser" from="Player" to="." method="_on_player_laser"]
 [connection signal="timeout" from="TutorialTimer" to="." method="_on_tutorial_timer_timeout"]

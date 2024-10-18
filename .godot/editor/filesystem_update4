@@ -1,0 +1,11 @@
+res://scenes/level.tscn
+res://global/global.gd
+res://scenes/level.gd
+res://scenes/title_screen.tscn
+res://scenes/cloud.tscn
+res://scenes/cloud.gd
+res://scenes/ui.tscn
+res://scenes/game_over.tscn
+res://scenes/plant.tscn
+res://scenes/bird.tscn
+res://scenes/plant.gd

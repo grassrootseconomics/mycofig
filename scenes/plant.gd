@@ -442,9 +442,6 @@ func _physics_process(delta):
 	if is_dragging:
 		
 		var hit = false
-		if $"../../UI/PalletContainer".get_rect().has_point(get_global_mouse_position()):
-			hit = true
-			#print("hit something-pallet: ", $PalletContainer.get_rect(), " point: ", event.position)
 		
 		if $"../../UI/MarginContainer".get_rect().has_point(get_global_mouse_position()):
 			hit = true
@@ -666,9 +663,6 @@ func have_babies()  -> void:
 		
 		var new_pos = Vector2(new_x, new_y )
 		var hit = false
-		if $"../../UI/PalletContainer".get_rect().has_point(new_pos):
-			hit = true
-			#print("hit something-pallet: ")
 		
 		if $"../../UI/MarginContainer".get_rect().has_point(new_pos):
 			hit = true
@@ -682,15 +676,6 @@ func have_babies()  -> void:
 			if rects.has_point(new_pos):
 				hit = true
 		
-		for body in $"../../Borders".get_children():
-			for border in body.get_children():
-				var recto = border.shape.get_rect()
-				var posr = recto.position+border.global_position
-				var rects = Rect2(posr,recto.size) 
-				
-				if rects.has_point(new_pos):
-					#print("Hit the border")
-					hit = true
 			
 		
 		if( hit == false):

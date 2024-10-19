@@ -11,16 +11,15 @@
 script = ExtResource("1_j1sfg")
 
 [node name="MarginContainer" type="MarginContainer" parent="."]
-anchors_preset = 3
-anchor_left = 1.0
+anchors_preset = 7
+anchor_left = 0.5
 anchor_top = 1.0
-anchor_right = 1.0
+anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -215.0
-offset_top = -171.0
-offset_right = -12.0
-offset_bottom = -12.0
-grow_horizontal = 0
+offset_left = -101.5
+offset_top = -159.0
+offset_right = 101.5
+grow_horizontal = 2
 grow_vertical = 0
 theme_override_constants/margin_left = 10
 theme_override_constants/margin_top = 10
@@ -31,50 +30,131 @@ theme_override_constants/margin_bottom = 10
 layout_mode = 2
 color = Color(0, 0.129412, 0.47451, 0.572549)
 
-[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer"]
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+
+[node name="PalletContainer" type="MarginContainer" parent="MarginContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/margin_left = 5
+theme_override_constants/margin_top = 5
+theme_override_constants/margin_right = 5
+theme_override_constants/margin_bottom = 5
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/PalletContainer"]
+layout_mode = 2
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer"]
+layout_mode = 2
+
+[node name="ChooseBeans" type="TextureRect" parent="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer"]
+layout_mode = 2
+texture = ExtResource("5_s1f7h")
+stretch_mode = 2
+
+[node name="BeanInv" type="Label" parent="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer"]
+layout_mode = 2
+text = "1"
+horizontal_alignment = 1
+
+[node name="VBoxContainer2" type="VBoxContainer" parent="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer"]
+layout_mode = 2
+
+[node name="ChooseSquash" type="TextureRect" parent="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2"]
+layout_mode = 2
+texture = ExtResource("4_7oh4h")
+stretch_mode = 2
+
+[node name="SquashInv" type="Label" parent="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2"]
+layout_mode = 2
+text = "1"
+horizontal_alignment = 1
+
+[node name="VBoxContainer3" type="VBoxContainer" parent="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer"]
+layout_mode = 2
+
+[node name="ChooseMaize" type="TextureRect" parent="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3"]
+layout_mode = 2
+texture = ExtResource("5_kmrjq")
+stretch_mode = 2
+
+[node name="MaizeInv" type="Label" parent="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3"]
+layout_mode = 2
+text = "1"
+horizontal_alignment = 1
+
+[node name="VBoxContainer4" type="VBoxContainer" parent="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer"]
+layout_mode = 2
+
+[node name="ChooseTree" type="TextureRect" parent="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4"]
+layout_mode = 2
+texture = ExtResource("6_41l0c")
+stretch_mode = 2
+
+[node name="TreeInv" type="Label" parent="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4"]
+layout_mode = 2
+text = "1"
+horizontal_alignment = 1
+
+[node name="VBoxContainer5" type="VBoxContainer" parent="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer"]
+layout_mode = 2
+
+[node name="ChooseMyco" type="TextureRect" parent="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5"]
+layout_mode = 2
+texture = ExtResource("7_w5alb")
+stretch_mode = 2
+
+[node name="MycoInv" type="Label" parent="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5"]
+layout_mode = 2
+text = "1"
+horizontal_alignment = 1
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer/VBoxContainer"]
 layout_mode = 2
 alignment = 1
 
-[node name="ResVBoxContainer" type="VBoxContainer" parent="MarginContainer/HBoxContainer"]
+[node name="ResVBoxContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/HBoxContainer"]
 layout_mode = 2
 size_flags_horizontal = 6
 size_flags_stretch_ratio = 0.85
 theme_override_constants/separation = 1
 
-[node name="Resources" type="Label" parent="MarginContainer/HBoxContainer/ResVBoxContainer"]
+[node name="Resources" type="Label" parent="MarginContainer/VBoxContainer/HBoxContainer/ResVBoxContainer"]
 layout_mode = 2
 text = "Res
 "
 horizontal_alignment = 1
 
-[node name="Resources2" type="Label" parent="MarginContainer/HBoxContainer/ResVBoxContainer"]
+[node name="Resources2" type="Label" parent="MarginContainer/VBoxContainer/HBoxContainer/ResVBoxContainer"]
 layout_mode = 2
 text = "Res
 "
 
-[node name="ValVBoxContainer" type="VBoxContainer" parent="MarginContainer/HBoxContainer"]
+[node name="ValVBoxContainer" type="VBoxContainer" parent="MarginContainer/VBoxContainer/HBoxContainer"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 8
 
-[node name="Val" type="Label" parent="MarginContainer/HBoxContainer/ValVBoxContainer"]
+[node name="Val" type="Label" parent="MarginContainer/VBoxContainer/HBoxContainer/ValVBoxContainer"]
 layout_mode = 2
 text = "Val
 "
 
-[node name="HSlider" type="HSlider" parent="MarginContainer/HBoxContainer/ValVBoxContainer"]
+[node name="HSlider" type="HSlider" parent="MarginContainer/VBoxContainer/HBoxContainer/ValVBoxContainer"]
 layout_mode = 2
 tick_count = 4
 ticks_on_borders = true
 
 [node name="EndGameContainer" type="MarginContainer" parent="."]
-anchors_preset = 5
-anchor_left = 0.5
-anchor_right = 0.5
-offset_left = -35.5
-offset_right = 35.5
-offset_bottom = 40.0
-grow_horizontal = 2
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_top = -55.0
+offset_right = 71.0
+grow_vertical = 0
 theme_override_constants/margin_top = 20
 
 [node name="Label" type="Label" parent="EndGameContainer"]
@@ -84,105 +164,19 @@ theme_override_font_sizes/font_size = 25
 text = "0"
 horizontal_alignment = 1
 
-[node name="PalletContainer" type="MarginContainer" parent="."]
-anchors_preset = 2
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_left = 1074.0
-offset_top = -236.0
-offset_right = 1259.0
-offset_bottom = -167.0
-grow_vertical = 0
-theme_override_constants/margin_left = 5
-theme_override_constants/margin_top = 5
-theme_override_constants/margin_right = 5
-theme_override_constants/margin_bottom = 5
-
-[node name="ColorRect2" type="ColorRect" parent="PalletContainer"]
-layout_mode = 2
-color = Color(0, 0.129412, 0.47451, 0.572549)
-
-[node name="VBoxContainer" type="VBoxContainer" parent="PalletContainer"]
-layout_mode = 2
-
-[node name="HBoxContainer" type="HBoxContainer" parent="PalletContainer/VBoxContainer"]
-layout_mode = 2
-theme_override_constants/separation = 10
-
-[node name="VBoxContainer" type="VBoxContainer" parent="PalletContainer/VBoxContainer/HBoxContainer"]
-layout_mode = 2
-
-[node name="ChooseBeans" type="TextureRect" parent="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer"]
-layout_mode = 2
-texture = ExtResource("5_s1f7h")
-stretch_mode = 2
-
-[node name="BeanInv" type="Label" parent="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer"]
-layout_mode = 2
-text = "1"
-horizontal_alignment = 1
-
-[node name="VBoxContainer2" type="VBoxContainer" parent="PalletContainer/VBoxContainer/HBoxContainer"]
-layout_mode = 2
-
-[node name="ChooseSquash" type="TextureRect" parent="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2"]
-layout_mode = 2
-texture = ExtResource("4_7oh4h")
-stretch_mode = 2
-
-[node name="SquashInv" type="Label" parent="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2"]
-layout_mode = 2
-text = "1"
-horizontal_alignment = 1
-
-[node name="VBoxContainer3" type="VBoxContainer" parent="PalletContainer/VBoxContainer/HBoxContainer"]
-layout_mode = 2
-
-[node name="ChooseMaize" type="TextureRect" parent="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3"]
-layout_mode = 2
-texture = ExtResource("5_kmrjq")
-stretch_mode = 2
-
-[node name="MaizeInv" type="Label" parent="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3"]
-layout_mode = 2
-text = "1"
-horizontal_alignment = 1
-
-[node name="VBoxContainer4" type="VBoxContainer" parent="PalletContainer/VBoxContainer/HBoxContainer"]
-layout_mode = 2
-
-[node name="ChooseTree" type="TextureRect" parent="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4"]
-layout_mode = 2
-texture = ExtResource("6_41l0c")
-stretch_mode = 2
-
-[node name="TreeInv" type="Label" parent="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4"]
-layout_mode = 2
-text = "1"
-horizontal_alignment = 1
-
-[node name="VBoxContainer5" type="VBoxContainer" parent="PalletContainer/VBoxContainer/HBoxContainer"]
-layout_mode = 2
-
-[node name="ChooseMyco" type="TextureRect" parent="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5"]
-layout_mode = 2
-texture = ExtResource("7_w5alb")
-stretch_mode = 2
-
-[node name="MycoInv" type="Label" parent="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5"]
-layout_mode = 2
-text = "1"
-horizontal_alignment = 1
-
 [node name="ScoreTimer" type="Timer" parent="."]
 autostart = true
 
 [node name="TutorialMarginContainer1" type="MarginContainer" parent="."]
+visible = false
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 347.0
+grow_horizontal = 2
 theme_override_constants/margin_left = 10
 theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 10
 theme_override_constants/margin_bottom = 10
-metadata/_edit_use_anchors_ = true
 
 [node name="ColorRect2" type="ColorRect" parent="TutorialMarginContainer1"]
 custom_minimum_size = Vector2(20, 20)
@@ -206,16 +200,18 @@ and plants so that the
 mycorrhizal fungi 
 touch the plants."
 horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 2
 
-[connection signal="drag_ended" from="MarginContainer/HBoxContainer/ValVBoxContainer/HSlider" to="." method="_on_h_slider_drag_ended"]
-[connection signal="mouse_entered" from="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/ChooseBeans" to="." method="_on_choose_beans_mouse_entered"]
-[connection signal="mouse_exited" from="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/ChooseBeans" to="." method="_on_choose_beans_mouse_exited"]
-[connection signal="mouse_entered" from="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/ChooseSquash" to="." method="_on_choose_squash_mouse_entered"]
-[connection signal="mouse_exited" from="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/ChooseSquash" to="." method="_on_choose_squash_mouse_exited"]
-[connection signal="mouse_entered" from="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3/ChooseMaize" to="." method="_on_choose_maize_mouse_entered"]
-[connection signal="mouse_exited" from="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3/ChooseMaize" to="." method="_on_choose_maize_mouse_exited"]
-[connection signal="mouse_entered" from="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4/ChooseTree" to="." method="_on_choose_tree_mouse_entered"]
-[connection signal="mouse_exited" from="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4/ChooseTree" to="." method="_on_choose_tree_mouse_exited"]
-[connection signal="mouse_entered" from="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/ChooseMyco" to="." method="_on_choose_myco_mouse_entered"]
-[connection signal="mouse_exited" from="PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/ChooseMyco" to="." method="_on_choose_myco_mouse_exited"]
+[connection signal="mouse_entered" from="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/ChooseBeans" to="." method="_on_choose_beans_mouse_entered"]
+[connection signal="mouse_exited" from="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/ChooseBeans" to="." method="_on_choose_beans_mouse_exited"]
+[connection signal="mouse_entered" from="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/ChooseSquash" to="." method="_on_choose_squash_mouse_entered"]
+[connection signal="mouse_exited" from="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/ChooseSquash" to="." method="_on_choose_squash_mouse_exited"]
+[connection signal="mouse_entered" from="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3/ChooseMaize" to="." method="_on_choose_maize_mouse_entered"]
+[connection signal="mouse_exited" from="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3/ChooseMaize" to="." method="_on_choose_maize_mouse_exited"]
+[connection signal="mouse_entered" from="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4/ChooseTree" to="." method="_on_choose_tree_mouse_entered"]
+[connection signal="mouse_exited" from="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4/ChooseTree" to="." method="_on_choose_tree_mouse_exited"]
+[connection signal="mouse_entered" from="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/ChooseMyco" to="." method="_on_choose_myco_mouse_entered"]
+[connection signal="mouse_exited" from="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/ChooseMyco" to="." method="_on_choose_myco_mouse_exited"]
+[connection signal="drag_ended" from="MarginContainer/VBoxContainer/HBoxContainer/ValVBoxContainer/HSlider" to="." method="_on_h_slider_drag_ended"]
 [connection signal="timeout" from="ScoreTimer" to="." method="_on_score_timer_timeout"]

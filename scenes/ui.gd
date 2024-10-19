@@ -44,18 +44,18 @@ var inventory_sprites = { #how many of each plant do we have to use
 
 func setup():
 	inventory_labels = { #how many of each plant do we have to use
-	"bean": $PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/BeanInv,
-	"squash": $PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/SquashInv,
-	"maize": $PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3/MaizeInv,
-	"tree":  $PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4/TreeInv,
-	"myco": $PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/MycoInv
+	"bean": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/BeanInv,
+	"squash": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/SquashInv,
+	"maize": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3/MaizeInv,
+	"tree":  $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4/TreeInv,
+	"myco": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/MycoInv
 	}
 	inventory_sprites = { #how many of each plant do we have to use
-	"bean": $PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/ChooseBeans,
-	"squash": $PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/ChooseSquash,
-	"maize": $PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3/ChooseMaize,
-	"tree":  $PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4/ChooseTree,
-	"myco": $PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/ChooseMyco
+	"bean": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/ChooseBeans,
+	"squash": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/ChooseSquash,
+	"maize": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3/ChooseMaize,
+	"tree":  $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4/ChooseTree,
+	"myco": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/ChooseMyco
 	}
 	for inv in inventory_labels:
 		inventory_labels[inv].text = str(Global.inventory[inv])
@@ -63,8 +63,8 @@ func setup():
 	sliders = []
 	
 	#var assets = agent.assets
-	var resContainer = $MarginContainer/HBoxContainer/ResVBoxContainer
-	var valContainer = $MarginContainer/HBoxContainer/ValVBoxContainer
+	var resContainer = $MarginContainer/VBoxContainer/HBoxContainer/ResVBoxContainer
+	var valContainer = $MarginContainer/VBoxContainer/HBoxContainer/ValVBoxContainer
 	
 	for child in resContainer.get_children():
 		child.queue_free()
@@ -130,7 +130,7 @@ func _on_h_slider_drag_ended(value_changed: bool) -> void:
 		#print("slider value:", slider["slider"].value, slider)
 		Global.values[res] = slider["slider"].value/100
 				
-		for label in $MarginContainer/HBoxContainer/ResVBoxContainer.get_children():
+		for label in $MarginContainer/VBoxContainer/HBoxContainer/ResVBoxContainer.get_children():
 			#print("g. << inside asadas: ", label.name, " : ", label.text, path_dict["trade_asset"])
 			if label.name == res:
 				#print("h. ><><< inside asadas, lable", label.name, " : ", label.text)
@@ -161,13 +161,9 @@ func _input(event):
 			#var space = get_world_2d().direct_space_state
 			if(Global.inventory[next_agent] >0 ):
 				var hit = false
-				if $PalletContainer.get_rect().has_point(event.position):
-					hit = true
-					#print("hit something-pallet: ", $PalletContainer.get_rect(), " point: ", event.position)
-				
 				if $MarginContainer.get_rect().has_point(event.position):
 					hit = true
-					#print("hit something-info")
+					#print("hit something-pallet: ", $PalletContainer.get_rect(), " point: ", event.position)
 				
 				"""
 				for agent in $"../Agents".get_children():

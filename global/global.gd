@@ -117,39 +117,20 @@ var stage_text = {
 	Trees -> (R) Water (Blue)
 	
 	** Click and drag the mushroom 
-	and plants so that the 
-	mycorrhizal fungi 
-	touches all five plants.
-	** You can also press tab to 
-	change plants and the 
-	arrow keys to move.",
+	and plants so that the mycorrhizal fungi touches all five plants.
+	** You can also press tab to change plants and the arrow keys to move.",
 	2: "Stage 2: 
-	The plants are now 
-	adding their minerals to the 
-	mycorrhizal fungi which is
-	distributing the resources.
+	The plants are now adding their minerals to the mycorrhizal fungi which is distributing the resources.
 	
-	Now the plants are happy and 
-	will grow more plants!
+	Now the plants are happy and will grow more plants!
 	
-	** Click and drag another
-	mushroom from your inventory 
-	below, into the garden to help 
-	the baby plants.",
+	** Click and drag another mushroom from your inventory below, into the garden to help the baby plants.",
 	3: "Stage 3: 
-		Now you have two
-	mycorrhizal fungi! 
+		Now you have two mycorrhizal fungi! 
 	
-	When fungi are connected together 
-	they can also help each other and 
-	store nutrients for hard times. 
+	When fungi are connected together they can also help each other and store nutrients for hard times. 
 	
-	** Click and drag another 
-	mushroom from your inventory 
-	below and ensure all 3 fungi are 
-	connected to eachother and that 
-	they have all the resources they 
-	need.",
+	** Click and drag another mushroom from your inventory below and ensure all 3 fungi are connected to eachother and that they have all the resources they need.",
 	
 	4: "Stage 4: 
 		You are doing great!

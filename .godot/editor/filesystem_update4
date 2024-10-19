@@ -10,3 +10,5 @@ res://scenes/plant.tscn
 res://scenes/bird.tscn
 res://scenes/plant.gd
 res://scenes/bird.gd
+res://scenes/ui.gd
+res://scenes/myco.gd

@@ -387,9 +387,6 @@ func _physics_process(delta):
 		#			return
 				
 		var hit = false
-		if $"../../UI/PalletContainer".get_rect().has_point(get_global_mouse_position()):
-			hit = true
-			#print("hit something-pallet: ", $PalletContainer.get_rect(), " point: ", event.position)
 		
 		if $"../../UI/MarginContainer".get_rect().has_point(get_global_mouse_position()):
 			hit = true

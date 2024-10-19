@@ -13,6 +13,7 @@ config_version=5
 config/name="mycofig"
 run/main_scene="res://scenes/title_screen.tscn"
 config/features=PackedStringArray("4.3", "GL Compatibility")
+boot_splash/image="res://loading/shamba-logo-ge.png"
 config/icon="res://icon.svg"
 
 [autoload]
@@ -21,9 +22,11 @@ Global="*res://global/global.gd"
 
 [display]
 
-window/size/viewport_width=1280
-window/size/viewport_height=720
+window/size/viewport_width=720
 window/stretch/mode="viewport"
+window/stretch/aspect="expand"
+window/handheld/orientation=1
+window/size/viewport_height=1280
 
 [global_group]
 

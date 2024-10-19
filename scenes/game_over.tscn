@@ -36,42 +36,33 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_iwgga")
 
-[node name="Sprite2D" type="Sprite2D" parent="."]
-position = Vector2(645, 345)
-scale = Vector2(1.26239, 1.44078)
-texture = ExtResource("2_qib70")
-
-[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]
-z_index = 4
-position = Vector2(310, 337)
-sprite_frames = SubResource("SpriteFrames_rgr7h")
-autoplay = "default"
-
-[node name="AnimatedSprite2D2" type="AnimatedSprite2D" parent="."]
-z_index = 4
-position = Vector2(949, 338)
-sprite_frames = SubResource("SpriteFrames_rgr7h")
-autoplay = "default"
-
-[node name="ColorRect" type="ColorRect" parent="."]
-modulate = Color(0.196078, 0, 1, 0.32549)
-layout_mode = 0
-offset_right = 1196.0
-offset_bottom = 666.0
-scale = Vector2(1.07558, 1.09082)
-
 [node name="CenterContainer" type="CenterContainer" parent="."]
 layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -298.5
+offset_top = -232.5
+offset_right = 298.5
+offset_bottom = 232.5
 grow_horizontal = 2
 grow_vertical = 2
+
+[node name="BG" type="Sprite2D" parent="CenterContainer"]
+position = Vector2(305.5, 233.5)
+scale = Vector2(2.23359, 2.54922)
+texture = ExtResource("2_qib70")
 
 [node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer"]
 layout_mode = 2
 
-[node name="Label" type="Label" parent="CenterContainer/VBoxContainer"]
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="CenterContainer/VBoxContainer"]
+sprite_frames = SubResource("SpriteFrames_rgr7h")
+autoplay = "default"
+
+[node name="TitleLabel" type="Label" parent="CenterContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 60
 text = "Gardening Complete"

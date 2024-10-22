@@ -1,0 +1,91 @@
+[gd_scene load_steps=7 format=3 uid="uid://cetor3n7febya"]
+
+[ext_resource type="Script" path="res://scenes/basket.gd" id="1_v2kne"]
+[ext_resource type="Texture2D" uid="uid://1654ejogtgjr" path="res://graphics/basket.png" id="2_b0ofl"]
+[ext_resource type="Texture2D" uid="uid://bd8so3hnylm4b" path="res://graphics/health-back.png" id="4_ubgv3"]
+[ext_resource type="Texture2D" uid="uid://gfa5wyo71535" path="res://graphics/health-over.png" id="5_w25kx"]
+[ext_resource type="Texture2D" uid="uid://bt73bfc1f07cl" path="res://graphics/health-progress.png" id="6_4u2g4"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_yl0lh"]
+size = Vector2(56, 29)
+
+[node name="Basket" type="Area2D"]
+collision_layer = 2
+collision_mask = 9
+script = ExtResource("1_v2kne")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_b0ofl")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(2, 0.5)
+shape = SubResource("RectangleShape2D_yl0lh")
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+
+[node name="Pbar" type="TextureProgressBar" parent="CanvasLayer"]
+offset_left = 30.0
+offset_top = 9.0
+offset_right = 35.0
+offset_bottom = 38.0
+max_value = 10.0
+value = 5.0
+fill_mode = 3
+texture_under = ExtResource("4_ubgv3")
+texture_over = ExtResource("5_w25kx")
+texture_progress = ExtResource("6_4u2g4")
+tint_progress = Color(0, 0.819023, 0.247507, 1)
+metadata/_edit_use_anchors_ = true
+
+[node name="Nbar" type="TextureProgressBar" parent="CanvasLayer"]
+offset_left = 24.0
+offset_top = 9.0
+offset_right = 29.0
+offset_bottom = 38.0
+max_value = 10.0
+value = 5.0
+fill_mode = 3
+texture_under = ExtResource("4_ubgv3")
+texture_over = ExtResource("5_w25kx")
+texture_progress = ExtResource("6_4u2g4")
+tint_progress = Color(0, 0.819023, 0.247507, 1)
+metadata/_edit_use_anchors_ = true
+
+[node name="Kbar" type="TextureProgressBar" parent="CanvasLayer"]
+offset_left = 36.0
+offset_top = 9.0
+offset_right = 41.0
+offset_bottom = 38.0
+max_value = 10.0
+value = 5.0
+fill_mode = 3
+texture_under = ExtResource("4_ubgv3")
+texture_over = ExtResource("5_w25kx")
+texture_progress = ExtResource("6_4u2g4")
+tint_progress = Color(0, 0.819023, 0.247507, 1)
+metadata/_edit_use_anchors_ = true
+
+[node name="Rbar" type="TextureProgressBar" parent="CanvasLayer"]
+offset_left = 42.0
+offset_top = 9.0
+offset_right = 47.0
+offset_bottom = 38.0
+max_value = 10.0
+value = 5.0
+fill_mode = 3
+texture_under = ExtResource("4_ubgv3")
+texture_over = ExtResource("5_w25kx")
+texture_progress = ExtResource("6_4u2g4")
+tint_progress = Color(0, 0.819023, 0.247507, 1)
+metadata/_edit_use_anchors_ = true
+
+[node name="GrowthTimer" type="Timer" parent="."]
+autostart = true
+
+[node name="ActionTimer" type="Timer" parent="."]
+autostart = true
+
+[connection signal="area_entered" from="." to="." method="_on_area_entered"]
+[connection signal="body_entered" from="." to="." method="_on_body_entered"]
+[connection signal="timeout" from="GrowthTimer" to="." method="_on_growth_timer_timeout"]
+[connection signal="timeout" from="ActionTimer" to="." method="_on_action_timer_timeout"]

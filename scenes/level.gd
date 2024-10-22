@@ -39,8 +39,8 @@ func _ready():
 	$"UI/TutorialMarginContainer1".visible = false
 	if(Global.mode == "tutorial"):
 		$"UI/TutorialMarginContainer1".visible=true
-		$"UI/TutorialMarginContainer1/VBoxContainer/Label".text = Global.stage_text[Global.stage]
-		$"UI/TutorialMarginContainer1/ColorRect2".color = Global.stage_colors[Global.stage]
+		$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
+		$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 
 	mid_width = int(get_viewport().get_visible_rect().size[0]/2)
 	mid_height = int(get_viewport().get_visible_rect().size[1]/2)
@@ -124,16 +124,17 @@ func _input(event):
 						agent.bar_canvas.visible = Global.bars_on
 			elif event.keycode == KEY_A:
 				Global.baby_mode = not Global.baby_mode
-				#print("Baby Mode: ", Global.baby_mode )
+			
 			elif event.keycode == KEY_TAB:
 				var index = 0
 				var found_it = -1
 				var agents = $Agents.get_children()
 				for agent in agents:	
-					if(Global.active_agent.name == agent.name):
-						found_it = index
-						#print("found: ", found_it, " out of ", len(agents), " all agents: ", agents)
-						break
+					if(is_instance_valid(Global.active_agent)):
+						if(Global.active_agent.name == agent.name):
+							found_it = index
+							#print("found: ", found_it, " out of ", len(agents), " all agents: ", agents)
+							break
 					index +=1
 				
 				if(found_it >= len(agents)-1):
@@ -402,8 +403,8 @@ func _on_tutorial_timer_timeout() -> void:
 			#print("len buds: ", c_buds)
 			if(c_buds >=4):
 				Global.stage += 1
-				$"UI/TutorialMarginContainer1/VBoxContainer/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect2".color = Global.stage_colors[Global.stage]
+				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
+				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 		elif(Global.stage == 2):
 			
 			var c_buds = 0
@@ -413,8 +414,8 @@ func _on_tutorial_timer_timeout() -> void:
 					num_myco += 1
 			if(num_myco >=2):
 				Global.stage += 1
-				$"UI/TutorialMarginContainer1/VBoxContainer/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect2".color = Global.stage_colors[Global.stage]
+				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
+				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 		elif(Global.stage == 3):
 			
 			var c_buds = 0
@@ -426,8 +427,8 @@ func _on_tutorial_timer_timeout() -> void:
 					#print(" child bud: ", child.name, " ", child.trade_buddies)
 			if(num_myco >= 3 and c_buds >=2):
 				Global.stage += 1
-				$"UI/TutorialMarginContainer1/VBoxContainer/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect2".color = Global.stage_colors[Global.stage]
+				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
+				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 		elif(Global.stage == 4):
 			
 			var c_maize = 0
@@ -451,8 +452,8 @@ func _on_tutorial_timer_timeout() -> void:
 			
 			if(c_maize >=3):
 				Global.stage = 5
-				$"UI/TutorialMarginContainer1/VBoxContainer/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect2".color = Global.stage_colors[Global.stage]
+				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
+				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 		
 		elif(Global.stage == 5):
 			
@@ -479,8 +480,8 @@ func _on_tutorial_timer_timeout() -> void:
 			
 			if(c_maize >=2 and Global.values['K']>1):
 				Global.stage = 6
-				$"UI/TutorialMarginContainer1/VBoxContainer/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect2".color = Global.stage_colors[Global.stage]
+				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
+				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 				
 		elif(Global.stage == 6):
 			
@@ -509,8 +510,8 @@ func _on_tutorial_timer_timeout() -> void:
 			
 			if(c_maize >=2 and Global.values['K']>1):
 				Global.stage = 7
-				$"UI/TutorialMarginContainer1/VBoxContainer/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect2".color = Global.stage_colors[Global.stage]
+				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
+				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 		
 		elif(Global.stage == 7):
 			
@@ -521,8 +522,8 @@ func _on_tutorial_timer_timeout() -> void:
 					
 			if(c_maize >=2 and Global.values['K']<=1.1):
 				Global.stage = 8
-				$"UI/TutorialMarginContainer1/VBoxContainer/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect2".color = Global.stage_colors[Global.stage]
+				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
+				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 		
 						
 			

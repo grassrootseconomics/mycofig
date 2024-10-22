@@ -12,3 +12,12 @@ res://scenes/plant.gd
 res://scenes/bird.gd
 res://scenes/ui.gd
 res://scenes/myco.gd
+res://scenes/sociallevel.tscn
+res://scenes/sociallevel.gd
+res://scenes/title_screen.gd
+res://scenes/basket.tscn
+res://scenes/basket.gd
+res://scenes/agent.gd
+res://scenes/bi-basket.gd
+res://scenes/game_over.gd
+res://scenes/asset.gd

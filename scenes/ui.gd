@@ -5,7 +5,7 @@ var time_elapsed := 0
 signal new_agent(agent_dict)
 
 var sliders = []
-var plant_scene: PackedScene = load("res://scenes/plant.tscn")
+
 var last_agent = null
 
 var next_agent = null
@@ -42,7 +42,10 @@ var inventory_sprites = { #how many of each plant do we have to use
 	"myco": null
 	}
 
+
 func setup():
+	
+	
 	inventory_labels = { #how many of each plant do we have to use
 	"bean": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/BeanInv,
 	"squash": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/SquashInv,
@@ -59,6 +62,19 @@ func setup():
 	}
 	for inv in inventory_labels:
 		inventory_labels[inv].text = str(Global.inventory[inv])
+	if(Global.social_mode):
+		for invs in inventory_sprites:
+			if(invs=="bean"):
+				inventory_sprites[invs].texture = load("res://graphics/services.png")
+			elif(invs=="squash"):
+				inventory_sprites[invs].texture = load("res://graphics/coopproduction.png")
+			elif(invs=="maize"):
+				inventory_sprites[invs].texture = load("res://graphics/shop-green.png")
+			elif(invs=="tree"):
+				inventory_sprites[invs].texture = load("res://graphics/city.png")
+			elif(invs=="myco"):
+				inventory_sprites[invs].texture = load("res://graphics/basket.png")
+		
 	
 	sliders = []
 	
@@ -75,7 +91,7 @@ func setup():
 	
 
 	var assetLabel = Label.new()
-	assetLabel.text = "Nutrient"
+	assetLabel.text = "Resource"
 	assetLabel.name = "Title"
 	resContainer.add_child(assetLabel)
 	
@@ -87,7 +103,10 @@ func setup():
 	for asset in Global.values:
 		var resText = Label.new()
 		resText.name = str(asset)
-		resText.text = str(asset) + str(" ") + str(Global.values[asset])
+		if(Global.social_mode==true):
+			resText.text = str(Global.assets_social[asset]) + str(" ") + str(Global.values[asset])
+		else:
+			resText.text = str(asset) + str(" ") + str(Global.values[asset])
 		resText.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		resContainer.add_child(resText)
 		
@@ -134,7 +153,10 @@ func _on_h_slider_drag_ended(value_changed: bool) -> void:
 			#print("g. << inside asadas: ", label.name, " : ", label.text, path_dict["trade_asset"])
 			if label.name == res:
 				#print("h. ><><< inside asadas, lable", label.name, " : ", label.text)
-				label.text = res + str(" ") + str(Global.values[res])
+				if(Global.social_mode==true):
+					label.text = Global.assets_social[res] + str(" ") + str(Global.values[res])
+				else:
+					label.text = res + str(" ") + str(Global.values[res])
 		
 
 
@@ -142,19 +164,19 @@ func _on_h_slider_drag_ended(value_changed: bool) -> void:
 func _input(event):
 	if event is InputEventMouseButton:
 		if mouseOverMyco == true:
-			print("Clicked On myco")
+			#print("Clicked On myco")
 			next_agent = "myco"
 		elif mouseOverMaize == true:
-			print("Clicked On maize")
+			#print("Clicked On maize")
 			next_agent = "maize"
 		elif mouseOverTree == true:
-			print("Clicked On tree")
+			#print("Clicked On tree")
 			next_agent = "tree"
 		elif mouseOverBean == true:
-			print("Clicked On Bean")
+			#print("Clicked On Bean")
 			next_agent = "bean"
 		elif mouseOverSquash == true:
-			print("Clicked On Squash")
+			#print("Clicked On Squash")
 			next_agent = "squash"
 			
 		if event.pressed == false and next_agent != null:

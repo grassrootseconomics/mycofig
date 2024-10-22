@@ -1,53 +1,14 @@
-extends Area2D
-
-@export var speed: int
-signal collision
-signal trade(pos)
-
-var draw_lines = true
-var draw_box = true
-
-var type = null
-var my_lines = []
-var trade_buddies = []
-var new_buddies = true
-var buddy_radius = 250
-var num_buddies = 5
-
-var logistics_ready = false
-var sprite = null
-var sprite_texture = null
-var sprite_myco = null
-var sprite_myco_texture = null
-var is_dragging = false
-var mouse_offset
-var delay = 10
-var bar_canvas = null
-
-var dead = false
-
-var low_alpha = 0.6
-var high_alpha = 1.0
-var max_scale = 1.5
-var min_scale = 0.3
+extends Agent
 
 
-var num_steps_down = 20.0
-var num_steps_up = 5.0
+func set_variables(a_dict) -> void:
 
-var alpha_step_down = (high_alpha - low_alpha) / num_steps_down
-var alpha_step_up = (high_alpha - low_alpha) / num_steps_up
-
-var scale_step_down = (max_scale - min_scale) / num_steps_down
-var scale_step_up = (max_scale - min_scale) / num_steps_up
-
-
-var START_N = 5 #Nitrogen
-var START_P = 5 # Potassium
-var START_K = 5 #Phosphorus
-var START_R = 5 #Rain
-
-var assets = { #list of assets - 
+	var START_N = 5 #Nitrogen
+	var START_P = 5 # Potassium
+	var START_K = 5 #Phosphorus
+	var START_R = 5 #Rain
+	
+	assets = { #list of assets - 
 	#for each asset there is a balance, and stready state amount needed for growth
 	"N": START_N,
 	"P": START_P,				
@@ -55,51 +16,12 @@ var assets = { #list of assets -
 	"R": START_R
 			}
 
-var needs = { #list of assets - 
-	#for each asset there is a balance, and stready state amount needed for growth
-	"N": 10,
-	"P": 10,				
-	"K": 10,
-	"R": 10
-			}
-var current_needs = { #list of needed assets with need level
-	"N": 0,
-	"P": 0,				
-	"K": 0,
-	"R": 0
-	}
-
-var current_excess = { #list of needed assets with need level
-	"N": 0,
-	"P": 0,				
-	"K": 0,
-	"R": 0
-	}
-
-
-var bars = { #list of needed assets with need level
-	"N": null,
-	"P": null,
-	"K": null,
-	"R": null
-}
-
-var bars_offset = { #list of needed assets with need level
-	"N": null,
-	"P": null,
-	"K": null,
-	"R": null
-}
-
-# Called when the node enters the scene tree for the first time.
-func _ready() -> void:
-	pass
-func set_variables(a_dict) -> void:
 	name = a_dict.get("name")
 	type = a_dict.get("type")
 	#prod_res = a_dict.get("prod_res")
 	#assets[prod_res] = a_dict.get("start_res")
 	position = a_dict.get("position")
+	last_position = position
 	sprite_texture = a_dict.get("texture")
 	sprite = $Sprite2D
 	sprite_myco_texture = load("res://graphics/rhizomorphic.png")
@@ -129,70 +51,6 @@ func set_variables(a_dict) -> void:
 		
 	bar_canvas = $CanvasLayer
 	
-func new_draw_line():
-	for line in $"../../Lines".get_children():
-		for my_line in my_lines:
-			if(my_line == line):
-				line.clear_points()	
-				line.queue_free()
-		
-	my_lines = []
-	#var g = Gradient.new()
-	var start_color = Color(Color.ANTIQUE_WHITE,0.3)
-	#var end_color = Color(Color.ANTIQUE_WHITE,0.3)
-	
-	#g.set_color( 0,  start_color)
-	#g.set_color( 1,  end_color )
-	#g.interpolation_mode = Gradient.GRADIENT_INTERPOLATE_LINEAR		# 0
-	#g.interpolation_mode = Gradient.GRADIENT_INTERPOLATE_CONSTANT	# 1
-	#g.interpolation_mode = Gradient.GRADIENT_INTERPOLATE_CUBIC		# 2
-
-	#var from = to_local(position)
-	var from = position
-	#print("from: ", from, " x: ", from.x, " y: ", from.y)
-	#from = from.normalized() *100
-	if($"../../Agents" != null):
-		#print("<><><>>< ", position, " ", global_position)
-		for agent in $"../../Agents".get_children():
-			if(is_instance_valid(agent)):
-				if agent.type != "cloud" and agent.dead != true and agent.name != self.name:
-					var dist = global_position.distance_to(agent.global_position)
-					if dist <= buddy_radius:
-						var myco_line1 = Line2D.new()
-						myco_line1.width = 2
-						myco_line1.z_as_relative = false
-						myco_line1.antialiased = true
-						myco_line1.global_rotation = 0
-						#myco_line1.modulate = start_color
-						myco_line1.modulate = start_color#set_gradient( g )
-						#var to = to_local(agent.position)#+agent.global_position		
-						var to = agent.position#+agent.global_position							
-						var new_pos1 = Vector2(to.x,from.y)
-						var new_pos2 = Vector2(from.x,to.y)
-						
-						
-						myco_line1.add_point( from )
-						myco_line1.add_point( new_pos1 )
-						myco_line1.add_point( to )
-						
-						var myco_line2 = Line2D.new()
-						myco_line2.width = 2
-						myco_line2.z_as_relative = false
-						myco_line2.antialiased = true
-						#myco_line2.global_rotation = 0
-						myco_line2.modulate = start_color
-						#var to = to_local(agent.position)#+agent.global_position		
-						
-						myco_line2.add_point( from )
-						myco_line2.add_point( new_pos2 )
-						myco_line2.add_point( to )
-						
-						#myco_line.z_index = -1
-						$"../../Lines".add_child(myco_line1)
-						my_lines.append(myco_line1)
-						$"../../Lines".add_child(myco_line2)
-						my_lines.append(myco_line2)
-
 # Search for things to trade with in a radius
 func generate_buddies() -> void:
 	var children =  $"../../Agents".get_children()
@@ -336,134 +194,6 @@ func draw_selected_box():
 	$"../../Boxes".add_child(myco_line1)
 
 
-# Called every frame. 'delta' is the elapsed time since the previous frame.
-func _process(delta: float) -> void:
-	if draw_lines == true and Global.draw_lines == true:
-		new_draw_line()
-		draw_lines = false
-	if new_buddies:
-		generate_buddies()
-		new_buddies = false
-	if(dead == false and is_instance_valid(self)):
-		logistics()
-	if(is_instance_valid(self) and is_instance_valid(Global.active_agent)):
-		if(Global.active_agent.name == self.name):
-			var direction = Input.get_vector("left","right","up","down")
-			#velocity = direction * speed
-			position += direction * 200 * delta
-			#move_and_slide()
-			
-			new_buddies = true
-			var children =  $"../../Agents".get_children()
-			for child in children:
-				#if child.type == 'myco': 
-				child.draw_lines = true
-				child.new_buddies = true
-			
-		
-			for bar in bars:
-				var tween = get_tree().create_tween()
-				#bars[bar].position = (position + bars[bar].position)
-				tween.tween_property(bars[bar], "position", (position + bars_offset[bar]), 0)
-				#tween.set_parallel(true)
-			if draw_box == true:
-				draw_selected_box()
-				#draw_box = false
-
-	pass
-
-func _on_body_entered(body: Node2D) -> void:
-	#print(body_entered)
-	#print(body)
-	collision.emit(body)
-
-		
-func _physics_process(delta):
-	#_draw()
-	if is_dragging:
-		#for agent in $"../../Agents".get_children():
-		#	if(agent.is_dragging == true):
-		#		if(self.get_index() > agent.get_index()):
-		#			return
-				
-		var hit = false
-		
-		if $"../../UI/MarginContainer".get_rect().has_point(get_global_mouse_position()):
-			hit = true
-		
-		if hit==true:
-			kill_it()
-			#queue_free()
-			return
-			
-		
-		
-		new_buddies = true
-		var children =  $"../../Agents".get_children()
-		for child in children:
-			#if child.type == 'myco': 
-			child.draw_lines = true
-			child.new_buddies = true
-		
-		
-		
-		var tween = get_tree().create_tween()
-		tween.tween_property(self, "position", get_global_mouse_position(), delay * delta)
-		#tween.set_parallel(true)
-		for bar in bars:
-			#bars[bar].position = (position + bars[bar].position)
-			tween.tween_property(bars[bar], "position", (position + bars_offset[bar]), 0)
-			#tween.set_parallel(true)
-
-
-func old_draw():
-	#print("outise")
-	var from = to_local(position)
-	#print("from: ", from, " x: ", from.x, " y: ", from.y)
-	#from = from.normalized() *100
-	if($"../../Agents" != null):
-		#print("<><><>>< ", position, " ", global_position)
-		for agent in $"../../Agents".get_children():
-			if agent.name != "Myco" and agent.name != "Cloud" :
-				var to = to_local(agent.position)#+agent.global_position			
-				#print("to: ", to)
-				var new_pos1 = Vector2(to.x,from.y)
-				#print("new_pos1: ", new_pos1)
-				#draw_line(from, new_pos1 , Color(0, 0, 1), 5)
-				#draw_line(from, new_pos1, Color(1, 1, 1), 1)
-				
-				#draw_line(new_pos1, to , Color(0, 0, 1), 5)
-				#draw_line(new_pos1, to , Color(1, 1, 1), 1)
-				#to = to.normalized() *100
-				# blue
-				
-				#draw_line(from, to , Color(0, 0, 1), 5)
-				# white
-				#draw_line(from, to, Color(1, 1, 1), 1)
-
-func _input(event):
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT:
-			
-			if event.pressed:
-				if $Sprite2D.get_rect().has_point(to_local(event.position)):
-					if(Global.is_dragging == false):
-						is_dragging = true
-						Global.is_dragging = true
-						Global.active_agent = self
-			else:
-				is_dragging = false
-				Global.is_dragging = false
-				if $Sprite2D.get_rect().has_point(to_local(event.position)):
-					#emit_signal("clicked_agent",self)
-					Global.active_agent = self
-					print(" clicked: ", name)
-				
-
-func _on_area_2d_body_entered(_body):
-	#rest_point = input_pos.global_position
-	print('hello')
-
 
 func _on_area_entered(trade: Area2D) -> void:
 	if trade.end_agent == self:
@@ -516,47 +246,6 @@ func _on_area_entered(trade: Area2D) -> void:
 
 	#queue_free()
 
-func kill_it():
-	#new_alpha = low_alpha
-	#self.queue_free()
-	self.call_deferred("queue_free")
-	self.dead = true
-	
-	trade_buddies = []
-	new_buddies = true
-	#var children =  $"../../Agents".get_children()
-	#for child in children:
-		#if child.type == 'myco': 
-		
-	#print(self.name, "  died! :( ", assets)
-	for line in $"../../Lines".get_children():
-		for my_line in my_lines:
-			if(my_line == line):
-				line.clear_points()	
-				line.queue_free()
-
-	my_lines = []
-	
-	if(draw_box):
-		for box in $"../../Boxes".get_children():
-			box.clear_points()	
-			box.queue_free()
-	
-	
-	var children =  $"../../Agents".get_children()
-	var living = false
-	for child in children:
-		child.draw_lines = true
-		child.new_buddies = true
-		
-		
-		if(child.dead == false and child.type != "cloud"):
-			living = true
-		
-			if( living == false  and Global.mode != "tutorial"):
-				get_tree().change_scene_to_file("res://scenes/game_over.tscn")
-			
-
 func _on_growth_timer_timeout() -> void:
 	#concume nutrients
 	var newScale = $MycoSprite.scale#$Sprite2D.scale
@@ -581,22 +270,8 @@ func _on_growth_timer_timeout() -> void:
 		$Sprite2D.modulate= new_color
 		
 		
-		#for res in assets:		
-		#	if(assets[res] >0):
-		#		assets[res] -=1
-		#		bars[res].value = assets[res]
-
-		#print(name, " ", $Sprite2D.scale)
-			
-		
-			
 	else:
-		#if $Sprite2D.scale.x > 0.5 and $Sprite2D.scale.y > 0.5:
-			
-			#newScale = $Sprite2D.scale * 0.95
-			#print($Sprite2D.scale)
 		
-			
 		var old_modulate = $Sprite2D.modulate
 		var new_alpha = $Sprite2D.modulate.a-alpha_step_down
 		
@@ -638,7 +313,7 @@ func _on_growth_timer_timeout() -> void:
 		#sparkle.z_index =-1
 		$"../../Sparkles".add_child(sparkle)
 		sparkle.start(0.75)
-		Global.score += int(Global.score_boost[self.type])
+		Global.score += 200
 
 
 	

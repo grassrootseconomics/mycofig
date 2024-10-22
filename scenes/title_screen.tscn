@@ -55,7 +55,8 @@ alignment = 1
 [node name="Label" type="Label" parent="CenterContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 42
-text = "Mycorrhizal Finance Garden
+text = "Mycorrhizal Finance 
+Garden
 #MYCOFI-G"
 horizontal_alignment = 1
 
@@ -88,6 +89,13 @@ theme_override_font_sizes/font_size = 30
 text = "Practice Social Gardening"
 uri = "https://sarafu.network"
 
+[node name="CofiButton" type="Button" parent="CenterContainer/VBoxContainer"]
+visible = false
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "cofi"
+
 [connection signal="pressed" from="CenterContainer/VBoxContainer/Tutorial" to="." method="_on_tutorial_pressed"]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/FreeGarden" to="." method="_on_free_garden_pressed"]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/ChallengeButton" to="." method="_on_challenge_button_pressed"]
+[connection signal="pressed" from="CenterContainer/VBoxContainer/CofiButton" to="." method="_on_cofi_button_pressed"]

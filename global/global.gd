@@ -13,6 +13,10 @@ var max_stage_inc = 5
 var baby_mode = true
 var draw_lines = false
 
+var social_mode = false
+
+var num_connectors = 5
+
 var sparkle_scene: PackedScene = load("res://scenes/sparkle.tscn")
 
 var growth_time = 0.4
@@ -28,6 +32,9 @@ var is_max_babies = true
 
 var quarry_type = "maize"
 
+var eco_names = ["bean","squash","maize","tree", "myco"]
+var social_names = ["service","good","city","foreign", "basket"]
+
 var inventory = { #how many of each plant do we have to use
 	"bean": 12,
 	"squash": 12,				
@@ -36,9 +43,13 @@ var inventory = { #how many of each plant do we have to use
 	"myco": 12
 	}
 
-
-
-
+var social_inventory = { #how many of each plant do we have to use
+	"service": 12,
+	"good": 12,				
+	"foreign": 12,
+	"city": 12,
+	"basket": 12
+	}
 
 var values = { #list of assets - 
 	#for each asset there is a balance, and stready state amount needed for growth
@@ -48,15 +59,25 @@ var values = { #list of assets -
 	"R": 1
 	
 	}
+	
+var assets_social = { #list of assets - 
+	#for each asset there is a balance, and stready state amount needed for growth
+	"N": "Services",
+	"P": "Goods",				
+	"K": "Foreign",
+	"R": "Money"
+	
+	}
 
-var score_boost = {
-	"tree": 10000,
-	"squash": 100,
-	"bean": 100,
-	"maize": 100,
-	"myco": 100,
-	"trade": 1
-}
+var social_values = { #list of assets - 
+	#for each asset there is a balance, and stready state amount needed for growth
+	"S": 1, #services
+	"G": 1, #goods	
+	"F": 1, #foreign
+	"M": 1 #money
+	
+	}
+
 
 var asset_colors = {
 	"N": Color.SPRING_GREEN,
@@ -64,6 +85,14 @@ var asset_colors = {
 	"K": Color.VIOLET,
 	"R": Color.DEEP_SKY_BLUE
 	}
+	
+var asset_colors_social = {
+	"S": Color.SPRING_GREEN,
+	"G": Color.ORANGE,
+	"F": Color.VIOLET,
+	"M": Color.DEEP_SKY_BLUE
+	}
+
 	
 var ranks = {
 	0: "Sporeling",
@@ -77,6 +106,7 @@ var ranks = {
 	10000000: "Soil Web Custodian",
 	50000000: "Grassroots Economist"
 }
+
 
 
 var birds = {
@@ -109,66 +139,42 @@ var rand_quarry = ["maize","bean","squash"]
 #var rand_quarry = ["bean"]
 
 var stage_text = {
-	1: "Stage 1: 
-	Each plant is rich in minerals:
+	1: "Stage 1: Each plant is rich in minerals:
 	Beans -> (N) Nitrogen (Green)
 	Squash -> (P) Potassium (Orange)
 	Maize -> (K) Phosphorus (Pink)
 	Trees -> (R) Water (Blue)
-	
-	** Click and drag the mushroom 
-	and plants so that the mycorrhizal fungi touches all five plants.
-	** You can also press tab to change plants and the arrow keys to move.",
-	2: "Stage 2: 
-	The plants are now adding their minerals to the mycorrhizal fungi which is distributing the resources.
-	
-	Now the plants are happy and will grow more plants!
+	** Click and drag the mushroom and plants so that the mycorrhizal fungi touches all five plants.",
+	2: "Stage 2: The mycorrhizal fungi is now distributing resources to the plants and more plants should start growing!
 	
 	** Click and drag another mushroom from your inventory below, into the garden to help the baby plants.",
-	3: "Stage 3: 
-		Now you have two mycorrhizal fungi! 
+	3: "Stage 3: Now you have two mycorrhizal fungi! 
 	
 	When fungi are connected together they can also help each other and store nutrients for hard times. 
-	
 	** Click and drag another mushroom from your inventory below and ensure all 3 fungi are connected to eachother and that they have all the resources they need.",
 	
-	4: "Stage 4: 
-		You are doing great!
+	4: "Stage 4: You are doing great!
 	
-	With all these fungi connected 
-	your garden should be able to 
-	survive some hungry birds!
+	With all these fungi connected your garden should be able to feed some hungry birds!
 	
-	** After the birds have eaten 
-	your maize. Add three maize 
-	from your inventory.",
-	5: "Stage 5: 
-	Grow maize faster by increasing
-	the relative value of phosporus (K) 
-	in the mycorrhizal network. 
+	** After the birds have eaten your maize. Add three maize from your inventory.",
+	5: "Stage 5: Grow maize faster by increasing the relative value of phosporus (K) in the mycorrhizal network. 
 	
-	** Adjust the purple level bottom right.",
+	** Adjust the purple level at the bottom.",
 	6: "Stage 6: 
-	Make sure your maize crop has all the 
-	nutrients it needs. 
-	
+	Make sure your maize crop has all the nutrients it needs. 
 	Try to grow as much  maize as you can!
+	
 	**Use your inventory as needed.
 	**Press q to start over.",
 	7: "Stage 7: 
-	Now that the birds have migrated 
-	you should return the value 
-	of phosporus (K) back to normal,
-	so that the other plants have a 
-	chance to grow.",
+	Now that the birds have migrated you should return the value of phosporus (K) back to normal, so that the other plants have a chance to grow.",
 	8: "Stage 8: 
 		
 		Well done!
 		
-		You have grown a 
-		mycorrhizal fungi network!
-		
-		Press q to return to the main menu."
+		You have grown a Mycorrhizal Fungi network and a nice garden!
+		Press q and try Challenge Mode!"
 
 }
 

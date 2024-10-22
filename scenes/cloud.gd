@@ -20,6 +20,7 @@ var draw_lines = false
 var new_buddies = false
 var trade_buddies = []
 
+var draw_box = false
 var type = "cloud"
 
 var logistics_ready = false
@@ -48,38 +49,6 @@ var bars_offset = { #list of needed assets with need level
 	"R": null
 }
 
-
-# Called when the node enters the scene tree for the first time.
-func _ready() -> void:
-	pass
-	#var rng :=  RandomNumberGenerator.new()
-	#var width = get_viewport().get_visible_rect().size[0]
-	#var height = get_viewport().get_visible_rect().size[1]
-	#var random_x = rng.randi_range(5,width-100)
-	#var random_y = rng.randi_range(5,height-200)
-	#var random_y = rng.randi_range(5,-1*height)
-	#position = Vector2(random_x,random_y)
-	#$GrowthTimer.wait_time = Global.growth_time
-	#position = Vector2(width,height)
-	
-	#sprite = $Sprite2D
-	#sprite_texture = load("res://graphics/cloud.png")
-	#bars = { #list of needed assets with need level
-	#	"R": $CanvasLayer/Rbar
-	#}
-	#for bar in bars:
-	#	bars[bar].max_value = int(needs[bar]*1.2)
-	#	bars[bar].value = assets[bar]
-	#	bars_offset[bar] = bars[bar].position
-	#	bars[bar].position = (position + bars[bar].position)
-	#	bars[bar].tint_progress = Global.asset_colors[bar]
-		#print(bar, " value: ", bars[bar].value)
-		
-		#var sb = StyleBoxFlat.new()
-		#bars[bar].add_theme_stylebox_override("fill", sb)
-		#sb.bg_color = Global.asset_colors[bar]
-
-	#speed = 0 #rng.randi_range(200,500)
 
 
 func set_variables(a_dict) -> void:
@@ -152,20 +121,6 @@ func logistics():
 							emit_signal("trade",path_dict)
 							logistics_ready = false
 							#trade.emit(path_dict)
-							#send what is in excess. 
-					
-								#Attempt to push out what you have in abundance
-						
-#determine what is needed (needs)
-		
-		#if they can swap a resource for a needed resource do it 
-		#     Send the resource to the myco (when it arrives the needed resource will come back)
-
-		#Consume resources
-		#These are combinations NPK together
-		
-		#Increase health
-		
 	
 	#if decay_ready:
 	if false:

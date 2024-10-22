@@ -79,14 +79,14 @@ text = "Challenge"
 layout_mode = 2
 size_flags_horizontal = 4
 theme_override_font_sizes/font_size = 30
-text = "Learn about Resource Coordination"
+text = "* Resource Coordination"
 uri = "https://willruddick.substack.com/p/three-sisters-meet-a-funguy"
 
 [node name="LinkButton2" type="LinkButton" parent="CenterContainer/VBoxContainer"]
 layout_mode = 2
 size_flags_horizontal = 4
 theme_override_font_sizes/font_size = 30
-text = "Practice Social Gardening"
+text = "* Social Gardening"
 uri = "https://sarafu.network"
 
 [node name="CofiButton" type="Button" parent="CenterContainer/VBoxContainer"]

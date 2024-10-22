@@ -267,3 +267,8 @@ func _on_choose_tree_mouse_entered() -> void:
 
 func _on_choose_tree_mouse_exited() -> void:
 	mouseOverTree = false
+
+
+func _on_button_pressed() -> void:
+	Global.score = 0
+	get_tree().change_scene_to_file("res://scenes/title_screen.tscn")

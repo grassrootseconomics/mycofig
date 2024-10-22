@@ -405,6 +405,7 @@ func _on_tutorial_timer_timeout() -> void:
 				Global.stage += 1
 				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
 				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				
 		elif(Global.stage == 2):
 			
 			var c_buds = 0
@@ -524,7 +525,8 @@ func _on_tutorial_timer_timeout() -> void:
 				Global.stage = 8
 				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
 				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				$"UI/RestartContainer".visible=true
 		
 						
 			
-			
+		

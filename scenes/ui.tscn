@@ -186,6 +186,41 @@ horizontal_alignment = 1
 vertical_alignment = 1
 autowrap_mode = 2
 
+[node name="RestartContainer" type="MarginContainer" parent="."]
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -20.0
+offset_top = -20.0
+offset_right = 20.0
+offset_bottom = 20.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Button" type="Button" parent="RestartContainer"]
+layout_mode = 2
+text = "Back to Main Menu"
+
+[node name="MarginCMarginContainer2ontainer" type="MarginContainer" parent="."]
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -53.0
+offset_top = -40.0
+grow_horizontal = 0
+grow_vertical = 0
+theme_override_constants/margin_right = 2
+theme_override_constants/margin_bottom = 2
+
+[node name="Button" type="Button" parent="MarginCMarginContainer2ontainer"]
+layout_mode = 2
+text = "Menu"
+
 [connection signal="mouse_entered" from="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/ChooseBeans" to="." method="_on_choose_beans_mouse_entered"]
 [connection signal="mouse_exited" from="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/ChooseBeans" to="." method="_on_choose_beans_mouse_exited"]
 [connection signal="mouse_entered" from="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/ChooseSquash" to="." method="_on_choose_squash_mouse_entered"]
@@ -198,3 +233,5 @@ autowrap_mode = 2
 [connection signal="mouse_exited" from="MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/ChooseMyco" to="." method="_on_choose_myco_mouse_exited"]
 [connection signal="drag_ended" from="MarginContainer/VBoxContainer/HBoxContainer/ValVBoxContainer/HSlider" to="." method="_on_h_slider_drag_ended"]
 [connection signal="timeout" from="ScoreTimer" to="." method="_on_score_timer_timeout"]
+[connection signal="pressed" from="RestartContainer/Button" to="." method="_on_button_pressed"]
+[connection signal="pressed" from="MarginCMarginContainer2ontainer/Button" to="." method="_on_button_pressed"]

@@ -174,7 +174,8 @@ var stage_text = {
 		Well done!
 		
 		You have grown a Mycorrhizal Fungi network and a nice garden!
-		Press q and try Challenge Mode!"
+		Head back to the main menu and try challenge mode to reach the rank of 
+		Grassroots Economist!"
 
 }
 

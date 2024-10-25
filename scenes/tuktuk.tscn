@@ -1,0 +1,17 @@
+[gd_scene load_steps=4 format=3 uid="uid://cfimtm1oxapam"]
+
+[ext_resource type="Script" path="res://scenes/tuktuk.gd" id="1_vskan"]
+[ext_resource type="Texture2D" uid="uid://h8g6760ucoah" path="res://graphics/tuktuk.png" id="2_ggtnc"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_lgsbw"]
+
+[node name="Tuktuk" type="CharacterBody2D"]
+collision_mask = 2
+script = ExtResource("1_vskan")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_ggtnc")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(-9.5, -4)
+shape = SubResource("RectangleShape2D_lgsbw")

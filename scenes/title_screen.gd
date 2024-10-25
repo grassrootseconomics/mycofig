@@ -2,11 +2,28 @@ extends Control
 
 
 func _ready():
-	DisplayServer.window_set_title("Mycofi Garden")
+	DisplayServer.window_set_title("Plants and People Gardening")
 	Global.score = 0
+	$CenterContainer/VBoxContainer/HBoxContainer/CheckButton.button_pressed = Global.social_mode
+	$CenterContainer/VBoxContainer/HBoxContainer/CheckButton2.button_pressed = not Global.social_mode
+	
+	if(Global.social_mode):
+		$CenterContainer/BG.modulate.a = 0
+		$CenterContainer/BG2.modulate.a = 1
+		var tween = get_tree().create_tween()
+		tween.tween_property($CenterContainer/BG2, "modulate:a", 0, 0.5)
+		var tween2 = get_tree().create_tween()
+		tween2.tween_property($CenterContainer/BG, "modulate:a", 1, 0.5)
+	else:
+		$CenterContainer/BG.modulate.a = 1
+		$CenterContainer/BG2.modulate.a = 0
+		var tween = get_tree().create_tween()
+		tween.tween_property($CenterContainer/BG2, "modulate:a", 0, 0.5)
+		var tween2 = get_tree().create_tween()
+		tween2.tween_property($CenterContainer/BG, "modulate:a", 1, 0.5)
 
 func _on_tutorial_pressed() -> void:
-	Global.social_mode= false
+	
 	Global.mode = "tutorial"
 	Global.is_raining = false
 	Global.is_birding = false
@@ -22,10 +39,14 @@ func _on_tutorial_pressed() -> void:
 	"tree": 5,
 	"myco": 4
 	}
-	get_tree().change_scene_to_file("res://scenes/level.tscn")
+	if(Global.social_mode== false):
+		get_tree().change_scene_to_file("res://scenes/level.tscn")
+	else:
+
+		get_tree().change_scene_to_file("res://scenes/sociallevel.tscn")
 
 func _on_free_garden_pressed() -> void:
-	Global.social_mode= false
+	
 	Global.mode = "free"
 	Global.is_raining = false
 	Global.is_birding = false
@@ -41,17 +62,21 @@ func _on_free_garden_pressed() -> void:
 	"myco": 40
 	}
 
-	get_tree().change_scene_to_file("res://scenes/level.tscn")
+	if(Global.social_mode== false):
+		get_tree().change_scene_to_file("res://scenes/level.tscn")
+	else:
+		Global.draw_lines = true
+		get_tree().change_scene_to_file("res://scenes/sociallevel.tscn")
 
 func _on_challenge_button_pressed() -> void:
-	Global.social_mode= false
+	
 	Global.mode = "challenge"
 	Global.is_raining = true
 	Global.is_birding = true
 	Global.is_killing = true
 	Global.is_max_babies = true
 	Global.bars_on = false
-	Global.draw_lines = false
+	Global.draw_lines = true
 	Global.inventory = { #how many of each plant do we have to use
 	"bean": 12,
 	"squash": 12,				
@@ -59,7 +84,10 @@ func _on_challenge_button_pressed() -> void:
 	"tree": 12,
 	"myco": 12
 	}
-	get_tree().change_scene_to_file("res://scenes/level.tscn")
+	if(Global.social_mode== false):
+		get_tree().change_scene_to_file("res://scenes/level.tscn")
+	else:
+		get_tree().change_scene_to_file("res://scenes/sociallevel.tscn")
 
 
 func _on_cofi_button_pressed() -> void:
@@ -81,3 +109,37 @@ func _on_cofi_button_pressed() -> void:
 	"basket": 12
 	}
 	get_tree().change_scene_to_file("res://scenes/sociallevel.tscn")
+
+
+func _on_check_button_toggled(toggled_on: bool) -> void:
+
+	$CenterContainer/VBoxContainer/HBoxContainer/CheckButton2.emit_signal("pressed")
+	
+	$CenterContainer/VBoxContainer/HBoxContainer/CheckButton2.button_pressed=not toggled_on
+	if toggled_on == true:
+		Global.social_mode = false
+		$CenterContainer/BG.texture = load("res://graphics/soil_end.jpeg")
+	else:
+		Global.social_mode = true
+		$CenterContainer/BG.texture = load("res://graphics/social.png")
+		
+
+
+func _on_check_button_2_toggled(toggled_on: bool) -> void:
+	
+	$CenterContainer/VBoxContainer/HBoxContainer/CheckButton.emit_signal("pressed")
+	$CenterContainer/VBoxContainer/HBoxContainer/CheckButton.button_pressed=not toggled_on
+	if toggled_on == true:
+		Global.social_mode = true
+		#$CenterContainer/BG.texture = load("res://graphics/social.png")
+		var tween = get_tree().create_tween()
+		tween.tween_property($CenterContainer/BG2, "modulate:a", 1, 0.2)
+		var tween2 = get_tree().create_tween()
+		tween2.tween_property($CenterContainer/BG, "modulate:a", 0, 0.2)
+	else:
+		Global.social_mode = false
+		#$CenterContainer/BG.texture = load("res://graphics/soil_end.jpeg")
+		var tween = get_tree().create_tween()
+		tween.tween_property($CenterContainer/BG2, "modulate:a", 0, 0.2)
+		var tween2 = get_tree().create_tween()
+		tween2.tween_property($CenterContainer/BG, "modulate:a", 1, 0.2)

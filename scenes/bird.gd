@@ -15,7 +15,8 @@ func _ready():
 func reset():
 	flying = true
 	#var mid_width = int(get_viewport().get_visible_rect().size[0]/2)
-	
+	#if(Global.social_mode == true):
+		
 	var rng :=  RandomNumberGenerator.new()
 	var width = get_viewport().get_visible_rect().size[0]
 	var height = get_viewport().get_visible_rect().size[1]

@@ -4,6 +4,7 @@ var score := 0
 
 var move_rate = 6
 var movement_speed = 200
+var social_buddy_radius = 200
 var active_agent = null
 
 var is_dragging = false
@@ -15,7 +16,7 @@ var draw_lines = false
 
 var social_mode = false
 
-var num_connectors = 5
+
 
 var sparkle_scene: PackedScene = load("res://scenes/sparkle.tscn")
 
@@ -33,7 +34,7 @@ var is_max_babies = true
 var quarry_type = "maize"
 
 var eco_names = ["bean","squash","maize","tree", "myco"]
-var social_names = ["service","good","city","foreign", "basket"]
+var social_names = ["service","good","city","value add", "basket"]
 
 var inventory = { #how many of each plant do we have to use
 	"bean": 12,
@@ -46,7 +47,7 @@ var inventory = { #how many of each plant do we have to use
 var social_inventory = { #how many of each plant do we have to use
 	"service": 12,
 	"good": 12,				
-	"foreign": 12,
+	"value add": 12,
 	"city": 12,
 	"basket": 12
 	}
@@ -62,12 +63,21 @@ var values = { #list of assets -
 	
 var assets_social = { #list of assets - 
 	#for each asset there is a balance, and stready state amount needed for growth
-	"N": "Services",
-	"P": "Goods",				
-	"K": "Foreign",
+	"N": "Farming",
+	"P": "Vegetables",				
+	"K": "Cooking",
 	"R": "Money"
 	
 	}
+	
+var assets_plant = { #list of assets - 
+	#for each asset there is a balance, and stready state amount needed for growth
+	"N": "Nitrogen (N)",
+	"P": "Potassium (P)",				
+	"K": "Phosphorous (K)",
+	"R": "Rain Water (R)"
+	
+	}	
 
 var social_values = { #list of assets - 
 	#for each asset there is a balance, and stready state amount needed for growth
@@ -96,53 +106,47 @@ var asset_colors_social = {
 	
 var ranks = {
 	0: "Sporeling",
-	5000: "Mycelium Weaver",
-	10000: "Mycorrhizal Guardian",
-	50000: "Myceliator",
-	100000: "Shroom Architect",
-	500000: "Nutrient Flow Oracle",
-	1000000: "Fungal Network Shepherd",
-	5000000: "Mycorrhizal Visionary",
-	10000000: "Soil Web Custodian",
-	50000000: "Grassroots Economist"
+	1000: "Mycelium Weaver",
+	2000: "Mycorrhizal Guardian",
+	5000: "Myceliator",
+	10000: "Shroom Architect",
+	50000: "Nutrient Flow Oracle",
+	100000: "Fungal Network Shepherd",
+	500000: "Mycorrhizal Visionary",
+	1000000: "Soil Web Custodian Moja",
+	2000000: "Soil Web Custodian Mbili",
+	3000000: "Soil Web Custodian Tatu",
+	4000000: "Soil Web Custodian Nne",
+	5000000: "Grassroots Economist"
 }
 
 
 
 var birds = {
 	0: 0,
+	1000: 1,
+	2000: 1,
 	5000: 1,
-	10000: 5,
-	50000: 5,
-	100000: 10,
-	500000: 20,
-	1000000: 30,
-	5000000: 40,
-	10000000: 50,
-	50000000: 1
-}
-
-var birds_quarry = {
-	0: "maize",
-	5000: "squash",
-	10000: "bean",
-	50000: "maize",
-	100000: "maize",
-	500000: "bean",
-	1000000: "bean",
-	5000000: "squash",
-	10000000: "maize",
-	50000000: "maize"
+	10000: 1,
+	50000: 1,
+	100000: 5,
+	500000: 10,
+	1000000: 15,
+	2000000: 20,
+	3000000: 23,
+	4000000: 25,
+	5000000: 1
 }
 
 var rand_quarry = ["maize","bean","squash"]
+#var rand_quarry_social = ["maize","bean","squash"]
 #var rand_quarry = ["bean"]
 
 var stage_text = {
 	1: "Stage 1: Each plant is rich in minerals:
 	Beans -> (N) Nitrogen (Green)
 	Squash -> (P) Potassium (Orange)
-	Maize -> (K) Phosphorus (Pink)
+	Maize -> (K) Phosphorous (Pink)
 	Trees -> (R) Water (Blue)
 	** Click and drag the mushroom and plants so that the mycorrhizal fungi touches all five plants.",
 	2: "Stage 2: The mycorrhizal fungi is now distributing resources to the plants and more plants should start growing!
@@ -158,17 +162,16 @@ var stage_text = {
 	With all these fungi connected your garden should be able to feed some hungry birds!
 	
 	** After the birds have eaten your maize. Add three maize from your inventory.",
-	5: "Stage 5: Grow maize faster by increasing the relative value of phosporus (K) in the mycorrhizal network. 
+	5: "Stage 5: Grow maize faster by increasing the relative value of Phosphorous (K) in the mycorrhizal network. 
 	
 	** Adjust the purple level at the bottom.",
 	6: "Stage 6: 
 	Make sure your maize crop has all the nutrients it needs. 
 	Try to grow as much  maize as you can!
 	
-	**Use your inventory as needed.
-	**Press q to start over.",
+	**Use your inventory as needed.",
 	7: "Stage 7: 
-	Now that the birds have migrated you should return the value of phosporus (K) back to normal, so that the other plants have a chance to grow.",
+	Now that the birds have migrated you should return the value of Phosphorous (K) back to normal, so that the other plants have a chance to grow.",
 	8: "Stage 8: 
 		
 		Well done!
@@ -178,6 +181,54 @@ var stage_text = {
 		Grassroots Economist!"
 
 }
+
+
+var social_stage_text = {
+	1: "Stage 1: Each person is rich in their own resources:
+	Farmers -> Labor (Green), Mama Mboga -> Vegetables (Orange)
+	Mpishi -> Cooking (Pink), Bank -> Money (Blue)
+	
+	The baskets here represent agreements that connect certain resources together. 
+	For now, all we have are colored baskets (bank agreements) that connect to money.
+	But what happens if the money from the city or bank stop comming?
+	
+	** Click and drag a new basket from your inventory so that the people have a 
+	way to trade with eachother directly without using the money.",
+	2: "Stage 2: The people using the baskets are now able to fairly exchange and distribute resources 
+	and more people are becomming farmers, cooks and selling vegetables to eachoter!
+	
+	** Click and drag another basket from your inventory below, into the economy to help the new service providers.",
+	3: "Stage 3: Now you have two new baskets!! 
+	
+	When baskets are connected together they can also help each other and store commitemnts for resources for hard times. 
+	
+	** Click and drag a 3rd basket from your inventory below and ensure all 3 baskets are connected to eachother and each is connected to a cook, farmer and mama mboga.",
+	4: "Stage 4: You are doing great!
+	
+	With all these baskets connected your economy should be able to deal with some losses.
+	
+	** After the cooks have migrated to the city on tuktuks, train 3 more cooks from your inventory.",
+	5: "Stage 5: Train cooks faster by increasing the relative value of Cooking in the economy. 
+	
+	** Increase the Cooking level in purple at the bottom.",
+	6: "Stage 6: 
+	Make sure your cooks have all the resources they need (Farming Labor and Vegetables). 
+	Try to train as many cooks as you can!
+	
+	**Use your inventory as needed.",
+	7: "Stage 7: 
+	Now that the tuktuks have left you should return the value of Cooking (purple) back to normal, 
+	so that the other services are equally valued again. ",
+	8: "Stage 8: 
+		
+		Well done!
+		
+		You have grown a small local economy!
+		Head back to the main menu and try challenge mode to reach the rank of Grassroots Economist!"
+
+}
+
+
 
 var stage_colors = {
 	1: Color(Color.DARK_GREEN,0.8),

@@ -98,15 +98,8 @@ horizontal_alignment = 1
 layout_mode = 2
 size_flags_horizontal = 4
 theme_override_font_sizes/font_size = 30
-text = "Learn about Resource Coordination"
+text = "*Resource Coordination"
 uri = "https://willruddick.substack.com/p/three-sisters-meet-a-funguy"
-
-[node name="LinkButton4" type="LinkButton" parent="CenterContainer/VBoxContainer"]
-layout_mode = 2
-size_flags_horizontal = 4
-theme_override_font_sizes/font_size = 30
-text = "Practice Social Gardening"
-uri = "https://sarafu.network"
 
 [node name="Button" type="Button" parent="CenterContainer/VBoxContainer"]
 layout_mode = 2

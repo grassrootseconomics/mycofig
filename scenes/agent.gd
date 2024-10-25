@@ -14,9 +14,13 @@ var buddy_radius = 250
 var sprite_myco = null
 var sprite_myco_texture = null
 
+
+
 var random = RandomNumberGenerator.new()
 
 var caught_by = null
+var draggable = true
+var killable = true
 var is_dragging = false
 var mouse_offset
 var delay = 10
@@ -47,7 +51,7 @@ var evaporate_ready = false
 var sprite = null
 var sprite_texture = null
 var bar_canvas = null
-var prod_res = "N"
+var prod_res = [null]
 var type = null
 
 var START_N = 0 #Nitrogen
@@ -63,7 +67,7 @@ var current_maturity = 0
 
 var num_buddies = 5
 var num_connectors = 0
-var max_connectors = 5
+
 var num_babies = 12
 var current_babies = 0
 
@@ -139,18 +143,22 @@ func set_variables(a_dict) -> void:
 	
 	#print("assets: ", dict_assets)
 	
-	
+	#Global.active_agent = self
 	
 	
 	name = a_dict.get("name")
 	type = a_dict.get("type")
 	
 	prod_res = a_dict.get("prod_res")
-	if a_dict.get("start_res") == null:
-		assets[prod_res] = needs[prod_res]
-		#assets[prod_res].amt = assets[prod_res].need
-	else:
-		assets[prod_res] = a_dict.get("start_res")
+	if (prod_res[0] != null):
+		if a_dict.get("start_res") == null:
+			for res in prod_res:
+				assets[res] = needs[res]
+			#assets[prod_res].amt = assets[prod_res].need
+		else:
+			for res in prod_res:
+				assets[res] = a_dict.get("start_res")
+			
 		#assets[prod_res].amt = a_dict.get("start_res")
 	position = a_dict.get("position")
 	last_position = position
@@ -248,30 +256,37 @@ func logistics():
 		#determine if there are extra resources (offers)
 		#find excess stock
 		for res in assets:
+			current_excess[res] = -999
+			current_needs[res] = -999			
+			 
+			var c_excess = assets[res] - needs[res] 
+			
+			if assets[res] > needs[res]:
+				#if c_excess > high_amt_excess:
+				high_amt_excess = c_excess
+				excess_res = res
+				current_excess[res] = high_amt_excess
 				
-				 
-				var c_excess = assets[res] - needs[res] 
-				
-				if assets[res] > needs[res]:
-					if c_excess > high_amt_excess:
-						high_amt_excess = c_excess
-						excess_res = res
-						
-				if assets[res] < needs[res]:
-					#print("res: ", res, " c_excess: ", c_excess, " high_amt_needed: ", high_amt_needed)
-					#if -1 * c_excess > high_amt_needed:
-					high_amt_needed = -1 * c_excess
-					needed_res = res
-					current_needs[res] = high_amt_needed
-				else:
-					current_needs[res] = 0
+			if assets[res] < needs[res]:
+				#print("res: ", res, " c_excess: ", c_excess, " high_amt_needed: ", high_amt_needed)
+				#if -1 * c_excess > high_amt_needed:
+				high_amt_needed = -1 * c_excess
+				needed_res = res
+				current_needs[res] = high_amt_needed
+			
 		
-		var keys: Array = current_needs.keys()
+		var needed_keys: Array = current_needs.keys()
+		var excess_keys: Array = current_excess.keys()
 		# Sort keys in descending order of values.
-		keys.sort_custom(func(x: String, y: String) -> bool: return current_needs[x] > current_needs[y])
+		needed_keys.sort_custom(func(x: String, y: String) -> bool: return current_needs[x] > current_needs[y])
+		excess_keys.sort_custom(func(x: String, y: String) -> bool: return current_excess[x] > current_excess[y])
 		#print("actual needs: ", needs)
 		if debug_mode:
-			print("excess: ", excess_res, " current_needs: ", current_needs, keys)
+			print("excess: ", current_excess  )
+			print("excess sorted: ", excess_keys)
+			print("needs: ", current_needs  )
+			print("needs sorted: ", needed_keys)
+			
 		
 		if excess_res != null and needed_res != null:
 			#var children =  $"../../Agents".get_children()
@@ -287,41 +302,48 @@ func logistics():
 					if logistics_ready and child.type == 'myco':
 						if debug_mode:
 							print(" child found" )
-						for need in keys:
+						for need in needed_keys:
 							need_itter +=1
-							if debug_mode:
-								print(need_itter, ". current need: ", need, " supply: ",assets[need], " needs: ", needs[need] )
-							if logistics_ready and current_needs[need] > 0 and assets[need] < needs[need] :
-								if child.assets.get(need) != null:
+							var excess_iter = 0
+							for excess in excess_keys:
+								if(excess == need):
+									continue
+								excess_iter +=1
+								if(logistics_ready and current_needs[need] > 0 and current_excess[excess] >0 ):
 									if debug_mode:
-										print(" ... myco assets: " , child.assets, " needs: ", child.needs[need])
-									if true: #child.assets[need] >= 1:# and child.assets[excess_res] < (child.needs[excess_res]*2):
-										
-										if need  != excess_res:
-											var path_dict = {
-												"from_agent": self,
-												"to_agent": child,
-												"trade_path": [self,child],
-												"trade_asset": excess_res,
-												"trade_amount": 1, #amt_needed,
-												"trade_type": "swap",
-												"return_res": need,
-												"return_amt": 1,#amt_needed
-											}
-											if debug_mode:
-												print(" .... sending a trade along, ")
-											#print(" .... sending a trade along, ", path_dict)
-											assets[excess_res] -= 1#amt_needed
-											bars[excess_res].value = assets[excess_res]
-											#print(excess_res, " value: ", bars[excess_res].value)
-											#bars[excess_res].update()
-											emit_signal("trade",path_dict)
-											logistics_ready = false
-											break
-											#trade.emit(path_dict)
-											#send what is in excess. 
-											
-					
+										print(need_itter, ". current need: ", need, " supply: ", assets[need] )
+										print(excess_iter, ". current excess: ", excess, " supply: ",assets[excess] )
+									
+									if child.assets.get(excess) != null and child.assets.get(need) != null:
+										if debug_mode:
+											print( " ... myco assets: " , child.assets)
+										var path_dict = {
+											"from_agent": self,
+											"to_agent": child,
+											"trade_path": [self,child],
+											"trade_asset": excess,
+											"trade_amount": 1, #amt_needed,
+											"trade_type": "swap",
+											"return_res": need,
+											"return_amt": 1,#amt_needed
+										}
+										if debug_mode:
+											print(" .... sending a trade along, ")
+										#print(" .... sending a trade along, ", path_dict)
+										if(assets[excess] <=0) :
+											print("WHAAAAAATTTTT:", assets )
+											print("excess:" , current_excess)
+										assets[excess] -= 1#amt_needed
+										bars[excess].value = assets[excess]
+										#print(excess_res, " value: ", bars[excess_res].value)
+										#bars[excess_res].update()
+										emit_signal("trade",path_dict)
+										logistics_ready = false
+										break
+										#trade.emit(path_dict)
+										#send what is in excess. 
+									
+				
 									#Attempt to push out what you have in abundance
 							
 		#determine what is needed (needs)
@@ -360,10 +382,14 @@ func kill_it():
 	self.dead = true
 	
 
-	if(draw_box):
-		for box in $"../../Boxes".get_children():
-			box.clear_points()	
-			box.queue_free()
+	if(Global.active_agent != null):
+		if(is_instance_valid(Global.active_agent)):
+			if(Global.active_agent.name == self.name):
+				if(draw_box):
+					for box in $"../../Boxes".get_children():
+						box.clear_points()	
+						box.queue_free()
+				Global.active_agent = null
 	
 	
 	new_buddies = true
@@ -420,28 +446,29 @@ func evaporate():
 
 
 func _input(event):
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT:
-			
-			if event.pressed:
+	if(draggable == true):
+		if event is InputEventMouseButton:
+			if event.button_index == MOUSE_BUTTON_LEFT:
 				
-				if $Sprite2D.get_rect().has_point(to_local(event.position)):
-					if(Global.is_dragging == false):
-						is_dragging = true
-						Global.is_dragging = true
-						Global.active_agent = self
-					#is_dragging = true
-					#Global.active_agent = self
-					#print(" clicked: ", name)
+				if event.pressed:
 					
-			else:
-				is_dragging = false
-				Global.is_dragging = false
-				if $Sprite2D.get_rect().has_point(to_local(event.position)):
-					#emit_signal("clicked_agent",self)
-					Global.active_agent = self
-					#print(" clicked: ", name)
-				
+					if $Sprite2D.get_rect().has_point(to_local(event.position)):
+						if(Global.is_dragging == false):
+							is_dragging = true
+							Global.is_dragging = true
+							Global.active_agent = self
+						#is_dragging = true
+						#Global.active_agent = self
+						#print(" clicked: ", name)
+						
+				else:
+					is_dragging = false
+					Global.is_dragging = false
+					if $Sprite2D.get_rect().has_point(to_local(event.position)):
+						#emit_signal("clicked_agent",self)
+						Global.active_agent = self
+						#print(" clicked: ", name)
+					
 
 func _physics_process(delta):
 	#_draw()
@@ -475,7 +502,10 @@ func _physics_process(delta):
 			tween.set_parallel(true)
 	
 	if(caught_by != null):
-		position = caught_by.position+Vector2(33,0)
+		if(caught_by is Tuktuk):
+			position = caught_by.position+Vector2(-6,0)
+		else:
+			position = caught_by.position+Vector2(33,0)
 		bar_canvas.visible = false
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
@@ -485,9 +515,11 @@ func _process(delta: float) -> void:
 		new_buddies = false
 	if draw_lines and Global.draw_lines and self.type == "myco":
 		new_draw_line()
-		new_buddies = false
+		draw_lines = false
 	if(dead == false and is_instance_valid(self)):
 		logistics()
+	if(position.x> get_viewport().get_visible_rect().size[0] or position.y > get_viewport().get_visible_rect().size[1] or position.y<0 or position.x<0):
+		self.kill_it()
 	if(is_instance_valid(self) and is_instance_valid(Global.active_agent)):
 		if(Global.active_agent.name == self.name):
 			if draw_box == true:
@@ -532,29 +564,14 @@ func generate_buddies() -> void:
 		if child.type == 'myco':
 			var over_full = false
 			child.num_connectors = 0
-			if(Global.social_mode):
-				for child2 in children:
-					if(child2.name != child.name):
-						for buddy in child2.trade_buddies:
-							if buddy.name == child.name:
-								child.num_connectors +=1
-				if(child.num_connectors>= child.max_connectors):
-					print("too many: connectors", child.num_connectors)
-					over_full = true
-			if (over_full == false):
-				var dist = global_position.distance_to(child.global_position)
-				if dist <= child.buddy_radius:
-					#print("child in dist,", dist, " len: ", len(trade_buddies) , " max: ", num_buddies)
-					if len(trade_buddies) < num_buddies:
-						trade_buddies.append(child)
-						if(Global.social_mode):
-							child.num_connectors +=1
-							print(child.name, " child connectors: ", child.num_connectors, " max con: ", child.max_connectors)
-							child.draw_lines = true
-					#else:
-						#print(self.name, " is too far from myco: ", dist)
-			#print("final new buddies: ", trade_buddies)
-
+			
+			
+			var dist = global_position.distance_to(child.global_position)
+			if dist <= child.buddy_radius:
+				#print("child in dist,", dist, " len: ", len(trade_buddies) , " max: ", num_buddies)
+				if len(trade_buddies) < num_buddies:
+					trade_buddies.append(child)
+		
 func new_draw_line():
 	for line in $"../../Lines".get_children():
 		for my_line in my_lines:
@@ -565,6 +582,9 @@ func new_draw_line():
 	my_lines = []
 	#var g = Gradient.new()
 	var start_color = Color(Color.ANTIQUE_WHITE,0.3)
+	if(Global.social_mode):
+		start_color = Color(Color.SADDLE_BROWN,0.3)
+		
 	#var end_color = Color(Color.ANTIQUE_WHITE,0.3)
 	
 	#g.set_color( 0,  start_color)
@@ -583,42 +603,43 @@ func new_draw_line():
 			if(is_instance_valid(agent)):
 				if agent.type != "cloud" and agent.dead != true and agent.name != self.name:
 					for buddy in agent.trade_buddies:
-						if buddy.name == self.name:
-							
-							var myco_line1 = Line2D.new()
-							myco_line1.width = 2
-							myco_line1.z_as_relative = false
-							myco_line1.antialiased = true
-							myco_line1.global_rotation = 0
-							#myco_line1.modulate = start_color
-							myco_line1.modulate = start_color#set_gradient( g )
-							#var to = to_local(agent.position)#+agent.global_position		
-							var to = agent.position#+agent.global_position							
-							var new_pos1 = Vector2(to.x,from.y)
-							var new_pos2 = Vector2(from.x,to.y)
-							
-							
-							myco_line1.add_point( from )
-							myco_line1.add_point( new_pos1 )
-							myco_line1.add_point( to )
-							
-							var myco_line2 = Line2D.new()
-							myco_line2.width = 2
-							myco_line2.z_as_relative = false
-							myco_line2.antialiased = true
-							#myco_line2.global_rotation = 0
-							myco_line2.modulate = start_color
-							#var to = to_local(agent.position)#+agent.global_position		
-							
-							myco_line2.add_point( from )
-							myco_line2.add_point( new_pos2 )
-							myco_line2.add_point( to )
-							
-							#myco_line.z_index = -1
-							$"../../Lines".add_child(myco_line1)
-							my_lines.append(myco_line1)
-							$"../../Lines".add_child(myco_line2)
-							my_lines.append(myco_line2)
+						if is_instance_valid(buddy):
+							if buddy.name == self.name:
+								
+								var myco_line1 = Line2D.new()
+								myco_line1.width = 2
+								myco_line1.z_as_relative = false
+								myco_line1.antialiased = true
+								myco_line1.global_rotation = 0
+								#myco_line1.modulate = start_color
+								myco_line1.modulate = start_color#set_gradient( g )
+								#var to = to_local(agent.position)#+agent.global_position		
+								var to = agent.position#+agent.global_position							
+								var new_pos1 = Vector2(to.x,from.y)
+								var new_pos2 = Vector2(from.x,to.y)
+								
+								
+								myco_line1.add_point( from )
+								myco_line1.add_point( new_pos1 )
+								myco_line1.add_point( to )
+								
+								var myco_line2 = Line2D.new()
+								myco_line2.width = 2
+								myco_line2.z_as_relative = false
+								myco_line2.antialiased = true
+								#myco_line2.global_rotation = 0
+								myco_line2.modulate = start_color
+								#var to = to_local(agent.position)#+agent.global_position		
+								
+								myco_line2.add_point( from )
+								myco_line2.add_point( new_pos2 )
+								myco_line2.add_point( to )
+								
+								#myco_line.z_index = -1
+								$"../../Lines".add_child(myco_line1)
+								my_lines.append(myco_line1)
+								$"../../Lines".add_child(myco_line2)
+								my_lines.append(myco_line2)
 
 
 
@@ -642,11 +663,13 @@ func _on_growth_timer_timeout() -> void:
 	#production_ready = true
 	#if production_ready:		
 	#	production_ready = false
-	assets[prod_res]+=3
-	if assets[prod_res]> needs[prod_res] *2:
-		assets[prod_res] = needs[prod_res] *2
-	bars[prod_res].value = assets[prod_res]
-	
+	if(prod_res[0] != null):
+		for res in prod_res:
+			assets[res]+=3
+			if assets[res]> needs[res] *2:
+				assets[res] = needs[res] *2
+			bars[res].value = assets[res]
+			
 	#if there is 1 res in each asset - consume them all and grow in size
 	#if any are missing shrink
 	var all_in = true
@@ -698,7 +721,7 @@ func _on_growth_timer_timeout() -> void:
 		if new_alpha < low_alpha:
 			new_alpha = low_alpha
 			
-			if(Global.is_killing == true):
+			if(Global.is_killing == true and self.killable == true):
 				kill_it()
 			
 		var new_color = Color(old_modulate,new_alpha)
@@ -807,14 +830,15 @@ func _on_evaporate_timer_timeout() -> void:
 
 
 func _on_body_entered(body: Node2D) -> void:
-	if (body is Bird and self.type == body.quarry_type):#"maize"):
+	if (self.type == body.quarry_type):#"maize"):
 		
 		#print("bird endered: ", body)
 		if(body.caught == false and caught_by == null):
 			body.caught = true
 			caught_by = body
 			logistics_ready = false
-			sprite.rotate(PI/4)
+			if(body is Bird):
+				sprite.rotate(PI/4)
 			self.dead = true
 			
 			var living = false

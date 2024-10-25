@@ -21,3 +21,10 @@ res://scenes/agent.gd
 res://scenes/bi-basket.gd
 res://scenes/game_over.gd
 res://scenes/asset.gd
+res://socialagent.gd
+res://scenes/socialagent.tscn
+res://scenes/socialagent.gd
+res://scenes/player.tscn
+res://scenes/tuktuk.tscn
+res://scenes/tuktuk.gd
+res://scenes/pause_node.gd

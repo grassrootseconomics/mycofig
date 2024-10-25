@@ -1,13 +1,13 @@
 [gd_scene load_steps=10 format=3 uid="uid://cqxduy84bksgu"]
 
 [ext_resource type="Texture2D" uid="uid://b0g4untp5lhx" path="res://graphics/soil-cutaway.png" id="1_2nhsr"]
-[ext_resource type="PackedScene" uid="uid://cwghgyigytbmj" path="res://scenes/player.tscn" id="1_60fi4"]
 [ext_resource type="Script" path="res://scenes/level.gd" id="1_76h6v"]
 [ext_resource type="PackedScene" uid="uid://bmwuxpm12gkh7" path="res://scenes/ui.tscn" id="4_c72w0"]
 [ext_resource type="AudioStream" uid="uid://vyhyw4xd3hes" path="res://audio/squelch_slayer.wav" id="5_ld565"]
 [ext_resource type="AudioStream" uid="uid://bi701uswd6us3" path="res://audio/twinkle.mp3" id="6_epj5m"]
 [ext_resource type="AudioStream" uid="uid://bksoh5ra6licd" path="res://audio/cardinal.mp3" id="6_lg0nh"]
 [ext_resource type="AudioStream" uid="uid://dlnowg5diunu5" path="res://audio/rustle-bush.mp3" id="7_t2wt4"]
+[ext_resource type="AudioStream" uid="uid://b73pb374nldbc" path="res://audio/old-car-horn.mp3" id="9_qsfbp"]
 [ext_resource type="AudioStream" uid="uid://d3fiyl7nscm1t" path="res://audio/binaural-birds-loop-short.mp3" id="9_x3sm0"]
 
 [node name="Level" type="Node2D"]
@@ -51,10 +51,6 @@ z_index = -2
 [node name="Lines" type="Node2D" parent="."]
 z_index = -2
 
-[node name="Player" parent="." instance=ExtResource("1_60fi4")]
-visible = false
-position = Vector2(157, 274)
-
 [node name="Animals" type="Node2D" parent="."]
 z_index = 1
 
@@ -84,5 +80,7 @@ stream = ExtResource("6_lg0nh")
 [node name="BirdLong" type="AudioStreamPlayer2D" parent="."]
 stream = ExtResource("9_x3sm0")
 
-[connection signal="laser" from="Player" to="." method="_on_player_laser"]
+[node name="CarSound" type="AudioStreamPlayer2D" parent="."]
+stream = ExtResource("9_qsfbp")
+
 [connection signal="timeout" from="TutorialTimer" to="." method="_on_tutorial_timer_timeout"]

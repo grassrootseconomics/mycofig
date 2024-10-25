@@ -7,6 +7,7 @@ var trade_scene: PackedScene = load("res://scenes/trade.tscn")
 var myco_scene: PackedScene = load("res://scenes/myco.tscn")
 var cloud_scene: PackedScene = load("res://scenes/cloud.tscn")
 var bird_scene: PackedScene = load("res://scenes/bird.tscn")
+var tuktuk_scene: PackedScene = load("res://scenes/tuktuk.tscn")
 var ui_scene: PackedScene = load("res://scenes/ui.tscn")
 
 
@@ -32,7 +33,7 @@ func _ready():
 	#uix.connect('new_agent',_on_new_agent)
 	$UI.connect('new_agent',_on_new_agent)
 	$UI.setup()
-	DisplayServer.window_set_title("Mycofi Garden")
+	DisplayServer.window_set_title("Plants Gardening")
 	$BirdLong.play()
 	#$BirdLong.
 		 
@@ -72,7 +73,6 @@ func _ready():
 	make_tree(tree_position)
 	
 	
-	
 	var myco_width = int(get_viewport().get_visible_rect().size[0]/2)+40
 	var myco_height = int(get_viewport().get_visible_rect().size[1]/2)+100
 	var myco_position = Vector2(myco_width,myco_height)
@@ -82,7 +82,7 @@ func _ready():
 	Global.active_agent = myco
 	
 	if(Global.is_raining == true):
-		var cloud_width = int(get_viewport().get_visible_rect().size[0]/2)+400
+		var cloud_width = int(get_viewport().get_visible_rect().size[0]/2)+250
 		var cloud_height = int(get_viewport().get_visible_rect().size[1]/2)-300
 		var cloud_position = Vector2(cloud_width,cloud_height)
 
@@ -114,7 +114,10 @@ func _input(event):
 					Global.move_rate = 0
 					Global.movement_speed = 0
 			elif event.keycode == KEY_ESCAPE or event.keycode == KEY_Q:
-				get_tree().change_scene_to_file("res://scenes/game_over.tscn")
+				
+				get_tree().call_deferred("change_scene_to_file","res://scenes/game_over.tscn")
+				
+				
 			elif event.keycode == KEY_B:
 				Global.bars_on = not Global.bars_on
 				#print("Bars on: ", Global.bars_on )
@@ -193,34 +196,39 @@ func _on_update_score() -> void:
 					var z_quarry = Global.rand_quarry[0]
 					Global.quarry_type = z_quarry
 					#print(" birds are after your ", z_quarry, " !!!")
-					$BirdSound.play()
+					if(Global.social_mode):
+						$CarSound.play()
+					else:
+						$BirdSound.play()
 					while iter < Global.birds[score_lvl]:
 						iter +=1
 						make_bird()
 	if(Global.mode == "challenge" and Global.ranks[current_score_lvl] == "Grassroots Economist"):
-		get_tree().change_scene_to_file("res://scenes/game_over.tscn")
+		get_tree().call_deferred("change_scene_to_file","res://scenes/game_over.tscn")
+		
 
 func _on_new_agent(agent_dict) -> void:
 	#print("found signal: ", agent_dict)
+	var new_agent = null
 	if agent_dict["name"]  == "squash":
 		$TwinkleSound.play()
-		make_squash(agent_dict["pos"])
+		new_agent = make_squash(agent_dict["pos"])
 	elif agent_dict["name"]  == "bean":
 		$TwinkleSound.play()
-		make_bean(agent_dict["pos"])
+		new_agent = make_bean(agent_dict["pos"])
 	elif agent_dict["name"]  == "maize":
 		$TwinkleSound.play()
-		make_maize(agent_dict["pos"])
+		new_agent = make_maize(agent_dict["pos"])
 	elif agent_dict["name"]  == "myco":
 		$SquelchSound.play()
-		make_myco(agent_dict["pos"])
+		new_agent = make_myco(agent_dict["pos"])
 	elif agent_dict["name"]  == "tree":
 		$BushSound.play()
-		make_tree(agent_dict["pos"])
-	elif agent_dict["name"]  == "cloud":
-		make_cloud(agent_dict["pos"])
-
+		new_agent = make_tree(agent_dict["pos"])
 	
+	if(Global.active_agent == null):
+		Global.active_agent = new_agent
+			
 func make_squash(pos):
 	#print("Clicked On Squash. making")
 	
@@ -232,7 +240,7 @@ func make_squash(pos):
 		"name": named,
 		"type": "squash",
 		"position": squash_position,
-		"prod_res": "P",
+		"prod_res": ["P"],
 		"start_res": null,
 		"texture": load("res://graphics/squash.png")
 	}
@@ -259,7 +267,7 @@ func make_tree(pos):
 		"name": named,
 		"type": "tree",
 		"position": pos,
-		"prod_res": "R",
+		"prod_res": ["R"],
 		"start_res": null,
 		"texture": load("res://graphics/baobab.png")
 	}
@@ -276,7 +284,11 @@ func make_tree(pos):
 	
 	
 func make_bird():
-	var bird = bird_scene.instantiate()
+	var bird = null
+	if(Global.social_mode):
+		bird = tuktuk_scene.instantiate()
+	else:
+		bird = bird_scene.instantiate()
 	#bird.set_variables(cloud_dict)
 	$Animals.add_child(bird)
 	#cloud.connect('trade', _on_agent_trade)
@@ -297,7 +309,7 @@ func make_maize(pos):
 		"name": named,
 		"type": "maize",
 		"position": maize_position,
-		"prod_res": "K",
+		"prod_res": ["K"],
 		"start_res": null,
 		"texture": load("res://graphics/maize.png")
 	}
@@ -323,7 +335,7 @@ func make_bean(pos):
 		"name": named,
 		"type": "bean",
 		"position": bean_position,
-		"prod_res": "N",
+		"prod_res": ["N"],
 		"start_res": null,
 		"texture": load("res://graphics/bean.png")
 	}
@@ -348,7 +360,7 @@ func make_cloud(pos):
 		"name": named,
 		"type": "cloud",
 		"position": pos,
-		"prod_res": "R",
+		"prod_res": ["R"],
 		"start_res": 20,
 		"texture": load("res://graphics/cloud.png")
 	}
@@ -370,7 +382,7 @@ func make_myco(pos):
 		"name": named,
 		"type": "myco",
 		"position": myco_position,
-		"prod_res": null,
+		"prod_res": [null],
 		"start_res": null,
 		"texture": load("res://graphics/mushroom_32.png")
 	}

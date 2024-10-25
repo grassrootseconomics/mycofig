@@ -2,11 +2,11 @@ extends Node2D
 
 #to run: python3 -m http.server  .. browse to localhost:8000
 
-var plant_scene: PackedScene = load("res://scenes/plant.tscn")
+var socialagent_scene: PackedScene = load("res://scenes/socialagent.tscn")
 var trade_scene: PackedScene = load("res://scenes/trade.tscn")
 #var myco_scene: PackedScene = load("res://scenes/myco.tscn")
 var basket_scene: PackedScene = load("res://scenes/basket.tscn")
-
+var tuktuk_scene: PackedScene = load("res://scenes/tuktuk.tscn")
 #var city_scene: PackedScene = load("res://scenes/city.tscn")
 var bird_scene: PackedScene = load("res://scenes/bird.tscn")
 var ui_scene: PackedScene = load("res://scenes/ui.tscn")
@@ -34,41 +34,22 @@ func _ready():
 	#uix.connect('new_agent',_on_new_agent)
 	$UI.connect('new_agent',_on_new_agent)
 	$UI.setup()
-	DisplayServer.window_set_title("Mycofi Garden")
+	DisplayServer.window_set_title("People Gardening")
 	$BirdLong.play()
 	#$BirdLong.
 		 
 	$"UI/TutorialMarginContainer1".visible = false
 	if(Global.mode == "tutorial"):
 		$"UI/TutorialMarginContainer1".visible=true
-		$"UI/TutorialMarginContainer1/VBoxContainer/Label".text = Global.stage_text[Global.stage]
-		$"UI/TutorialMarginContainer1/ColorRect2".color = Global.stage_colors[Global.stage]
+		$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
+		$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 
 	mid_width = int(get_viewport().get_visible_rect().size[0]/2)
 	mid_height = int(get_viewport().get_visible_rect().size[1]/2)
 	
-	var maize_center_offset_x = 75
-	var maize_center_offset_y = 65
-	var maize_position = Vector2(mid_width+maize_center_offset_x,mid_height+maize_center_offset_y)
 	
-	make_maize(maize_position)
-
-	
-	var bean_center_offset_x = -75
-	var bean_center_offset_y = 0
-	var bean_position = Vector2(mid_width+bean_center_offset_x,mid_height+bean_center_offset_y)
-	
-	make_bean(bean_position)
-	
-	
-	var squash_center_offset_x = 0
-	var squash_center_offset_y = -90
-	var squash_position = Vector2(mid_width+squash_center_offset_x,mid_height+squash_center_offset_y)
-	
-	make_squash(squash_position)
-	
-	var tree_center_offset_x = 75
-	var tree_center_offset_y = -50
+	var tree_center_offset_x = 220
+	var tree_center_offset_y = -300
 	var tree_position = Vector2(mid_width+tree_center_offset_x,mid_height+tree_center_offset_y)
 	
 	make_tree(tree_position)
@@ -79,18 +60,50 @@ func _ready():
 	var myco_height = int(get_viewport().get_visible_rect().size[1]/2)+100
 	var myco_position = Vector2(myco_width,myco_height)
 
-	var myco = make_myco(myco_position)
+	#var myco = make_myco(myco_position)
 
-	Global.active_agent = myco
+	#Global.active_agent = myco
+	
+	var bean_center_offset_x = 80
+	var bean_center_offset_y = -90
+	var bean_position = Vector2(mid_width+bean_center_offset_x,mid_height+bean_center_offset_y)
+	
+	make_bean(bean_position)
+	
+	var bi_myco_n_width = int(get_viewport().get_visible_rect().size[0]/2)+100
+	var bi_myco_n_height = int(get_viewport().get_visible_rect().size[1]/2)-210
+	var bi_myco_n_position = Vector2(bi_myco_n_width,bi_myco_n_height)
+
+	var bi_n_myco = make_bi_n_myco(bi_myco_n_position)
+
+
+	var squash_center_offset_x = 120
+	var squash_center_offset_y = -70
+	var squash_position = Vector2(mid_width+squash_center_offset_x,mid_height+squash_center_offset_y)
+	
+	make_squash(squash_position)
+	
+
+	var bi_myco_p_width = int(get_viewport().get_visible_rect().size[0]/2)+160
+	var bi_myco_p_height = int(get_viewport().get_visible_rect().size[1]/2)-220
+	var bi_myco_p_position = Vector2(bi_myco_p_width,bi_myco_p_height)
+
+	var bi_p_myco = make_bi_p_myco(bi_myco_p_position)
 	
 	
-	var bi_myco_width = int(get_viewport().get_visible_rect().size[0]/2)+10
-	var bi_myco_height = int(get_viewport().get_visible_rect().size[1]/2)-70
-	var bi_myco_position = Vector2(bi_myco_width,bi_myco_height)
-
-	var bi_myco = make_bi_myco(bi_myco_position)
+	
+	var maize_center_offset_x = 200
+	var maize_center_offset_y = -80
+	var maize_position = Vector2(mid_width+maize_center_offset_x,mid_height+maize_center_offset_y)
+	
+	make_maize(maize_position)
 
 	
+	var bi_myco_k_width = int(get_viewport().get_visible_rect().size[0]/2)+210
+	var bi_myco_k_height = int(get_viewport().get_visible_rect().size[1]/2)-230
+	var bi_myco_k_position = Vector2(bi_myco_k_width,bi_myco_k_height)
+
+	var bi_k_myco = make_bi_k_myco(bi_myco_k_position)
 	
 			
 func _input(event):
@@ -107,7 +120,8 @@ func _input(event):
 					Global.move_rate = 0
 					Global.movement_speed = 0
 			elif event.keycode == KEY_ESCAPE or event.keycode == KEY_Q:
-				get_tree().change_scene_to_file("res://scenes/game_over.tscn")
+				#get_tree().change_scene_to_file("res://scenes/game_over.tscn")
+				get_tree().call_deferred("change_scene_to_file","res://scenes/game_over.tscn")
 			elif event.keycode == KEY_B:
 				Global.bars_on = not Global.bars_on
 				#print("Bars on: ", Global.bars_on )
@@ -197,33 +211,37 @@ func _on_update_score() -> void:
 					var z_quarry = Global.rand_quarry[0]
 					Global.quarry_type = z_quarry
 					#print(" birds are after your ", z_quarry, " !!!")
-					$BirdSound.play()
+					if(Global.social_mode):
+						$CarSound.play()
+					else:
+						$BirdSound.play()
 					while iter < Global.birds[score_lvl]:
 						iter +=1
 						make_bird()
 	if(Global.mode == "challenge" and Global.ranks[current_score_lvl] == "Grassroots Economist"):
-		get_tree().change_scene_to_file("res://scenes/game_over.tscn")
+		get_tree().call_deferred("change_scene_to_file","res://scenes/game_over.tscn")
 
 func _on_new_agent(agent_dict) -> void:
 	#print("found signal: ", agent_dict)
-	
+	var new_agent = null
 	if agent_dict["name"]  == "squash":
 		$TwinkleSound.play()
-		Global.active_agent = make_squash(agent_dict["pos"])
+		new_agent = make_squash(agent_dict["pos"])
 	elif agent_dict["name"]  == "bean":
 		$TwinkleSound.play()
-		Global.active_agent = make_bean(agent_dict["pos"])
+		new_agent = make_bean(agent_dict["pos"])
 	elif agent_dict["name"]  == "maize":
 		$TwinkleSound.play()
-		Global.active_agent = make_maize(agent_dict["pos"])
+		new_agent = make_maize(agent_dict["pos"])
 	elif agent_dict["name"]  == "myco":
 		$SquelchSound.play()
-		Global.active_agent = make_myco(agent_dict["pos"])
+		new_agent = make_myco(agent_dict["pos"])
 	elif agent_dict["name"]  == "tree":
 		$BushSound.play()
-		Global.active_agent = make_tree(agent_dict["pos"])
+		new_agent = make_tree(agent_dict["pos"])
 	
-	
+	if(Global.active_agent == null):
+		Global.active_agent = new_agent
 func make_squash(pos):
 	#print("Clicked On Squash. making")
 	
@@ -235,14 +253,17 @@ func make_squash(pos):
 		"name": named,
 		"type": "squash",
 		"position": squash_position,
-		"prod_res": "P",
+		"prod_res": ["P"],
 		"start_res": null,
-		"texture": load("res://graphics/coopproduction.png")
+		"texture": load("res://graphics/mama.png")
 	}
 	
-	var squash = plant_scene.instantiate()
+	var squash = socialagent_scene.instantiate()
+	
 	squash.set_variables(squash_dict)
+	#squash.needs["R"]=0
 	$Agents.add_child(squash)
+	squash.buddy_radius = Global.social_buddy_radius
 	squash.connect('trade',_on_agent_trade)
 	squash.connect('new_agent',_on_new_agent)
 	squash.connect('update_score',_on_update_score)
@@ -262,13 +283,18 @@ func make_tree(pos):
 		"name": named,
 		"type": "tree",
 		"position": pos,
-		"prod_res": "R",
+		"prod_res": ["R"],
 		"start_res": null,
-		"texture": load("res://graphics/city.png")
+		"texture": load("res://graphics/bank.png")
 	}
-	var tree = plant_scene.instantiate()
+	var tree = socialagent_scene.instantiate()
+	#tree.needs["R"] = 40
 	tree.set_variables(tree_dict)
+	#tree.needs["R"]=20
 	$Agents.add_child(tree)
+	tree.buddy_radius = Global.social_buddy_radius
+	tree.draggable = false
+	tree.killable = false
 	tree.connect('trade',_on_agent_trade)
 	tree.connect('new_agent',_on_new_agent)
 	tree.connect('update_score',_on_update_score)
@@ -279,10 +305,15 @@ func make_tree(pos):
 	
 	
 func make_bird():
-	var bird = bird_scene.instantiate()
+	var bird = null
+	if(Global.social_mode):
+		bird = tuktuk_scene.instantiate()
+	else:
+		bird = bird_scene.instantiate()
 	#bird.set_variables(cloud_dict)
 	$Animals.add_child(bird)
 	#cloud.connect('trade', _on_agent_trade)
+
 
 	
 func make_maize(pos):
@@ -300,13 +331,14 @@ func make_maize(pos):
 		"name": named,
 		"type": "maize",
 		"position": maize_position,
-		"prod_res": "K",
+		"prod_res": ["K"],
 		"start_res": null,
-		"texture": load("res://graphics/shop-green.png")
+		"texture": load("res://graphics/cook.png")
 	}
-	var maize = plant_scene.instantiate()
+	var maize = socialagent_scene.instantiate()
 	maize.set_variables(maize_dict)
 	$Agents.add_child(maize)
+	maize.buddy_radius = Global.social_buddy_radius
 	maize.connect('trade',_on_agent_trade)
 	maize.connect('new_agent',_on_new_agent)
 	maize.connect('update_score',_on_update_score)
@@ -326,13 +358,16 @@ func make_bean(pos):
 		"name": named,
 		"type": "bean",
 		"position": bean_position,
-		"prod_res": "N",
+		"prod_res": ["N"],
 		"start_res": null,
-		"texture": load("res://graphics/services.png")
+		"texture": load("res://graphics/farmer.png")
 	}
-	var bean = plant_scene.instantiate()
+	var bean = socialagent_scene.instantiate()
+	
 	bean.set_variables(bean_dict)
+	#bean.needs["R"]=0
 	$Agents.add_child(bean)
+	bean.buddy_radius = Global.social_buddy_radius
 	bean.connect('trade',_on_agent_trade)
 	bean.connect('new_agent',_on_new_agent)
 	bean.connect('update_score',_on_update_score)
@@ -346,20 +381,21 @@ func make_bean(pos):
 func make_myco(pos):
 	var myco_position = pos
 	
-	var named = "Mycorrhizal_" + str($Agents.get_child_count()+1)
+	var named = "Myco_Basket" + str($Agents.get_child_count()+1)
 		
 	
 	var myco_dict = {
 		"name": named,
 		"type": "myco",
 		"position": myco_position,
-		"prod_res": null,
+		"prod_res": [null],
 		"start_res": null,
 		"texture": load("res://graphics/basket.png")
 	}
 	
 	var basket = basket_scene.instantiate()
 	basket.set_variables(myco_dict)
+	basket.draw_lines = true
 	basket.sprite_texture = load("res://graphics/basket.png")
 	$Agents.add_child(basket)
 	
@@ -371,25 +407,37 @@ func make_myco(pos):
 	return basket
 	
 
-func make_bi_myco(pos):
+func make_bi_n_myco(pos):
 	var myco_position = pos
 	
-	var named = "Bi-Mycorrhizal_" + str($Agents.get_child_count()+1)
+	var named = "Bi-N-Mycorrhizal_" + str($Agents.get_child_count()+1)
 		
 	
 	var myco_dict = {
 		"name": named,
 		"type": "myco",
 		"position": myco_position,
-		"prod_res": null,
+		"prod_res": [null],
 		"start_res": null,
 		"texture": load("res://graphics/basket.png")
 	}
 	
 	var basket = basket_scene.instantiate()
+	basket.assets = { #list of assets - 
+	"N": 5,
+	"R": 0
+	}
+	basket.needs = { #list of assets - 
+	"N": 10,
+	"R": 10
+	}
+	
 	basket.set_variables(myco_dict)
 	#basket.sprite_texture = load("res://graphics/basket.png")
 	$Agents.add_child(basket)
+	basket.draw_lines = true
+	basket.draggable = false
+	basket.killable = false
 	basket.sprite.modulate = Global.asset_colors["N"]
 	
 	basket.connect('trade',_on_agent_trade)
@@ -400,6 +448,86 @@ func make_bi_myco(pos):
 	return basket
 	
 
+func make_bi_p_myco(pos):
+	var myco_position = pos
+	
+	var named = "Bi-P-Mycorrhizal_" + str($Agents.get_child_count()+1)
+		
+	
+	var myco_dict = {
+		"name": named,
+		"type": "myco",
+		"position": myco_position,
+		"prod_res": [null],
+		"start_res": null,
+		"texture": load("res://graphics/basket.png")
+	}
+	
+	var basket = basket_scene.instantiate()
+	basket.assets = { #list of assets - 
+	"P": 5,
+	"R": 0
+	}
+	basket.needs = { #list of assets - 
+	"P": 10,
+	"R": 10
+	}
+	basket.set_variables(myco_dict)
+	#basket.sprite_texture = load("res://graphics/basket.png")
+	$Agents.add_child(basket)
+	basket.draw_lines = true
+	basket.draggable = false
+	basket.killable = false
+	basket.sprite.modulate = Global.asset_colors["P"]
+	
+	basket.connect('trade',_on_agent_trade)
+	
+	for agent in $Agents.get_children():
+		agent.new_buddies = true
+	
+	return basket
+
+
+func make_bi_k_myco(pos):
+	var myco_position = pos
+	
+	var named = "Bi-K-Mycorrhizal_" + str($Agents.get_child_count()+1)
+		
+	
+	var myco_dict = {
+		"name": named,
+		"type": "myco",
+		"position": myco_position,
+		"prod_res": [null],
+		"start_res": null,
+		"texture": load("res://graphics/basket.png")
+	}
+	
+	var basket = basket_scene.instantiate()
+	basket.assets = { #list of assets - 
+	"K": 5,
+	"R": 0
+	}
+	basket.needs = { #list of assets - 
+	"K": 10,
+	"R": 10
+	}
+	basket.set_variables(myco_dict)
+	#basket.sprite_texture = load("res://graphics/basket.png")
+	$Agents.add_child(basket)
+	basket.draw_lines = true
+	basket.draggable = false
+	basket.killable = false
+	basket.sprite.modulate = Global.asset_colors["K"]
+	
+	basket.connect('trade',_on_agent_trade)
+	
+	for agent in $Agents.get_children():
+		agent.new_buddies = true
+	
+	return basket
+
+
 
 func _on_tutorial_timer_timeout() -> void:
 	if(Global.mode == "tutorial"):
@@ -408,14 +536,15 @@ func _on_tutorial_timer_timeout() -> void:
 			
 			var c_buds = 0
 			for child in $Agents.get_children():
-				if(child.type!="myco"):
-					c_buds += len(child.trade_buddies)
+				if(child.type=="myco"):
+					c_buds += 1
 				#print(" child bud: ", child.name, " ", child.trade_buddies)
 			#print("len buds: ", c_buds)
 			if(c_buds >=4):
 				Global.stage += 1
-				$"UI/TutorialMarginContainer1/VBoxContainer/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect2".color = Global.stage_colors[Global.stage]
+				$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
+				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+			
 		elif(Global.stage == 2):
 			
 			var c_buds = 0
@@ -423,10 +552,10 @@ func _on_tutorial_timer_timeout() -> void:
 			for child in $Agents.get_children():
 				if(child.type=="myco"):
 					num_myco += 1
-			if(num_myco >=2):
+			if(num_myco >=5):
 				Global.stage += 1
-				$"UI/TutorialMarginContainer1/VBoxContainer/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect2".color = Global.stage_colors[Global.stage]
+				$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
+				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 		elif(Global.stage == 3):
 			
 			var c_buds = 0
@@ -436,10 +565,10 @@ func _on_tutorial_timer_timeout() -> void:
 					num_myco += 1
 					c_buds += len(child.trade_buddies)
 					#print(" child bud: ", child.name, " ", child.trade_buddies)
-			if(num_myco >= 3 and c_buds >=2):
+			if(num_myco >= 5 and c_buds >=3):
 				Global.stage += 1
-				$"UI/TutorialMarginContainer1/VBoxContainer/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect2".color = Global.stage_colors[Global.stage]
+				$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
+				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 		elif(Global.stage == 4):
 			
 			var c_maize = 0
@@ -448,7 +577,7 @@ func _on_tutorial_timer_timeout() -> void:
 					c_maize += 1
 			
 			var iter = 0
-			$BirdSound.play()
+			$CarSound.play()
 			while iter < c_maize*3:
 				iter +=1
 				make_bird()
@@ -463,8 +592,8 @@ func _on_tutorial_timer_timeout() -> void:
 			
 			if(c_maize >=3):
 				Global.stage = 5
-				$"UI/TutorialMarginContainer1/VBoxContainer/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect2".color = Global.stage_colors[Global.stage]
+				$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
+				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 		
 		elif(Global.stage == 5):
 			
@@ -474,7 +603,7 @@ func _on_tutorial_timer_timeout() -> void:
 					c_maize += 1
 			
 			var iter = 0
-			$BirdSound.play()
+			$CarSound.play()
 			while iter < c_maize-1:
 				iter +=1
 				make_bird()
@@ -491,8 +620,8 @@ func _on_tutorial_timer_timeout() -> void:
 			
 			if(c_maize >=2 and Global.values['K']>1):
 				Global.stage = 6
-				$"UI/TutorialMarginContainer1/VBoxContainer/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect2".color = Global.stage_colors[Global.stage]
+				$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
+				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 				
 		elif(Global.stage == 6):
 			
@@ -521,8 +650,8 @@ func _on_tutorial_timer_timeout() -> void:
 			
 			if(c_maize >=2 and Global.values['K']>1):
 				Global.stage = 7
-				$"UI/TutorialMarginContainer1/VBoxContainer/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect2".color = Global.stage_colors[Global.stage]
+				$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
+				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 		
 		elif(Global.stage == 7):
 			
@@ -533,8 +662,9 @@ func _on_tutorial_timer_timeout() -> void:
 					
 			if(c_maize >=2 and Global.values['K']<=1.1):
 				Global.stage = 8
-				$"UI/TutorialMarginContainer1/VBoxContainer/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect2".color = Global.stage_colors[Global.stage]
+				$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
+				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				$"UI/RestartContainer".visible=true
 		
 						
 			

@@ -56,10 +56,16 @@ func set_variables(a_dict) -> void:
 	name = a_dict.get("name")
 	type = a_dict.get("type")
 	prod_res = a_dict.get("prod_res")
-	if a_dict.get("start_res") == null:
-		assets[prod_res] = needs[prod_res]
-	else:
-		assets[prod_res] = a_dict.get("start_res")
+	
+	if (prod_res[0] != null):
+		if a_dict.get("start_res") == null:
+			for res in prod_res:
+				assets[res] = needs[res]
+			#assets[prod_res].amt = assets[prod_res].need
+		else:
+			for res in prod_res:
+				assets[res] = a_dict.get("start_res")
+	
 	position = a_dict.get("position")
 	sprite_texture = a_dict.get("texture")
 	sprite = $Sprite2D
@@ -93,13 +99,13 @@ func logistics():
 		randomize()
 		children.shuffle()
 		for child in children:
-			if(assets[prod_res] - needs[prod_res]  >= 1):
+			if(assets[prod_res[0]] - needs[prod_res[0]]  >= 1):
 				if(is_instance_valid(child)):
 					if child.type != 'myco' and child.type != 'cloud':
 						#print(child.name, " needs: ", prod_res)
 						#if child.name != 'Maize':
 						#		print(child.name, " needs: ", prod_res)
-						if child.assets.get(prod_res) != null:	
+						if child.assets.get(prod_res[0]) != null:	
 							#==========+++print(" needed: ", needed_res, ":", amt_needed)
 							#print(" cloud supply: ", child.assets[excess_res], " maize excess: ", excess_res, ":", amt_excess)
 							#if child.assets[needed_res] >= amt_needed:
@@ -107,15 +113,15 @@ func logistics():
 								"from_agent": self,
 								"to_agent": child,
 								"trade_path": [self,child],
-								"trade_asset": prod_res,
+								"trade_asset": prod_res[0],
 								"trade_amount": 1, #amt_needed,
 								"trade_type": "send",
 								"return_res": null,
 								"return_amt": 1,#amt_needed
 							}
 							#print("cloud .... sending a trade along, ", path_dict)
-							assets[prod_res] -= 1#amt_needed
-							bars[prod_res].value = assets[prod_res]
+							assets[prod_res[0]] -= 1#amt_needed
+							bars[prod_res[0]].value = assets[prod_res[0]]
 							#print(excess_res, " value: ", bars[excess_res].value)
 							#bars[excess_res].update()
 							emit_signal("trade",path_dict)
@@ -134,11 +140,12 @@ func logistics():
 	#if false:
 	if production_ready:
 		production_ready = false
-		if assets[prod_res] < needs[prod_res] *2:
-			assets[prod_res]+=3
-		if assets[prod_res]> needs[prod_res] *2:
-			assets[prod_res] = needs[prod_res] *2
-		bars[prod_res].value = assets[prod_res]
+		for res in prod_res:
+			if assets[res] < needs[res] *2:
+				assets[res]+=3
+			if assets[res]> needs[res] *2:
+				assets[res] = needs[res] *2
+			bars[res].value = assets[res]
 			
 	
 	

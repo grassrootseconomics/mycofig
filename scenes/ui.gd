@@ -65,13 +65,15 @@ func setup():
 	if(Global.social_mode):
 		for invs in inventory_sprites:
 			if(invs=="bean"):
-				inventory_sprites[invs].texture = load("res://graphics/services.png")
+				inventory_sprites[invs].texture = load("res://graphics/farmer.png")
 			elif(invs=="squash"):
-				inventory_sprites[invs].texture = load("res://graphics/coopproduction.png")
+				inventory_sprites[invs].texture = load("res://graphics/mama.png")
 			elif(invs=="maize"):
-				inventory_sprites[invs].texture = load("res://graphics/shop-green.png")
+				inventory_sprites[invs].texture = load("res://graphics/cook.png")
 			elif(invs=="tree"):
-				inventory_sprites[invs].texture = load("res://graphics/city.png")
+				inventory_sprites[invs].texture = load("res://graphics/bank.png")
+				inventory_sprites[invs].visible = false
+				inventory_labels[invs].visible = false
 			elif(invs=="myco"):
 				inventory_sprites[invs].texture = load("res://graphics/basket.png")
 		
@@ -93,10 +95,12 @@ func setup():
 	var assetLabel = Label.new()
 	assetLabel.text = "Resource"
 	assetLabel.name = "Title"
+	assetLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	resContainer.add_child(assetLabel)
 	
 	var valLabel = Label.new()
 	valLabel.text = "Relative Value"
+	valLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	valContainer.add_child(valLabel)
 	
 
@@ -106,7 +110,7 @@ func setup():
 		if(Global.social_mode==true):
 			resText.text = str(Global.assets_social[asset]) + str(" ") + str(Global.values[asset])
 		else:
-			resText.text = str(asset) + str(" ") + str(Global.values[asset])
+			resText.text = str(Global.assets_plant[asset]) + str(" ") + str(Global.values[asset])
 		resText.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		resContainer.add_child(resText)
 		
@@ -178,6 +182,9 @@ func _input(event):
 		elif mouseOverSquash == true:
 			#print("Clicked On Squash")
 			next_agent = "squash"
+		
+		#if(next_agent!=null):
+			#inventory_sprites[next_agent].modulate.a = 0.5
 			
 		if event.pressed == false and next_agent != null:
 			#var space = get_world_2d().direct_space_state
@@ -216,6 +223,7 @@ func _input(event):
 					emit_signal("new_agent", new_agent_dict)
 					Global.inventory[next_agent] -=1
 					inventory_labels[next_agent].text = str(Global.inventory[next_agent])
+					inventory_sprites[next_agent].modulate.a = 1
 					if (Global.inventory[next_agent] <1):
 						inventory_sprites[next_agent].modulate.a =0.5
 					
@@ -271,4 +279,15 @@ func _on_choose_tree_mouse_exited() -> void:
 
 func _on_button_pressed() -> void:
 	Global.score = 0
-	get_tree().change_scene_to_file("res://scenes/title_screen.tscn")
+	get_tree().call_deferred("change_scene_to_file","res://scenes/title_screen.tscn")
+	
+
+
+func _on_pause_button_pressed() -> void:
+	var status = get_tree().paused
+	print("pause status:", status)
+	get_tree().paused = not status
+	if(status == true):
+		$MarginCMarginContainer2ontainer/HBoxContainer/PauseButton.text = "Pause"
+	else:
+		$MarginCMarginContainer2ontainer/HBoxContainer/PauseButton.text = "Start"

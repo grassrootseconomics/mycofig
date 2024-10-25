@@ -1,14 +1,15 @@
-[gd_scene load_steps=10 format=3 uid="uid://bketp5uhgmluh"]
+[gd_scene load_steps=11 format=3 uid="uid://bketp5uhgmluh"]
 
 [ext_resource type="Script" path="res://scenes/sociallevel.gd" id="1_jw2pv"]
-[ext_resource type="Texture2D" uid="uid://7mopp7hpgw3d" path="res://graphics/landscape.png" id="2_8vc0a"]
-[ext_resource type="PackedScene" uid="uid://cwghgyigytbmj" path="res://scenes/player.tscn" id="3_cs3jl"]
+[ext_resource type="Texture2D" uid="uid://cs87sc1knnnbq" path="res://graphics/social.png" id="2_rgcoq"]
+[ext_resource type="PackedScene" uid="uid://dx8wueg7o5i66" path="res://scenes/player.tscn" id="3_cs3jl"]
 [ext_resource type="PackedScene" uid="uid://bmwuxpm12gkh7" path="res://scenes/ui.tscn" id="4_uvyqa"]
 [ext_resource type="AudioStream" uid="uid://vyhyw4xd3hes" path="res://audio/squelch_slayer.wav" id="5_pibxj"]
 [ext_resource type="AudioStream" uid="uid://bi701uswd6us3" path="res://audio/twinkle.mp3" id="6_bdr3o"]
 [ext_resource type="AudioStream" uid="uid://dlnowg5diunu5" path="res://audio/rustle-bush.mp3" id="7_msnna"]
 [ext_resource type="AudioStream" uid="uid://bksoh5ra6licd" path="res://audio/cardinal.mp3" id="8_cf52g"]
 [ext_resource type="AudioStream" uid="uid://d3fiyl7nscm1t" path="res://audio/binaural-birds-loop-short.mp3" id="9_habmw"]
+[ext_resource type="AudioStream" uid="uid://b73pb374nldbc" path="res://audio/old-car-horn.mp3" id="10_x0m0b"]
 
 [node name="SocialLevel" type="Node2D"]
 script = ExtResource("1_jw2pv")
@@ -36,11 +37,12 @@ offset_right = 20.0
 offset_bottom = 20.0
 grow_horizontal = 2
 grow_vertical = 2
+use_top_left = true
 
 [node name="BG" type="Sprite2D" parent="Control/CenterContainer"]
-position = Vector2(1540, 833)
-scale = Vector2(0.808507, 0.82307)
-texture = ExtResource("2_8vc0a")
+position = Vector2(1782, 1406)
+scale = Vector2(3.04517, 3.10002)
+texture = ExtResource("2_rgcoq")
 
 [node name="Agents" type="Node2D" parent="."]
 z_index = 1
@@ -84,5 +86,7 @@ stream = ExtResource("8_cf52g")
 [node name="BirdLong" type="AudioStreamPlayer2D" parent="."]
 stream = ExtResource("9_habmw")
 
-[connection signal="laser" from="Player" to="." method="_on_player_laser"]
+[node name="CarSound" type="AudioStreamPlayer2D" parent="."]
+stream = ExtResource("10_x0m0b")
+
 [connection signal="timeout" from="TutorialTimer" to="." method="_on_tutorial_timer_timeout"]

@@ -3,15 +3,18 @@ extends Control
 #@export var level_scene: PackedScene = load("res://scenes/level.tscn")
 
 func _ready():
+	var PPMode = "Plant"
+	if Global.social_mode == true:
+		PPMode = "People"
 	$CenterContainer/VBoxContainer/Label2.text = $CenterContainer/VBoxContainer/Label2.text + str(Global.score)
-	$CenterContainer/VBoxContainer/ModeLabel.text = Global.mode+" mode"
+	$CenterContainer/VBoxContainer/ModeLabel.text = PPMode + " " + Global.mode+" mode"
 	var rank_str = Global.ranks[0]
 	for ranks in Global.ranks:
 		if(Global.score > ranks):
 			rank_str = Global.ranks[ranks]
 	
 	if(rank_str=="Grassroots Economist"):
-		$CenterContainer/VBoxContainer/ModeLabel.text = "You WON! "+Global.mode+" mode"
+		$CenterContainer/VBoxContainer/ModeLabel.text = "You WON! "+ PPMode+ " " +Global.mode+" mode"
 	
 	$CenterContainer/VBoxContainer/RankLabel.text = rank_str
 func _process(delta: float) -> void:

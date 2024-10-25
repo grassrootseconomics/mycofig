@@ -1,6 +1,10 @@
+Node
 Button
+HBoxContainer
+AudioStreamPlayer2D
+Sprite2D
+CheckButton
 MarginContainer
 Control
 CenterContainer
 VBoxContainer
-AudioStreamPlayer2D

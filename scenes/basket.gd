@@ -1,5 +1,6 @@
 extends Agent
 
+var trade_queue = []
 func set_variables(a_dict) -> void:
 	name = a_dict.get("name")
 	type = a_dict.get("type")
@@ -7,23 +8,45 @@ func set_variables(a_dict) -> void:
 	#assets[prod_res] = a_dict.get("start_res")
 	position = a_dict.get("position")
 	last_position = position
-	max_connectors = Global.num_connectors
+	
 	sprite_texture = a_dict.get("texture")
 	sprite = $Sprite2D
 	
 	sprite.z_index = 9
 	
-	#buddy_radius = sprite.get_rect().size[0]/2*min_scale
+	buddy_radius = Global.social_buddy_radius
 	#print("start radius: ", buddy_radius)
 	$Sprite2D.texture = sprite_texture
 	$GrowthTimer.wait_time = Global.growth_time
 	$ActionTimer.wait_time = Global.action_time
+	
+	$CanvasLayer/Nbar.visible = false
+	$CanvasLayer/Pbar.visible = false
+	$CanvasLayer/Kbar.visible = false
+	$CanvasLayer/Rbar.visible = false
+	
+	bars = {}
+	for asset in assets:
+		if(asset == "N"):
+			bars[asset] = $CanvasLayer/Nbar
+			$CanvasLayer/Nbar.visible = true
+		elif(asset == "P"):
+			bars[asset] = $CanvasLayer/Pbar
+			$CanvasLayer/Pbar.visible = true
+		elif(asset == "K"):
+			bars[asset] = $CanvasLayer/Kbar
+			$CanvasLayer/Kbar.visible = true
+		elif(asset == "R"):
+			bars[asset] = $CanvasLayer/Rbar
+			$CanvasLayer/Rbar.visible = true
+	"""
 	bars = { #list of needed assets with need level
 		"N": $CanvasLayer/Nbar,
 		"P": $CanvasLayer/Pbar,
 		"K": $CanvasLayer/Kbar,
 		"R": $CanvasLayer/Rbar
 	}
+	"""
 	for bar in bars:
 		bars[bar].max_value = int(needs[bar]*1.2)
 		bars[bar].value = assets[bar]
@@ -41,22 +64,30 @@ func generate_buddies() -> void:
 	num_connectors = 0
 	#print(self.name, " new buddies children: ", children)
 	for child in children:
-		for buddy in child.trade_buddies:
-			if buddy.name == self.name:
-				num_connectors +=1
-		if child.type == 'myco' and child.name != self.name:
-			var dist = global_position.distance_to(child.global_position)
-			if dist <= buddy_radius:
-				if len(trade_buddies) < num_buddies:
-					trade_buddies.append(child)
-			#else:
+		if(is_instance_valid(self) and is_instance_valid(child)):
+			if child.type == 'myco' and child.name != self.name:
+				var dist = global_position.distance_to(child.global_position)
+				if dist <= buddy_radius:
+					if len(trade_buddies) < num_buddies:
+						trade_buddies.append(child)
+				#else:
 				#print(self.name, " is too far from myco: ", dist)
 	#print("final new buddies: ", trade_buddies)
 
 	pass
 
 func logistics():
-	#wait for timer
+	var new_trade_queue = []
+	for trade in trade_queue:
+		if(assets[trade.trade_asset]>= trade.trade_amount):
+			assets[trade.trade_asset]-=trade.trade_amount
+			bars[trade.trade_asset].value = assets[trade.trade_asset]
+			emit_signal("trade",trade)
+		
+		else:
+			new_trade_queue.append(trade)
+	trade_queue = new_trade_queue
+	pass
 	var excess_res = null
 	var high_amt_excess = 0
 	var needed_res = null
@@ -120,29 +151,30 @@ func logistics():
 						if debug_mode:
 							print(" child found: ", child.name )
 						for excess in keys_e:
-							if current_excess[excess] > 0 and assets[excess] > needs[excess] and child.assets[excess]<child.needs[excess]:
-								var path_dict = {
-									"from_agent": self,
-									"to_agent": child,
-									"trade_path": [self,child],
-									"trade_asset": excess,
-									"trade_amount": 1, #amt_needed,
-									"trade_type": "send",
-									"return_res": null,
-									"return_amt": 1,#amt_needed
-								}
-								if debug_mode:
-									print(" .... sending a trade along, ", path_dict)
-								#print(" .... sending a trade along, ", path_dict)
-								assets[excess] -= 1#amt_needed
-								bars[excess].value = assets[excess]
-								#print(excess_res, " value: ", bars[excess_res].value)
-								#bars[excess_res].update()
-								emit_signal("trade",path_dict)
-								#
-								#break
-								#trade.emit(path_dict)
-								#send what is in excess. 
+							if(child.assets.get(excess) != null):
+								if current_excess[excess] > 0 and assets[excess] > needs[excess] and child.assets[excess]<child.needs[excess]:
+									var path_dict = {
+										"from_agent": self,
+										"to_agent": child,
+										"trade_path": [self,child],
+										"trade_asset": excess,
+										"trade_amount": 1, #amt_needed,
+										"trade_type": "send",
+										"return_res": null,
+										"return_amt": 1,#amt_needed
+									}
+									if debug_mode:
+										print(" .... sending a trade along, ", path_dict)
+									#print(" .... sending a trade along, ", path_dict)
+									assets[excess] -= 1#amt_needed
+									bars[excess].value = assets[excess]
+									#print(excess_res, " value: ", bars[excess_res].value)
+									#bars[excess_res].update()
+									emit_signal("trade",path_dict)
+									#
+									#break
+									#trade.emit(path_dict)
+									#send what is in excess. 
 								
 
 func draw_selected_box():
@@ -184,7 +216,7 @@ func draw_selected_box():
 		
 func _physics_process(delta):
 	#_draw()
-	if is_dragging:
+	if is_dragging and draggable == true:
 		#for agent in $"../../Agents".get_children():
 		#	if(agent.is_dragging == true):
 		#		if(self.get_index() > agent.get_index()):
@@ -239,10 +271,6 @@ func _input(event):
 					print(" clicked: ", name)
 				
 
-func _on_area_2d_body_entered(_body):
-	#rest_point = input_pos.global_position
-	print('hello')
-
 
 func _on_area_entered(trade: Area2D) -> void:
 	if trade.end_agent == self:
@@ -257,35 +285,39 @@ func _on_area_entered(trade: Area2D) -> void:
 			
 			
 			if trade.type == "swap":
-				var return_amount = trade.return_amt*Global.values[trade.asset]/Global.values[trade.return_asset]
-				if return_amount < 0.5:
-					#print("return amount:", return_amount, trade)
-					return_amount = 0
-				else:
-					if return_amount < 1:
-						return_amount = 1
+				if(assets.get(trade.return_asset) != null):
+					var return_amount = trade.return_amt*Global.values[trade.asset]/Global.values[trade.return_asset]
+					if return_amount < 0.5:
+						#print("return amount:", return_amount, trade)
+						return_amount = 0
 					else:
-						return_amount = int(return_amount)
-					var path_dict = {
-						"from_agent": self,
-						"to_agent": trade.start_agent,
-						"trade_path": [self,trade.start_agent],
-						"trade_asset": trade.return_asset,
-						"trade_amount": return_amount,
-						"trade_type": "send",
-						"return_res": null,
-						"return_amt": null
-					}	
-					if(assets[trade.return_asset]>= return_amount):
-						assets[trade.return_asset]-=return_amount
-						bars[trade.return_asset].value = assets[trade.return_asset]
-						emit_signal("trade",path_dict)
-						#print("Returned Trade in Myco: ", path_dict)	
+						if return_amount < 1:
+							return_amount = 1
+						else:
+							return_amount = int(return_amount)
+						var path_dict = {
+							"from_agent": self,
+							"to_agent": trade.start_agent,
+							"trade_path": [self,trade.start_agent],
+							"trade_asset": trade.return_asset,
+							"trade_amount": return_amount,
+							"trade_type": "send",
+							"return_res": null,
+							"return_amt": null
+						}	
+						if(assets[trade.return_asset]>= return_amount):
+							assets[trade.return_asset]-=return_amount
+							bars[trade.return_asset].value = assets[trade.return_asset]
+							emit_signal("trade",path_dict)
+						else: #add to queue
+							trade_queue.append(path_dict)
+				else:
+					print("Error basket without return asset:", trade.return_asset, assets)
 			trade.call_deferred("queue_free")
 			
 			
 		else:
-			print("Error myco without asset:", trade.asset, assets)
+			print("Error basket without asset:", trade.asset, assets)
 	#else:
 	#	print("not myself", body_entered)
 		#collision.emit(body)
@@ -386,8 +418,10 @@ func _on_growth_timer_timeout() -> void:
 		var new_color = Color(old_modulate,new_alpha)
 		$Sprite2D.modulate= new_color
 
+	"""
 	if modulate.a >= 1:
 		#print("increase score and twinkle")
+		
 		var sparkle = Global.sparkle_scene.instantiate()
 		
 		sparkle.z_as_relative = false
@@ -396,8 +430,10 @@ func _on_growth_timer_timeout() -> void:
 		#sparkle.z_index =-1
 		$"../../Sparkles".add_child(sparkle)
 		sparkle.start(0.75)
+		
+		
 		Global.score += 200
-
+		"""
 
 	
 func _on_action_timer_timeout() -> void:

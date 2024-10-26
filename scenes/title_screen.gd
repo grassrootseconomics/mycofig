@@ -4,23 +4,26 @@ extends Control
 func _ready():
 	DisplayServer.window_set_title("Plants and People Gardening")
 	Global.score = 0
-	$CenterContainer/VBoxContainer/HBoxContainer/CheckButton.button_pressed = Global.social_mode
-	$CenterContainer/VBoxContainer/HBoxContainer/CheckButton2.button_pressed = not Global.social_mode
 	
 	if(Global.social_mode):
-		$CenterContainer/BG.modulate.a = 0
-		$CenterContainer/BG2.modulate.a = 1
-		var tween = get_tree().create_tween()
-		tween.tween_property($CenterContainer/BG2, "modulate:a", 0, 0.5)
-		var tween2 = get_tree().create_tween()
-		tween2.tween_property($CenterContainer/BG, "modulate:a", 1, 0.5)
-	else:
 		$CenterContainer/BG.modulate.a = 1
 		$CenterContainer/BG2.modulate.a = 0
+		$CenterContainer/VBoxContainer/HBoxContainer/CheckButton2.button_pressed = true
+		$CenterContainer/VBoxContainer/HBoxContainer/CheckButton.button_pressed = false
 		var tween = get_tree().create_tween()
-		tween.tween_property($CenterContainer/BG2, "modulate:a", 0, 0.5)
+		tween.tween_property($CenterContainer/BG, "modulate:a", 0, 0.5)
 		var tween2 = get_tree().create_tween()
-		tween2.tween_property($CenterContainer/BG, "modulate:a", 1, 0.5)
+		tween2.tween_property($CenterContainer/BG2, "modulate:a", 1, 0.5)
+	else:
+		$CenterContainer/BG.modulate.a = 0
+		$CenterContainer/BG2.modulate.a = 1
+		$CenterContainer/VBoxContainer/HBoxContainer/CheckButton.button_pressed = true
+		$CenterContainer/VBoxContainer/HBoxContainer/CheckButton2.button_pressed = false
+		var tween2 = get_tree().create_tween()
+		tween2.tween_property($CenterContainer/BG2, "modulate:a", 0, 0.5)
+		var tween = get_tree().create_tween()
+		tween.tween_property($CenterContainer/BG, "modulate:a", 1, 0.5)
+		
 
 func _on_tutorial_pressed() -> void:
 	

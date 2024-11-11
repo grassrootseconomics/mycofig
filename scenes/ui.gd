@@ -160,7 +160,7 @@ func _on_h_slider_drag_ended(value_changed: bool) -> void:
 				if(Global.social_mode==true):
 					label.text = Global.assets_social[res] + str(" ") + str(Global.values[res])
 				else:
-					label.text = res + str(" ") + str(Global.values[res])
+					label.text = Global.assets_plant[res] + str(" ") + str(Global.values[res])
 		
 
 

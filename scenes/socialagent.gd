@@ -3,6 +3,7 @@ extends Agent
 var is_trading = false
 var is_raining = true
 
+
 func logistics():
 	#wait for timer
 	var excess_res = null

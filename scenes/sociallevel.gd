@@ -240,6 +240,7 @@ func _on_new_agent(agent_dict) -> void:
 		$BushSound.play()
 		new_agent = make_tree(agent_dict["pos"])
 	
+	new_agent.peak_maturity = 4
 	if(Global.active_agent == null):
 		Global.active_agent = new_agent
 func make_squash(pos):

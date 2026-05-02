@@ -15,13 +15,16 @@ func _ready():
 	
 func reset():
 	flying = true
+	caught = false
+	quarry_found = false
+	the_quarry = null
 	#var mid_width = int(get_viewport().get_visible_rect().size[0]/2)
 	#if(Global.social_mode == true):
 		
 	var rng :=  RandomNumberGenerator.new()
 	var width = get_viewport().get_visible_rect().size[0]
 	var height = get_viewport().get_visible_rect().size[1]
-	var random_x = rng.randi_range(-55,-1*width/2)
+	var random_x = rng.randi_range(-120, -40)
 	var random_y = rng.randi_range(100,height-200)
 	quarry_type = Global.quarry_type
 	position = Vector2(random_x,random_y)
@@ -29,12 +32,10 @@ func reset():
 	#position = START_POS
 	set_rotation(0)
 	var children =  $"../../Agents".get_children()
-	randomize()
 	children.shuffle()
 		
 	for child in children:
 		if(child.type == quarry_type and child.dead == false):
-			var dest = child.position
 			if(child.position.x > self.position.x+10):
 				quarry_found = true
 				the_quarry = child
@@ -68,16 +69,13 @@ func _physics_process(delta: float) -> void:
 				quarry_found = false
 			
 		
-		if(caught == false and quarry_found == false):
-			move_and_collide(speed*going * delta)
-				
-		
-		if(caught ==false and quarry_found == true ):
-			if( is_instance_valid(the_quarry) ):
+		if(caught == false):
+			if(quarry_found and is_instance_valid(the_quarry)):
 				#print("-1:", self.name, " caught:", caught, " found: ",quarry_found, " tuktuk:", speed, going, delta)
 				position = position.move_toward(the_quarry.position,speed * delta)
 			else:
-				quarry_found == false 
+				quarry_found = false
+				the_quarry = null
 				#print("0:", self.name, "tuktuk:", speed, going, delta)
 				move_and_collide(speed*going * delta)
 		if(caught == true):
@@ -104,6 +102,3 @@ func _physics_process(delta: float) -> void:
 func _on_area_entered(agent: Area2D) -> void:
 	if agent.type == quarry_type:
 		flying = false
-		print("hit ", agent)
-	else:
-		print("hit ", agent)

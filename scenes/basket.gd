@@ -138,7 +138,6 @@ func logistics():
 		
 		if excess_res != null and needed_res != null:
 			#var children =  $"../../Agents".get_children()
-			randomize()
 			trade_buddies.shuffle()
 			
 			if debug_mode:
@@ -243,13 +242,10 @@ func _physics_process(delta):
 		
 		
 		
-		var tween = get_tree().create_tween()
-		tween.tween_property(self, "position", get_global_mouse_position(), delay * delta)
-		#tween.set_parallel(true)
-		for bar in bars:
-			#bars[bar].position = (position + bars[bar].position)
-			tween.tween_property(bars[bar], "position", (position + bars_offset[bar]), 0)
-			#tween.set_parallel(true)
+			var t = min(1.0, delay * delta)
+			position = position.lerp(get_global_mouse_position(), t)
+			for bar in bars:
+				bars[bar].position = position + bars_offset[bar]
 
 
 func _input(event):
@@ -268,7 +264,6 @@ func _input(event):
 				if $Sprite2D.get_rect().has_point(to_local(event.position)):
 					#emit_signal("clicked_agent",self)
 					Global.active_agent = self
-					print(" clicked: ", name)
 				
 
 
@@ -347,7 +342,6 @@ func kill_it():
 				line.queue_free()
 
 	my_lines = []
-	
 	if(draw_box):
 		for box in $"../../Boxes".get_children():
 			box.clear_points()	
@@ -363,9 +357,9 @@ func kill_it():
 		
 		if(child.dead == false and child.type != "cloud"):
 			living = true
-		
-			if( living == false  and Global.mode != "tutorial"):
-				get_tree().change_scene_to_file("res://scenes/game_over.tscn")
+
+	if( living == false  and Global.mode != "tutorial"):
+		get_tree().change_scene_to_file("res://scenes/game_over.tscn")
 			
 
 func _on_growth_timer_timeout() -> void:

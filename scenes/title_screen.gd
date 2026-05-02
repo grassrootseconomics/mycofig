@@ -1,6 +1,18 @@
 extends Control
 
 
+func _reset_run_state() -> void:
+	Global.values = {
+		"N": 1,
+		"P": 1,
+		"K": 1,
+		"R": 1
+	}
+	Global.active_agent = null
+	Global.is_dragging = false
+	Global.stage_inc = 0
+
+
 func _ready():
 	DisplayServer.window_set_title("Plants and People Gardening")
 	Global.score = 0
@@ -26,7 +38,7 @@ func _ready():
 		
 
 func _on_tutorial_pressed() -> void:
-	
+	_reset_run_state()
 	Global.mode = "tutorial"
 	Global.is_raining = false
 	Global.is_birding = false
@@ -49,7 +61,7 @@ func _on_tutorial_pressed() -> void:
 		get_tree().change_scene_to_file("res://scenes/sociallevel.tscn")
 
 func _on_free_garden_pressed() -> void:
-	
+	_reset_run_state()
 	Global.mode = "free"
 	Global.is_raining = false
 	Global.is_birding = false
@@ -72,7 +84,7 @@ func _on_free_garden_pressed() -> void:
 		get_tree().change_scene_to_file("res://scenes/sociallevel.tscn")
 
 func _on_challenge_button_pressed() -> void:
-	
+	_reset_run_state()
 	Global.mode = "challenge"
 	Global.is_raining = true
 	Global.is_birding = true
@@ -94,6 +106,7 @@ func _on_challenge_button_pressed() -> void:
 
 
 func _on_cofi_button_pressed() -> void:
+	_reset_run_state()
 	Global.social_mode = true
 	Global.mode = "challenge"
 	Global.is_raining = true
@@ -107,7 +120,7 @@ func _on_cofi_button_pressed() -> void:
 	Global.social_inventory = { #how many of each plant do we have to use
 	"service": 12,
 	"good": 12,				
-	"foreign": 12,
+	"value add": 12,
 	"city": 12,
 	"basket": 12
 	}

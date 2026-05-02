@@ -2,6 +2,14 @@ extends Node2D
 
 #to run: python3 -m http.server  .. browse to localhost:8000
 
+const LevelHelpersRef = preload("res://scenes/level_helpers.gd")
+const TEX_SQUASH = preload("res://graphics/squash.png")
+const TEX_TREE = preload("res://graphics/baobab.png")
+const TEX_MAIZE = preload("res://graphics/maize.png")
+const TEX_BEAN = preload("res://graphics/bean.png")
+const TEX_CLOUD = preload("res://graphics/cloud.png")
+const TEX_MYCO = preload("res://graphics/mushroom_32.png")
+
 var plant_scene: PackedScene = load("res://scenes/plant.tscn")
 var trade_scene: PackedScene = load("res://scenes/trade.tscn")
 var myco_scene: PackedScene = load("res://scenes/myco.tscn")
@@ -163,14 +171,14 @@ func _on_player_laser(path_dict) -> void:
 	#$Trades.add_child(trade)
 	
 func _on_agent_trade(path_dict) -> void:
+	call_deferred("_spawn_trade", path_dict)
+
+
+func _spawn_trade(path_dict) -> void:
 	#print("Found Trade signal dict: ", path_dict)
 	var trade = trade_scene.instantiate()
 	trade.set_variables(path_dict)
-	#$Trades.add_child(trade)
-	$Trades.call_deferred("add_child",trade)
-	#var to_ish = path_dict["to_agent"]
-	#var from_ish = path_dict["from_agent"]
-	#update_bars(path_dict)
+	$Trades.add_child(trade)
 	
 func update_bars(path_dict)  -> void:
 	if is_instance_valid(Global.active_agent) and is_instance_valid(path_dict["from_agent"]) and is_instance_valid(path_dict["to_agent"]):  
@@ -180,29 +188,36 @@ func update_bars(path_dict)  -> void:
 				if label.name == path_dict["trade_asset"]:
 					#print("h. ><><< inside asadas, lable", label.name, " : ", label.text)
 					label.text = str(path_dict["trade_asset"]) + str(" ") + str(Global.active_agent.assets[path_dict["trade_asset"]])
+
+
+func _play_predator_alert() -> void:
+	if(Global.social_mode):
+		$CarSound.play()
+	else:
+		$BirdSound.play()
+
+
+func _spawn_predators(requested_count: int, play_alert: bool = false) -> void:
+	var spawn_count = max(requested_count, 0)
+	if Global.is_mobile_platform:
+		spawn_count = min(spawn_count, Global.max_predators_per_wave_mobile)
+	if spawn_count <= 0:
+		return
+	if play_alert:
+		_play_predator_alert()
+	for _i in range(spawn_count):
+		make_bird()
 					
 func _on_update_score() -> void:
-	var current_score_lvl = 0
-	
-	for rank in Global.ranks:
-		if(Global.score > rank):
-			current_score_lvl = rank
-			if(current_score_lvl > score_lvl):
-				score_lvl = current_score_lvl
-				#print("create birds: ", Global.birds[score_lvl])
-				if(Global.is_birding == true):
-					var iter = 0
-					Global.rand_quarry.shuffle()
-					var z_quarry = Global.rand_quarry[0]
-					Global.quarry_type = z_quarry
-					#print(" birds are after your ", z_quarry, " !!!")
-					if(Global.social_mode):
-						$CarSound.play()
-					else:
-						$BirdSound.play()
-					while iter < Global.birds[score_lvl]:
-						iter +=1
-						make_bird()
+	var current_score_lvl := Global.get_rank_threshold(Global.score)
+	if current_score_lvl > score_lvl:
+		score_lvl = current_score_lvl
+		#print("create birds: ", Global.birds[score_lvl])
+		if(Global.is_birding == true):
+			Global.rand_quarry.shuffle()
+			var z_quarry = Global.rand_quarry[0]
+			Global.quarry_type = z_quarry
+			_spawn_predators(Global.get_predator_spawn_count(score_lvl), true)
 	if(Global.mode == "challenge" and Global.ranks[current_score_lvl] == "Grassroots Economist"):
 		get_tree().call_deferred("change_scene_to_file","res://scenes/game_over.tscn")
 		
@@ -226,6 +241,11 @@ func _on_new_agent(agent_dict) -> void:
 		$BushSound.play()
 		new_agent = make_tree(agent_dict["pos"])
 	
+	if is_instance_valid(new_agent):
+		if agent_dict.has("spawn_anchor"):
+			LevelHelpersRef.ensure_spawn_buddy_link(new_agent, agent_dict["spawn_anchor"])
+		LevelHelpersRef.mark_all_buddies_dirty($Agents)
+		LevelHelpersRef.mark_myco_lines_dirty($Agents)
 	if(Global.active_agent == null):
 		Global.active_agent = new_agent
 			
@@ -242,18 +262,14 @@ func make_squash(pos):
 		"position": squash_position,
 		"prod_res": ["P"],
 		"start_res": null,
-		"texture": load("res://graphics/squash.png")
+		"texture": TEX_SQUASH
 	}
 	
 	var squash = plant_scene.instantiate()
 	squash.set_variables(squash_dict)
 	$Agents.add_child(squash)
-	squash.connect('trade',_on_agent_trade)
-	squash.connect('new_agent',_on_new_agent)
-	squash.connect('update_score',_on_update_score)
-	for agent in $Agents.get_children():
-		if agent.type == "myco":
-			agent.draw_lines = true
+	LevelHelpersRef.connect_core_agent_signals(squash, _on_agent_trade, _on_new_agent, _on_update_score)
+	LevelHelpersRef.mark_myco_lines_dirty($Agents)
 	
 	return squash
 
@@ -269,29 +285,27 @@ func make_tree(pos):
 		"position": pos,
 		"prod_res": ["R"],
 		"start_res": null,
-		"texture": load("res://graphics/baobab.png")
+		"texture": TEX_TREE
 	}
 	var tree = plant_scene.instantiate()
 	tree.set_variables(tree_dict)
 	$Agents.add_child(tree)
-	tree.connect('trade',_on_agent_trade)
-	tree.connect('new_agent',_on_new_agent)
-	tree.connect('update_score',_on_update_score)
-	for agent in $Agents.get_children():
-		if agent.type == "myco":
-			agent.draw_lines = true
+	LevelHelpersRef.connect_core_agent_signals(tree, _on_agent_trade, _on_new_agent, _on_update_score)
+	LevelHelpersRef.mark_myco_lines_dirty($Agents)
 	return tree
 	
 	
 func make_bird():
+	call_deferred("_spawn_bird")
+
+
+func _spawn_bird():
 	var bird = null
 	if(Global.social_mode):
 		bird = tuktuk_scene.instantiate()
 	else:
 		bird = bird_scene.instantiate()
-	#bird.set_variables(cloud_dict)
 	$Animals.add_child(bird)
-	#cloud.connect('trade', _on_agent_trade)
 
 	
 func make_maize(pos):
@@ -311,17 +325,13 @@ func make_maize(pos):
 		"position": maize_position,
 		"prod_res": ["K"],
 		"start_res": null,
-		"texture": load("res://graphics/maize.png")
+		"texture": TEX_MAIZE
 	}
 	var maize = plant_scene.instantiate()
 	maize.set_variables(maize_dict)
 	$Agents.add_child(maize)
-	maize.connect('trade',_on_agent_trade)
-	maize.connect('new_agent',_on_new_agent)
-	maize.connect('update_score',_on_update_score)
-	for agent in $Agents.get_children():
-		if agent.type == "myco":
-			agent.draw_lines = true
+	LevelHelpersRef.connect_core_agent_signals(maize, _on_agent_trade, _on_new_agent, _on_update_score)
+	LevelHelpersRef.mark_myco_lines_dirty($Agents)
 	
 	return maize
 		
@@ -337,17 +347,13 @@ func make_bean(pos):
 		"position": bean_position,
 		"prod_res": ["N"],
 		"start_res": null,
-		"texture": load("res://graphics/bean.png")
+		"texture": TEX_BEAN
 	}
 	var bean = plant_scene.instantiate()
 	bean.set_variables(bean_dict)
 	$Agents.add_child(bean)
-	bean.connect('trade',_on_agent_trade)
-	bean.connect('new_agent',_on_new_agent)
-	bean.connect('update_score',_on_update_score)
-	for agent in $Agents.get_children():
-		if agent.type == "myco":
-			agent.draw_lines = true
+	LevelHelpersRef.connect_core_agent_signals(bean, _on_agent_trade, _on_new_agent, _on_update_score)
+	LevelHelpersRef.mark_myco_lines_dirty($Agents)
 	
 	return bean
 
@@ -362,12 +368,13 @@ func make_cloud(pos):
 		"position": pos,
 		"prod_res": ["R"],
 		"start_res": 20,
-		"texture": load("res://graphics/cloud.png")
+		"texture": TEX_CLOUD
 	}
 	var cloud = cloud_scene.instantiate()
 	cloud.set_variables(cloud_dict)
 	$Agents.add_child(cloud)
-	cloud.connect('trade',_on_agent_trade)
+	if cloud.has_signal("trade"):
+		cloud.connect("trade", _on_agent_trade)
 	
 	return cloud
 
@@ -384,18 +391,17 @@ func make_myco(pos):
 		"position": myco_position,
 		"prod_res": [null],
 		"start_res": null,
-		"texture": load("res://graphics/mushroom_32.png")
+		"texture": TEX_MYCO
 	}
 	
 	var myco = myco_scene.instantiate()
 	myco.set_variables(myco_dict)
-	myco.sprite_texture = load("res://graphics/mushroom_32.png")
+	myco.sprite_texture = TEX_MYCO
 	$Agents.add_child(myco)
 	
-	myco.connect('trade',_on_agent_trade)
-	
-	for agent in $Agents.get_children():
-		agent.new_buddies = true
+	if myco.has_signal("trade"):
+		myco.connect("trade", _on_agent_trade)
+	LevelHelpersRef.mark_all_buddies_dirty($Agents)
 	
 	return myco
 	
@@ -449,11 +455,7 @@ func _on_tutorial_timer_timeout() -> void:
 				if(child.type=="maize" and child.dead==false):
 					c_maize += 1
 			
-			var iter = 0
-			$BirdSound.play()
-			while iter < c_maize*3:
-				iter +=1
-				make_bird()
+			_spawn_predators(c_maize * 3, true)
 				
 			Global.stage = 4.1
 			
@@ -475,11 +477,7 @@ func _on_tutorial_timer_timeout() -> void:
 				if(child.type=="maize" and child.dead==false):
 					c_maize += 1
 			
-			var iter = 0
-			$BirdSound.play()
-			while iter < c_maize-1:
-				iter +=1
-				make_bird()
+			_spawn_predators(c_maize - 1, true)
 				
 			Global.stage = 5.1
 			
@@ -504,10 +502,7 @@ func _on_tutorial_timer_timeout() -> void:
 				if(child.type=="maize" and child.dead==false):
 					c_maize += 1
 			
-			var iter = 0
-			while iter < c_maize-1:
-				iter +=1
-				make_bird()
+			_spawn_predators(c_maize - 1)
 			Global.stage_inc+=1
 			if(Global.stage_inc>=Global.max_stage_inc):
 				Global.stage = 6.1
@@ -538,6 +533,26 @@ func _on_tutorial_timer_timeout() -> void:
 				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
 				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 				$"UI/RestartContainer".visible=true
+
+
+func _exit_tree() -> void:
+	_release_audio()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
+		_release_audio()
+
+
+func _release_audio() -> void:
+	LevelHelpersRef.stop_audio_players([
+		$BirdSound,
+		$BirdLong,
+		$CarSound,
+		$SquelchSound,
+		$TwinkleSound,
+		$BushSound
+	])
 		
 						
 			

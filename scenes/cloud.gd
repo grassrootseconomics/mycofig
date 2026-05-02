@@ -96,7 +96,6 @@ func logistics():
 	if logistics_ready:
 
 		var children =  $"../../Agents".get_children()
-		randomize()
 		children.shuffle()
 		for child in children:
 			if(assets[prod_res[0]] - needs[prod_res[0]]  >= 1):
@@ -179,13 +178,10 @@ func _physics_process(delta):
 			queue_free()
 			return
 	
-		var tween = get_tree().create_tween()
-		tween.tween_property(self, "position", get_global_mouse_position(), delay * delta)
-		tween.set_parallel(true)
+		var t = min(1.0, delay * delta)
+		position = position.lerp(get_global_mouse_position(), t)
 		for bar in bars:
-			#bars[bar].position = (position + bars[bar].position)
-			tween.tween_property(bars[bar], "position", (position + bars_offset[bar]), 0)
-			tween.set_parallel(true)
+			bars[bar].position = position + bars_offset[bar]
 	
 func _input(event):
 	if false:
@@ -245,7 +241,6 @@ func _on_dry_timer_timeout() -> void:
 		tween.tween_property(sprite, "modulate:a", 0.2, 0.5)
 		#tween.set_parallel(true)
 		#$Sprite2D.modulate.a = 0.2
-		print("not raining on timer: " , wait_for_rain)
 		
 	else:
 		wait_for_rain = random.randi_range(1, 50)
@@ -254,5 +249,4 @@ func _on_dry_timer_timeout() -> void:
 		tween.tween_property(sprite, "modulate:a", 1, 0.5)
 		#tween.set_parallel(true)
 		#$Sprite2D.modulate.a = 1
-		print("raining on timer: ", wait_for_rain)
 	$DryTimer.set_wait_time(wait_for_rain)

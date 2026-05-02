@@ -290,7 +290,6 @@ func logistics():
 		
 		if excess_res != null and needed_res != null:
 			#var children =  $"../../Agents".get_children()
-			randomize()
 			trade_buddies.shuffle()
 			
 			if debug_mode:
@@ -420,7 +419,6 @@ func evaporate():
 
 	if assets["R"] > 0: #evaporate
 		var children =  $"../../Agents".get_children()
-		randomize()
 		children.shuffle()
 		for child in children:
 			#print(children)
@@ -493,13 +491,10 @@ func _physics_process(delta):
 			child.new_buddies = true
 			
 		
-		var tween = get_tree().create_tween()
-		tween.tween_property(self, "position", get_global_mouse_position(), delay * delta)
-		tween.set_parallel(true)
+		var t = min(1.0, delay * delta)
+		position = position.lerp(get_global_mouse_position(), t)
 		for bar in bars:
-			#bars[bar].position = (position + bars[bar].position)
-			tween.tween_property(bars[bar], "position", (position + bars_offset[bar]), 0)
-			tween.set_parallel(true)
+			bars[bar].position = position + bars_offset[bar]
 	
 	if(caught_by != null):
 		if(caught_by is Tuktuk):
@@ -544,10 +539,7 @@ func _process(delta: float) -> void:
 					
 			
 				for bar in bars:
-					var tween = get_tree().create_tween()
-					#bars[bar].position = (position + bars[bar].position)
-					tween.tween_property(bars[bar], "position", (position + bars_offset[bar]), 0)
-					#tween.set_parallel(true)
+					bars[bar].position = position + bars_offset[bar]
 				#if draw_box == true:
 				#	draw_selected_box()
 				draw_box = true
@@ -680,13 +672,9 @@ func _on_growth_timer_timeout() -> void:
 	var newScale = $Sprite2D.scale
 	#print(name, " assets: ", assets)
 	if all_in == true:	
-		
-		
-		
 		if $Sprite2D.scale.x < max_scale and $Sprite2D.scale.y < max_scale:
-			var tween = get_tree().create_tween()
 			newScale = $Sprite2D.scale * (1+scale_step_up)
-			
+		
 		var old_modulate = modulate
 		var new_alpha = modulate.a+alpha_step_up
 		if new_alpha > high_alpha:
@@ -694,11 +682,8 @@ func _on_growth_timer_timeout() -> void:
 		var new_color = Color(old_modulate,new_alpha)
 		self.modulate= new_color
 		
-		
 		Global.score += 400
 		emit_signal("update_score")
-				
-		
 		
 		#print(name, " ", $Sprite2D.scale)
 		for res in assets:
@@ -707,9 +692,7 @@ func _on_growth_timer_timeout() -> void:
 			bars[res].value = assets[res]
 			#else:
 			#	evaporate()
-			
 		
-			
 	else:
 		#if $Sprite2D.scale.x > 0.5 and $Sprite2D.scale.y > 0.5:
 			

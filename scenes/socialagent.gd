@@ -64,7 +64,6 @@ func logistics():
 		
 		if excess_res != null and needed_res != null:
 			#var children =  $"../../Agents".get_children()
-			randomize()
 			trade_buddies.shuffle()
 			
 			if debug_mode:
@@ -190,7 +189,6 @@ func _on_growth_timer_timeout() -> void:
 		
 		
 		if $Sprite2D.scale.x < max_scale and $Sprite2D.scale.y < max_scale:
-			var tween = get_tree().create_tween()
 			newScale = $Sprite2D.scale * (1+scale_step_up)
 			
 		var old_modulate = modulate
@@ -267,7 +265,6 @@ func _on_dry_timer_timeout() -> void:
 			tween.tween_property(sprite, "modulate:a", 0.2, 0.5)
 			#tween.set_parallel(true)
 			#$Sprite2D.modulate.a = 0.2
-			print("not raining on timer: " , wait_for_rain)
 			
 		else:
 			wait_for_rain = random.randi_range(1, 50)
@@ -276,5 +273,4 @@ func _on_dry_timer_timeout() -> void:
 			tween.tween_property(sprite, "modulate:a", 1, 0.5)
 			#tween.set_parallel(true)
 			#$Sprite2D.modulate.a = 1
-			print("raining on timer: ", wait_for_rain)
 		$DryTimer.set_wait_time(wait_for_rain)

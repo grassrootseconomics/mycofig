@@ -1,7 +1,7 @@
 [gd_scene load_steps=4 format=3 uid="uid://de0tglxxwmbi4"]
 
 [ext_resource type="Script" path="res://scenes/meteor.gd" id="1_46igg"]
-[ext_resource type="Texture2D" uid="uid://unvng6qnw25h" path="res://graphics/city.png" id="1_cq6kw"]
+[ext_resource type="Texture2D" uid="uid://cq1csbscp8tek" path="res://graphics/bank.png" id="1_cq6kw"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_yl0lh"]
 size = Vector2(63, 20)

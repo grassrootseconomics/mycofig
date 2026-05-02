@@ -216,8 +216,7 @@ func _process(delta: float) -> void:
 
 
 func _on_body_entered(body: Node2D) -> void:
-	print(body_entered)
-	#print(body)
+	collision.emit(body)
 	
 	
 func _physics_process(delta):

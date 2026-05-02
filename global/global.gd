@@ -5,7 +5,9 @@ var score := 0
 var move_rate = 6
 var movement_speed = 200
 var social_buddy_radius = 200
+var num_connectors = 4
 var active_agent = null
+var is_mobile_platform = false
 
 var is_dragging = false
 var bars_on = true
@@ -139,6 +141,8 @@ var birds = {
 }
 
 var rand_quarry = ["maize","bean","squash"]
+# Lightweight runtime cap for mobile sessions.
+var max_predators_per_wave_mobile = 6
 #var rand_quarry_social = ["maize","bean","squash"]
 #var rand_quarry = ["bean"]
 
@@ -240,3 +244,29 @@ var stage_colors = {
 	7: Color(Color.DARK_ORANGE,0.8),
 	8: Color(Color.DARK_SEA_GREEN,0.8),
 	}
+
+
+func _ready() -> void:
+	randomize()
+	is_mobile_platform = OS.has_feature("mobile") or OS.get_name() == "Android" or OS.get_name() == "iOS"
+	if is_mobile_platform:
+		# Smaller radius reduces partner scans and line churn on phones.
+		social_buddy_radius = 170
+
+
+func get_rank_threshold(score_value: int) -> int:
+	var keys: Array = ranks.keys()
+	keys.sort()
+	var current: int = int(keys[0])
+	for key in keys:
+		var threshold := int(key)
+		if score_value >= threshold:
+			current = threshold
+	return current
+
+
+func get_predator_spawn_count(score_level: int) -> int:
+	var spawn_count = int(birds.get(score_level, 0))
+	if is_mobile_platform:
+		spawn_count = min(spawn_count, max_predators_per_wave_mobile)
+	return max(spawn_count, 0)

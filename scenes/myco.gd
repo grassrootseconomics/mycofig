@@ -24,15 +24,12 @@ func set_variables(a_dict) -> void:
 	last_position = position
 	sprite_texture = a_dict.get("texture")
 	sprite = $Sprite2D
-	sprite_myco_texture = load("res://graphics/rhizomorphic.png")
-	sprite = $Sprite2D
 	sprite_myco = $MycoSprite
 	sprite_myco.scale *= min_scale
 	$MycoSprite.modulate.a = 0.3
 	sprite.z_index = 9
 	$MycoSprite.z_index = -1
 	buddy_radius = $MycoSprite.get_rect().size[0]/2*min_scale
-	print("start radius: ", buddy_radius)
 	$Sprite2D.texture = sprite_texture
 	$GrowthTimer.wait_time = Global.growth_time
 	$ActionTimer.wait_time = Global.action_time
@@ -120,7 +117,6 @@ func logistics():
 		
 		if excess_res != null and needed_res != null:
 			#var children =  $"../../Agents".get_children()
-			randomize()
 			trade_buddies.shuffle()
 			
 			if debug_mode:

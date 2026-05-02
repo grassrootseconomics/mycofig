@@ -8,10 +8,8 @@ func _ready():
 		PPMode = "People"
 	$CenterContainer/VBoxContainer/Label2.text = $CenterContainer/VBoxContainer/Label2.text + str(Global.score)
 	$CenterContainer/VBoxContainer/ModeLabel.text = PPMode + " " + Global.mode+" mode"
-	var rank_str = Global.ranks[0]
-	for ranks in Global.ranks:
-		if(Global.score > ranks):
-			rank_str = Global.ranks[ranks]
+	var rank_key := Global.get_rank_threshold(Global.score)
+	var rank_str = Global.ranks[rank_key]
 	
 	if(rank_str=="Grassroots Economist"):
 		$CenterContainer/VBoxContainer/ModeLabel.text = "You WON! "+ PPMode+ " " +Global.mode+" mode"

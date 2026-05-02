@@ -10,11 +10,16 @@ var last_agent = null
 
 var next_agent = null
 var resContainer = null
+var drag_preview_sprite: Sprite2D = null
+var inventory_spawn_rng := RandomNumberGenerator.new()
+const AUTO_SPAWN_ATTEMPTS := 96
+const AUTO_SPAWN_SWEEP_STEPS := 48
 
 func _ready() -> void:
 	#$PalletContainer2/HBoxContainer/ActiveTexture.texture = Global.active_agent.sprite_texture
 	#resContainer = $MarginContainer/HBoxContainer/ResVBoxContainer
-	pass
+	inventory_spawn_rng.randomize()
+	_ensure_drag_preview()
 
 var clicked_slider = false
 var mouseOverMyco = false
@@ -165,74 +170,206 @@ func _on_h_slider_drag_ended(value_changed: bool) -> void:
 
 
 
+func _ensure_drag_preview() -> void:
+	if is_instance_valid(drag_preview_sprite):
+		return
+	drag_preview_sprite = Sprite2D.new()
+	drag_preview_sprite.visible = false
+	drag_preview_sprite.centered = true
+	drag_preview_sprite.z_as_relative = false
+	drag_preview_sprite.z_index = 200
+	drag_preview_sprite.modulate = Color(1,1,1,0.85)
+	add_child(drag_preview_sprite)
+
+
+func _get_inventory_agent_at(mouse_pos: Vector2) -> String:
+	for agent_name in inventory_sprites:
+		var icon = inventory_sprites[agent_name]
+		if not is_instance_valid(icon):
+			continue
+		if not icon.visible:
+			continue
+		if icon.get_global_rect().has_point(mouse_pos):
+			return agent_name
+	return ""
+
+
+func _start_inventory_drag(agent_name: String, mouse_pos: Vector2) -> void:
+	_ensure_drag_preview()
+	var icon = inventory_sprites.get(agent_name)
+	if is_instance_valid(icon):
+		drag_preview_sprite.texture = icon.texture
+	drag_preview_sprite.global_position = mouse_pos
+	drag_preview_sprite.visible = true
+
+
+func _update_inventory_drag(mouse_pos: Vector2) -> void:
+	if is_instance_valid(drag_preview_sprite) and drag_preview_sprite.visible:
+		drag_preview_sprite.global_position = mouse_pos
+
+
+func _end_inventory_drag() -> void:
+	if is_instance_valid(drag_preview_sprite):
+		drag_preview_sprite.visible = false
+		drag_preview_sprite.texture = null
+
+
+func _get_agents_root() -> Node:
+	return get_node_or_null("../Agents")
+
+
+func _get_agent_edge_radius(agent: Node) -> float:
+	var radius := 24.0
+	var sprite_node = agent.get("sprite")
+	if is_instance_valid(sprite_node) and sprite_node.has_method("get_rect"):
+		var rect = sprite_node.get_rect()
+		var sx = abs(sprite_node.scale.x)
+		var sy = abs(sprite_node.scale.y)
+		radius = max(rect.size.x * sx, rect.size.y * sy) * 0.5
+	elif agent.has_node("Sprite2D"):
+		var sprite_child = agent.get_node("Sprite2D")
+		if is_instance_valid(sprite_child) and sprite_child.has_method("get_rect"):
+			var child_rect = sprite_child.get_rect()
+			var csx = abs(sprite_child.scale.x)
+			var csy = abs(sprite_child.scale.y)
+			radius = max(child_rect.size.x * csx, child_rect.size.y * csy) * 0.5
+	return max(radius, 16.0)
+
+
+func _get_anchor_reach_radius(anchor: Node) -> float:
+	var reach := 0.0
+	var reach_value = anchor.get("buddy_radius")
+	if typeof(reach_value) == TYPE_FLOAT or typeof(reach_value) == TYPE_INT:
+		reach = float(reach_value)
+	if reach <= 0.0:
+		reach = _get_agent_edge_radius(anchor) + 24.0
+	return max(reach, 24.0)
+
+
+func _get_reach_anchors(agents_root: Node) -> Array:
+	var anchors: Array = []
+	if not is_instance_valid(agents_root):
+		return anchors
+	for agent in agents_root.get_children():
+		if not is_instance_valid(agent):
+			continue
+		if agent.get("dead") == true:
+			continue
+		if agent.get("type") == "myco":
+			anchors.append(agent)
+	return anchors
+
+
+func _is_valid_auto_spawn_position(pos: Vector2, agents_root: Node, anchor: Node = null) -> bool:
+	var view = get_viewport().get_visible_rect()
+	if not view.has_point(pos):
+		return false
+	if $MarginContainer.get_global_rect().has_point(pos):
+		return false
+	if is_instance_valid(anchor):
+		var reach = _get_anchor_reach_radius(anchor)
+		var distance_to_anchor = anchor.global_position.distance_to(pos)
+		if abs(distance_to_anchor - reach) > 1.5:
+			return false
+	if is_instance_valid(agents_root):
+		for agent in agents_root.get_children():
+			if not is_instance_valid(agent):
+				continue
+			if agent.get("dead") == true:
+				continue
+			var min_dist = _get_agent_edge_radius(agent) + 6.0
+			if agent.global_position.distance_to(pos) < min_dist:
+				return false
+	return true
+
+
+func _get_auto_spawn_target() -> Dictionary:
+	var target = {
+		"pos": Vector2.ZERO,
+		"anchor": null
+	}
+	var agents_root = _get_agents_root()
+	var anchors = _get_reach_anchors(agents_root)
+	var view = get_viewport().get_visible_rect()
+	if anchors.is_empty():
+		target["pos"] = Vector2(view.size.x * 0.5, view.size.y * 0.35)
+		return target
+	for _attempt in range(AUTO_SPAWN_ATTEMPTS):
+		var anchor = anchors[inventory_spawn_rng.randi_range(0, anchors.size() - 1)]
+		var dist = _get_anchor_reach_radius(anchor)
+		var angle = inventory_spawn_rng.randf_range(0.0, TAU)
+		var candidate = anchor.global_position + Vector2.RIGHT.rotated(angle) * dist
+		if _is_valid_auto_spawn_position(candidate, agents_root, anchor):
+			target["pos"] = candidate
+			target["anchor"] = anchor
+			return target
+	for anchor in anchors:
+		var dist = _get_anchor_reach_radius(anchor)
+		var start_angle = inventory_spawn_rng.randf_range(0.0, TAU)
+		for idx in range(AUTO_SPAWN_SWEEP_STEPS):
+			var angle = start_angle + (TAU * float(idx) / float(AUTO_SPAWN_SWEEP_STEPS))
+			var candidate = anchor.global_position + Vector2.RIGHT.rotated(angle) * dist
+			if _is_valid_auto_spawn_position(candidate, agents_root, anchor):
+				target["pos"] = candidate
+				target["anchor"] = anchor
+				return target
+	var fallback_anchor = anchors[inventory_spawn_rng.randi_range(0, anchors.size() - 1)]
+	var toward_center = view.get_center() - fallback_anchor.global_position
+	if toward_center.length() < 0.001:
+		toward_center = Vector2.RIGHT
+	var fallback_pos = fallback_anchor.global_position + toward_center.normalized() * _get_anchor_reach_radius(fallback_anchor)
+	if _is_valid_auto_spawn_position(fallback_pos, agents_root, fallback_anchor):
+		target["pos"] = fallback_pos
+		target["anchor"] = fallback_anchor
+		return target
+	target["pos"] = Vector2(view.size.x * 0.5, view.size.y * 0.35)
+	return target
+
+
+func _drop_inventory_agent(drop_pos: Vector2) -> void:
+	if next_agent == null:
+		return
+	if Global.inventory[next_agent] <= 0:
+		return
+	var target_pos = drop_pos
+	var spawn_anchor = null
+	var view = get_viewport().get_visible_rect()
+	if $MarginContainer.get_global_rect().has_point(drop_pos) or not view.has_point(drop_pos):
+		var auto_target = _get_auto_spawn_target()
+		target_pos = auto_target["pos"]
+		spawn_anchor = auto_target["anchor"]
+	var new_agent_dict = {
+		"name" : next_agent,
+		"pos": target_pos
+	}
+	if is_instance_valid(spawn_anchor):
+		new_agent_dict["spawn_anchor"] = spawn_anchor
+	emit_signal("new_agent", new_agent_dict)
+	Global.inventory[next_agent] -=1
+	inventory_labels[next_agent].text = str(Global.inventory[next_agent])
+	if (Global.inventory[next_agent] <1):
+		inventory_sprites[next_agent].modulate.a = 0.5
+	else:
+		inventory_sprites[next_agent].modulate.a = 1
+
+
 func _input(event):
-	if event is InputEventMouseButton:
-		if mouseOverMyco == true:
-			#print("Clicked On myco")
-			next_agent = "myco"
-		elif mouseOverMaize == true:
-			#print("Clicked On maize")
-			next_agent = "maize"
-		elif mouseOverTree == true:
-			#print("Clicked On tree")
-			next_agent = "tree"
-		elif mouseOverBean == true:
-			#print("Clicked On Bean")
-			next_agent = "bean"
-		elif mouseOverSquash == true:
-			#print("Clicked On Squash")
-			next_agent = "squash"
-		
-		#if(next_agent!=null):
-			#inventory_sprites[next_agent].modulate.a = 0.5
-			
-		if event.pressed == false and next_agent != null:
-			#var space = get_world_2d().direct_space_state
-			if(Global.inventory[next_agent] >0 ):
-				var hit = false
-				if $MarginContainer.get_rect().has_point(event.position):
-					hit = true
-					#print("hit something-pallet: ", $PalletContainer.get_rect(), " point: ", event.position)
-				
-				"""
-				for agent in $"../Agents".get_children():
-					var recto = agent.sprite.get_rect()
-					var posr = recto.position+agent.global_position
-					var rects = Rect2(posr,recto.size) 
-					
-					#var newRect = rects
-					#rects["P"] += agent.sprite.global_position
-					#print("testing collision: ", agent.name, " rect:", rects)
-					
-					if rects.has_point(event.position):
-					#if agent.sprite.get_rect().has_point(event.position):
-						hit = true
-						print("hit something-agent: ", agent.name)
-				"""		
-			# Check if there is a collision at the mouse position
-				#if space.intersect_point(event.position, 1):
-				#	print("hit something")
-				#else:
-				#	print("no hit")
-				if( hit == false):
-					var new_agent_dict = {
-						"name" : next_agent,
-						"pos": event.position
-					}
-					#print("()()clicked sending signal: ", new_agent_dict)
-					emit_signal("new_agent", new_agent_dict)
-					Global.inventory[next_agent] -=1
-					inventory_labels[next_agent].text = str(Global.inventory[next_agent])
-					inventory_sprites[next_agent].modulate.a = 1
-					if (Global.inventory[next_agent] <1):
-						inventory_sprites[next_agent].modulate.a =0.5
-					
-					next_agent = null
-					#make_squash(event.position)		
+	if event is InputEventMouseMotion:
+		if next_agent != null:
+			_update_inventory_drag(event.position)
+		return
 
-
-			
-		
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			var selected = _get_inventory_agent_at(event.position)
+			if selected != "" and Global.inventory[selected] > 0:
+				next_agent = selected
+				_start_inventory_drag(selected, event.position)
+		else:
+			if next_agent != null:
+				_drop_inventory_agent(event.position)
+			next_agent = null
+			_end_inventory_drag()
 
 
 func _on_choose_myco_mouse_entered() -> void:
@@ -285,7 +422,6 @@ func _on_button_pressed() -> void:
 
 func _on_pause_button_pressed() -> void:
 	var status = get_tree().paused
-	print("pause status:", status)
 	get_tree().paused = not status
 	if(status == true):
 		$MarginCMarginContainer2ontainer/HBoxContainer/PauseButton.text = "Pause"

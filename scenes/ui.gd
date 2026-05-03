@@ -3,6 +3,7 @@ var time_elapsed := 0
 
 #signal sliderChanged(info_dict)
 signal new_agent(agent_dict)
+signal inventory_drag_preview(agent_name, world_pos, active)
 
 var sliders = []
 
@@ -230,6 +231,25 @@ func _get_world_rect() -> Rect2:
 	return Global.get_world_rect(self)
 
 
+func _emit_inventory_drag_preview(agent_name: String, screen_pos: Vector2, active: bool) -> void:
+	if not active:
+		emit_signal("inventory_drag_preview", agent_name, Vector2.ZERO, false)
+		return
+	var view = get_viewport().get_visible_rect()
+	if not view.has_point(screen_pos):
+		emit_signal("inventory_drag_preview", agent_name, Vector2.ZERO, false)
+		return
+	if $MarginContainer.get_global_rect().has_point(screen_pos):
+		emit_signal("inventory_drag_preview", agent_name, Vector2.ZERO, false)
+		return
+	var world_pos = _screen_to_world(screen_pos)
+	var world_rect = _get_world_rect()
+	if not world_rect.has_point(world_pos):
+		emit_signal("inventory_drag_preview", agent_name, Vector2.ZERO, false)
+		return
+	emit_signal("inventory_drag_preview", agent_name, world_pos, true)
+
+
 func _get_agent_edge_radius(agent: Node) -> float:
 	var radius := 24.0
 	var sprite_node = agent.get("sprite")
@@ -371,6 +391,7 @@ func _input(event):
 	if event is InputEventMouseMotion:
 		if next_agent != null:
 			_update_inventory_drag(event.position)
+			_emit_inventory_drag_preview(next_agent, event.position, true)
 		return
 
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
@@ -379,9 +400,11 @@ func _input(event):
 			if selected != "" and Global.inventory[selected] > 0:
 				next_agent = selected
 				_start_inventory_drag(selected, event.position)
+				_emit_inventory_drag_preview(selected, event.position, true)
 		else:
 			if next_agent != null:
 				_drop_inventory_agent(event.position)
+				_emit_inventory_drag_preview(next_agent, event.position, false)
 			next_agent = null
 			_end_inventory_drag()
 

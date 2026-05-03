@@ -32,6 +32,7 @@ var num_squash = 1
 
 var is_dragging = false
 var delay = 10
+var inventory_preview_lines: Array = []
 
 
 func _get_world_foundation() -> Node:
@@ -56,6 +57,7 @@ func _ready():
 	#var uix = ui_scene.instantiate()
 	#uix.connect('new_agent',_on_new_agent)
 	$UI.connect('new_agent',_on_new_agent)
+	$UI.connect("inventory_drag_preview", _on_inventory_drag_preview)
 	$UI.setup()
 	Global.prevent_auto_select = false
 	DisplayServer.window_set_title("People Gardening")
@@ -141,6 +143,10 @@ func _input(event):
 
 func _process(_delta: float) -> void:
 	LevelHelpersRef.refresh_trade_line_visuals($Lines)
+
+
+func _on_inventory_drag_preview(agent_name: String, world_pos: Vector2, active: bool) -> void:
+	LevelHelpersRef.update_inventory_connection_preview(self, $Agents, $Lines, inventory_preview_lines, agent_name, world_pos, active)
 				
 				
 				
@@ -567,6 +573,7 @@ func _notification(what: int) -> void:
 
 
 func _release_audio() -> void:
+	LevelHelpersRef.clear_inventory_connection_preview_lines(inventory_preview_lines)
 	LevelHelpersRef.stop_audio_players([
 		$BirdSound,
 		$BirdLong,

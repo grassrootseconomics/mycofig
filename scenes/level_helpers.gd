@@ -440,6 +440,119 @@ static func refresh_trade_line_visuals(lines_root: Node) -> void:
 			line.modulate = target_color
 
 
+static func clear_inventory_connection_preview_lines(preview_lines: Array) -> void:
+	for line in preview_lines:
+		if is_instance_valid(line):
+			line.queue_free()
+	preview_lines.clear()
+
+
+static func _is_preview_candidate(agent: Node) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	if bool(agent.get("dead")):
+		return false
+	return true
+
+
+static func _get_preview_myco_radius(agents_root: Node) -> float:
+	if not is_instance_valid(agents_root):
+		return 200.0
+	for agent in agents_root.get_children():
+		if not _is_preview_candidate(agent):
+			continue
+		if str(agent.get("type")) != "myco":
+			continue
+		var reach = agent.get("buddy_radius")
+		if typeof(reach) == TYPE_FLOAT or typeof(reach) == TYPE_INT:
+			return max(float(reach), 24.0)
+	return 200.0
+
+
+static func _resolve_preview_anchor(level_root: Node, world_pos: Vector2) -> Variant:
+	if not is_instance_valid(level_root):
+		return world_pos
+	var world = _get_world_foundation(level_root)
+	if not is_instance_valid(world):
+		return world_pos
+	if world.has_method("world_to_tile") and world.has_method("tile_to_world_center"):
+		var coord = world.world_to_tile(world_pos)
+		if world.has_method("in_bounds") and not world.in_bounds(coord):
+			return null
+		return world.tile_to_world_center(coord)
+	return world_pos
+
+
+static func _add_preview_l_pair(lines_root: Node, preview_lines: Array, from_world: Vector2, to_world: Vector2, color: Color) -> void:
+	if not is_instance_valid(lines_root):
+		return
+	var new_pos1 = Vector2(to_world.x, from_world.y)
+	var new_pos2 = Vector2(from_world.x, to_world.y)
+
+	var line1 = Line2D.new()
+	line1.width = 2
+	line1.z_as_relative = false
+	line1.antialiased = true
+	line1.modulate = color
+	line1.add_point(from_world)
+	line1.add_point(new_pos1)
+	line1.add_point(to_world)
+	lines_root.add_child(line1)
+	preview_lines.append(line1)
+
+	var line2 = Line2D.new()
+	line2.width = 2
+	line2.z_as_relative = false
+	line2.antialiased = true
+	line2.modulate = color
+	line2.add_point(from_world)
+	line2.add_point(new_pos2)
+	line2.add_point(to_world)
+	lines_root.add_child(line2)
+	preview_lines.append(line2)
+
+
+static func update_inventory_connection_preview(level_root: Node, agents_root: Node, lines_root: Node, preview_lines: Array, dragged_agent_type: String, world_pos: Vector2, active: bool) -> void:
+	clear_inventory_connection_preview_lines(preview_lines)
+	if not active:
+		return
+	if not is_instance_valid(agents_root) or not is_instance_valid(lines_root):
+		return
+
+	var anchor_variant = _resolve_preview_anchor(level_root, world_pos)
+	if typeof(anchor_variant) != TYPE_VECTOR2:
+		return
+	var anchor_world: Vector2 = anchor_variant
+
+	var preview_color = Color(Color.ANTIQUE_WHITE, 0.3)
+	if Global.social_mode:
+		preview_color = Color(Color.SADDLE_BROWN, 0.3)
+
+	var safe_type = str(dragged_agent_type)
+	var preview_is_myco = safe_type == "myco"
+	var myco_radius = _get_preview_myco_radius(agents_root)
+	for agent in agents_root.get_children():
+		if not _is_preview_candidate(agent):
+			continue
+		var agent_type = str(agent.get("type"))
+		if preview_is_myco:
+			if agent_type == "myco" or agent_type == "cloud":
+				continue
+			if anchor_world.distance_to(agent.global_position) > myco_radius:
+				continue
+			_add_preview_l_pair(lines_root, preview_lines, anchor_world, agent.global_position, preview_color)
+		else:
+			if agent_type != "myco":
+				continue
+			var reach = agent.get("buddy_radius")
+			var buddy_radius = myco_radius
+			if typeof(reach) == TYPE_FLOAT or typeof(reach) == TYPE_INT:
+				buddy_radius = max(float(reach), 24.0)
+			if anchor_world.distance_to(agent.global_position) > buddy_radius:
+				continue
+			_add_preview_l_pair(lines_root, preview_lines, agent.global_position, anchor_world, preview_color)
+
+
 static func stop_audio_players(players: Array) -> void:
 	for player in players:
 		if is_instance_valid(player):

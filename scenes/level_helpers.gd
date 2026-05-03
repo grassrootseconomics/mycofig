@@ -425,12 +425,17 @@ static func refresh_trade_line_visuals(lines_root: Node) -> void:
 		if not (line is Line2D):
 			continue
 		var base_color = line.modulate
-		var base_color_meta = line.get_meta("base_color", null)
-		if typeof(base_color_meta) == TYPE_COLOR:
-			base_color = base_color_meta
+		if line.has_meta("base_color"):
+			var base_color_meta = line.get_meta("base_color")
+			if typeof(base_color_meta) == TYPE_COLOR:
+				base_color = base_color_meta
 
-		var endpoint_a = line.get_meta("endpoint_a", null)
-		var endpoint_b = line.get_meta("endpoint_b", null)
+		var endpoint_a = null
+		if line.has_meta("endpoint_a"):
+			endpoint_a = line.get_meta("endpoint_a")
+		var endpoint_b = null
+		if line.has_meta("endpoint_b"):
+			endpoint_b = line.get_meta("endpoint_b")
 		var locked = _is_agent_trade_locked(endpoint_a) or _is_agent_trade_locked(endpoint_b)
 
 		var target_color = base_color

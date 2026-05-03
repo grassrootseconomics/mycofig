@@ -43,10 +43,12 @@ func set_variables(a_dict) -> void:
 		bars[bar].max_value = int(needs[bar]*1.2)
 		bars[bar].value = assets[bar]
 		bars_offset[bar] = bars[bar].position
-		bars[bar].position = (position + bars[bar].position)
 		bars[bar].tint_progress = Global.asset_colors[bar]
 		
 	bar_canvas = $CanvasLayer
+	if Global.bars_on == false:
+		bar_canvas.visible = false
+	_update_bar_positions()
 	
 # Search for things to trade with in a radius
 func generate_buddies() -> void:
@@ -86,6 +88,9 @@ func logistics():
 			
 		#determine if there are extra resources (offers)
 		#find excess stock
+		for res in assets:
+			current_excess[res] = -999
+			current_needs[res] = -999
 		for res in assets:
 				
 				 

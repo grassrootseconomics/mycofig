@@ -9,6 +9,10 @@ const STAGE_DRY_COMPACTED := 0
 const STAGE_RECOVERING := 1
 const STAGE_SEMI_HEALTHY := 2
 const STAGE_HEALTHY := 3
+const CAM_LEFT_ACTION := "cam_left"
+const CAM_RIGHT_ACTION := "cam_right"
+const CAM_UP_ACTION := "cam_up"
+const CAM_DOWN_ACTION := "cam_down"
 
 @export var columns: int = 48
 @export var rows: int = 27
@@ -16,10 +20,17 @@ const STAGE_HEALTHY := 3
 @export var mode_id: String = ""
 @export var scenario_id: String = ""
 @export var camera_pan_speed: float = 900.0
+@export var follow_response_speed: float = 10.0
+@export var follow_deadzone_ratio: Vector2 = Vector2(0.28, 0.22)
+@export var enable_pan_gesture: bool = true
+@export var pan_gesture_scale: float = 1.0
 @export var drag_pan_button: MouseButton = MOUSE_BUTTON_RIGHT
+@export var allow_left_drag_pan: bool = true
 @export var enable_touch_pan: bool = true
 @export var debug_overlay_enabled: bool = false
 @export var debug_edit_enabled: bool = false
+@export var drag_hint_available_color: Color = Color(0.20, 0.95, 0.35, 0.95)
+@export var drag_hint_blocked_color: Color = Color(0.95, 0.20, 0.20, 0.95)
 
 @onready var camera: Camera2D = $Camera2D
 @onready var debug_label: Label = $DebugCanvas/DebugLabel
@@ -28,14 +39,19 @@ var _tiles: Array = []
 var _baseline_stage: PackedInt32Array = PackedInt32Array()
 var _desktop_dragging := false
 var _desktop_drag_last := Vector2.ZERO
+var _desktop_drag_button: MouseButton = MOUSE_BUTTON_NONE
 var _touch_drag_id: int = -1
 var _touch_drag_last := Vector2.ZERO
+var _drag_hint_visible := false
+var _drag_hint_coord := Vector2i(-1, -1)
+var _drag_hint_available := true
 
 
 func _ready() -> void:
 	_initialize_tile_data()
 	_build_baseline_pattern()
 	reset_to_baseline()
+	_ensure_camera_pan_actions()
 	_setup_camera()
 	if get_viewport().has_signal("size_changed"):
 		get_viewport().size_changed.connect(_on_viewport_size_changed)
@@ -139,6 +155,26 @@ func reset_to_baseline() -> void:
 	_update_debug_label()
 
 
+func set_drag_tile_hint(coord: Vector2i, available: bool) -> void:
+	if not in_bounds(coord):
+		clear_drag_tile_hint()
+		return
+	if _drag_hint_visible and _drag_hint_coord == coord and _drag_hint_available == available:
+		return
+	_drag_hint_visible = true
+	_drag_hint_coord = coord
+	_drag_hint_available = available
+	queue_redraw()
+
+
+func clear_drag_tile_hint() -> void:
+	if not _drag_hint_visible:
+		return
+	_drag_hint_visible = false
+	_drag_hint_coord = Vector2i(-1, -1)
+	queue_redraw()
+
+
 func _draw() -> void:
 	for y in range(rows):
 		for x in range(columns):
@@ -154,6 +190,11 @@ func _draw() -> void:
 				if font != null:
 					draw_string(font, rect.position + Vector2(4, 13), str(coord.x, ",", coord.y), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0, 0, 0, 0.9))
 					draw_string(font, rect.position + Vector2(4, 26), str("S", stage), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0, 0, 0, 0.9))
+	if _drag_hint_visible and in_bounds(_drag_hint_coord):
+		var hint_rect = Rect2(Vector2(_drag_hint_coord.x * tile_size, _drag_hint_coord.y * tile_size), Vector2(tile_size, tile_size))
+		var hint_color = drag_hint_available_color if _drag_hint_available else drag_hint_blocked_color
+		draw_rect(hint_rect, Color(hint_color, 0.16), true)
+		draw_rect(hint_rect, hint_color, false, 3.0, true)
 	if debug_overlay_enabled:
 		draw_rect(Rect2(Vector2.ZERO, get_world_rect().size), Color(1, 1, 1, 0.9), false, 3.0, true)
 
@@ -170,9 +211,17 @@ func _unhandled_input(event: InputEvent) -> void:
 			debug_edit_enabled = not debug_edit_enabled
 			_update_debug_label()
 
-	if event is InputEventMouseButton and event.button_index == drag_pan_button:
-		_desktop_dragging = event.pressed
-		_desktop_drag_last = event.position
+	if event is InputEventMouseButton:
+		if event.button_index == drag_pan_button:
+			if event.pressed:
+				_try_start_desktop_pan(event.button_index, event.position)
+			else:
+				_stop_desktop_pan(event.button_index)
+		elif allow_left_drag_pan and drag_pan_button != MOUSE_BUTTON_LEFT and event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				_try_start_desktop_pan(event.button_index, event.position)
+			else:
+				_stop_desktop_pan(event.button_index)
 
 	if debug_edit_enabled and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		if not _is_pointer_over_ui(event.position):
@@ -189,6 +238,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			var delta = event.position - _touch_drag_last
 			_touch_drag_last = event.position
 			_pan_camera_by_screen_delta(delta)
+	if enable_pan_gesture and event is InputEventPanGesture and not Global.is_dragging:
+		var pointer_pos = get_viewport().get_mouse_position()
+		if not _is_pointer_over_ui(pointer_pos):
+			_pan_camera_by_screen_delta(event.delta * pan_gesture_scale)
 
 	if event is InputEventMouseMotion:
 		if _desktop_dragging and not Global.is_dragging:
@@ -200,8 +253,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
-	if not Global.is_dragging:
-		var pan_dir = Input.get_vector("left", "right", "up", "down")
+	var followed = _follow_active_agent(delta)
+	if not followed and _should_keyboard_pan():
+		var pan_dir = _get_camera_pan_vector()
 		if pan_dir != Vector2.ZERO:
 			camera.global_position += pan_dir.normalized() * camera_pan_speed * delta
 			_clamp_camera()
@@ -318,6 +372,113 @@ func _clamp_camera() -> void:
 func _pan_camera_by_screen_delta(delta: Vector2) -> void:
 	camera.global_position -= delta
 	_clamp_camera()
+
+
+func _follow_active_agent(delta: float) -> bool:
+	var active_agent = Global.active_agent
+	if not is_instance_valid(active_agent):
+		return false
+	if bool(active_agent.get("dead")):
+		return false
+	if not _is_active_agent_user_moving(active_agent):
+		return false
+
+	var view_size = get_viewport().get_visible_rect().size
+	if view_size.x <= 0.0 or view_size.y <= 0.0:
+		return false
+
+	var center = view_size * 0.5
+	var safe_ratio = Vector2(
+		clampf(follow_deadzone_ratio.x, 0.05, 0.49),
+		clampf(follow_deadzone_ratio.y, 0.05, 0.49)
+	)
+	var deadzone_half = Vector2(view_size.x * safe_ratio.x, view_size.y * safe_ratio.y)
+	var focus_screen = Global.world_to_screen(self, active_agent.global_position)
+	var shift_screen = Vector2.ZERO
+
+	if focus_screen.x < center.x - deadzone_half.x:
+		shift_screen.x = focus_screen.x - (center.x - deadzone_half.x)
+	elif focus_screen.x > center.x + deadzone_half.x:
+		shift_screen.x = focus_screen.x - (center.x + deadzone_half.x)
+
+	if focus_screen.y < center.y - deadzone_half.y:
+		shift_screen.y = focus_screen.y - (center.y - deadzone_half.y)
+	elif focus_screen.y > center.y + deadzone_half.y:
+		shift_screen.y = focus_screen.y - (center.y + deadzone_half.y)
+
+	if shift_screen.length_squared() < 0.25:
+		return false
+
+	var target_pos = camera.global_position + shift_screen
+	var t = min(1.0, follow_response_speed * delta)
+	camera.global_position = camera.global_position.lerp(target_pos, t)
+	_clamp_camera()
+	return true
+
+
+func _is_active_agent_user_moving(active_agent: Node) -> bool:
+	if Global.is_dragging:
+		return true
+	var drag_flag = active_agent.get("is_dragging")
+	if typeof(drag_flag) == TYPE_BOOL and drag_flag:
+		return true
+	return Input.get_vector("left", "right", "up", "down") != Vector2.ZERO
+
+
+func _should_keyboard_pan() -> bool:
+	return not Global.is_dragging
+
+
+func _get_camera_pan_vector() -> Vector2:
+	var pan = Input.get_vector(CAM_LEFT_ACTION, CAM_RIGHT_ACTION, CAM_UP_ACTION, CAM_DOWN_ACTION)
+	if Input.is_key_pressed(KEY_SHIFT):
+		pan += Input.get_vector("left", "right", "up", "down")
+	return pan.limit_length()
+
+
+func _ensure_camera_pan_actions() -> void:
+	var key_map = {
+		CAM_LEFT_ACTION: [KEY_A],
+		CAM_RIGHT_ACTION: [KEY_D],
+		CAM_UP_ACTION: [KEY_W],
+		CAM_DOWN_ACTION: [KEY_S]
+	}
+	for action in key_map.keys():
+		if not InputMap.has_action(action):
+			InputMap.add_action(action)
+		for keycode in key_map[action]:
+			var key = int(keycode)
+			if _action_has_key(action, key):
+				continue
+			var input_event := InputEventKey.new()
+			input_event.physical_keycode = key
+			InputMap.action_add_event(action, input_event)
+
+
+func _action_has_key(action: String, keycode: int) -> bool:
+	for event in InputMap.action_get_events(action):
+		if event is InputEventKey:
+			if int(event.physical_keycode) == keycode or int(event.keycode) == keycode:
+				return true
+	return false
+
+
+func _try_start_desktop_pan(button: MouseButton, screen_pos: Vector2) -> void:
+	if Global.is_dragging:
+		return
+	if _is_pointer_over_ui(screen_pos):
+		return
+	if button == MOUSE_BUTTON_LEFT and debug_edit_enabled:
+		return
+	_desktop_dragging = true
+	_desktop_drag_button = button
+	_desktop_drag_last = screen_pos
+
+
+func _stop_desktop_pan(button: MouseButton) -> void:
+	if _desktop_dragging and _desktop_drag_button == button:
+		_desktop_dragging = false
+		_desktop_drag_button = MOUSE_BUTTON_NONE
 
 
 func _sync_global_world_context() -> void:

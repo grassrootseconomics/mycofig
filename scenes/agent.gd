@@ -3,6 +3,8 @@ class_name Agent
 
 @export var speed: int
 
+const LevelHelpersRef = preload("res://scenes/level_helpers.gd")
+
 signal trade(pos)
 signal clicked
 signal clicked_agent(agent)
@@ -114,8 +116,247 @@ var bars_offset = { #list of needed assets with need level
 	"K": null,
 	"R": null
 }
+var _tile_snap_target := Vector2.ZERO
+var _tile_snap_in_progress := false
+var _keyboard_moving := false
+var _drag_hint_active := false
+var _press_started_here := false
 
-	
+
+func _get_sprite_half_extents() -> Vector2:
+	if is_instance_valid(sprite) and sprite.has_method("get_rect"):
+		var rect: Rect2 = sprite.get_rect()
+		var sprite_scale := Vector2(1.0, 1.0)
+		if sprite is Node2D:
+			sprite_scale = Vector2(abs(sprite.scale.x), abs(sprite.scale.y))
+		var half = rect.size * sprite_scale * 0.5
+		return Vector2(max(half.x, 8.0), max(half.y, 8.0))
+	if has_node("Sprite2D"):
+		var sprite_node = get_node("Sprite2D")
+		if is_instance_valid(sprite_node) and sprite_node.has_method("get_rect"):
+			var sprite_rect: Rect2 = sprite_node.get_rect()
+			var node_scale := Vector2(abs(sprite_node.scale.x), abs(sprite_node.scale.y))
+			var node_half = sprite_rect.size * node_scale * 0.5
+			return Vector2(max(node_half.x, 8.0), max(node_half.y, 8.0))
+	return Vector2(8.0, 8.0)
+
+
+func _clamp_position_to_world(candidate: Vector2) -> Vector2:
+	var world_rect = Global.get_world_rect(self)
+	var half = _get_sprite_half_extents()
+
+	var min_x = world_rect.position.x + half.x
+	var max_x = world_rect.position.x + world_rect.size.x - half.x
+	var min_y = world_rect.position.y + half.y
+	var max_y = world_rect.position.y + world_rect.size.y - half.y
+
+	var result = candidate
+	if min_x > max_x:
+		result.x = world_rect.position.x + world_rect.size.x * 0.5
+	else:
+		result.x = clampf(candidate.x, min_x, max_x)
+	if min_y > max_y:
+		result.y = world_rect.position.y + world_rect.size.y * 0.5
+	else:
+		result.y = clampf(candidate.y, min_y, max_y)
+	return result
+
+
+func _update_bar_positions() -> void:
+	if bars.is_empty():
+		return
+	var anchor = position
+	if is_instance_valid(bar_canvas) and bar_canvas is CanvasLayer:
+		var viewport = get_viewport()
+		if viewport != null:
+			var camera = viewport.get_camera_2d()
+			if camera != null:
+				anchor = Global.world_to_screen(self, position)
+	for bar in bars:
+		if is_instance_valid(bars[bar]):
+			bars[bar].position = anchor + bars_offset[bar]
+
+
+func _get_world_foundation_node() -> Node:
+	return get_node_or_null("../../WorldFoundation")
+
+
+func _get_level_root() -> Node:
+	return get_node_or_null("../..")
+
+
+func _get_agents_root() -> Node:
+	return get_node_or_null("../../Agents")
+
+
+func _uses_tile_snap() -> bool:
+	if str(type) == "cloud":
+		return false
+	var world = _get_world_foundation_node()
+	if not is_instance_valid(world):
+		return false
+	return world.has_method("world_to_tile") and world.has_method("tile_to_world_center") and world.has_method("in_bounds")
+
+
+func _clamp_tile_coord(world: Node, coord: Vector2i) -> Vector2i:
+	var columns = max(int(world.get("columns")), 1)
+	var rows = max(int(world.get("rows")), 1)
+	return Vector2i(
+		clampi(coord.x, 0, columns - 1),
+		clampi(coord.y, 0, rows - 1)
+	)
+
+
+func _clamp_position_to_world_rect(candidate: Vector2) -> Vector2:
+	var rect = Global.get_world_rect(self)
+	var max_x = rect.position.x + rect.size.x - 0.001
+	var max_y = rect.position.y + rect.size.y - 0.001
+	return Vector2(
+		clampf(candidate.x, rect.position.x, max_x),
+		clampf(candidate.y, rect.position.y, max_y)
+	)
+
+
+func _is_tile_occupied(_world: Node, coord: Vector2i) -> bool:
+	var level_root = _get_level_root()
+	var agents_root = _get_agents_root()
+	if not is_instance_valid(level_root) or not is_instance_valid(agents_root):
+		return false
+	return LevelHelpersRef.is_tile_occupied(level_root, agents_root, coord, self)
+
+
+func _can_place_on_tile(coord: Vector2i, sprite_scale_override: Variant = null) -> bool:
+	if not _uses_tile_snap():
+		return true
+	var world = _get_world_foundation_node()
+	var level_root = _get_level_root()
+	var agents_root = _get_agents_root()
+	if not is_instance_valid(world) or not is_instance_valid(level_root) or not is_instance_valid(agents_root):
+		return true
+	var clamped_coord = _clamp_tile_coord(world, coord)
+	return LevelHelpersRef.can_place_agent_on_tile(level_root, agents_root, self, clamped_coord, self, sprite_scale_override)
+
+
+func _can_expand_to_scale(scale_candidate: Vector2) -> bool:
+	if str(type) != "tree":
+		return true
+	if not _uses_tile_snap():
+		return true
+	var world = _get_world_foundation_node()
+	if not is_instance_valid(world):
+		return true
+	var current_coord = _clamp_tile_coord(world, world.world_to_tile(_clamp_position_to_world_rect(position)))
+	return _can_place_on_tile(current_coord, scale_candidate)
+
+
+func _get_tree_single_tile_spawn_scale() -> float:
+	var target_tile_pixels := 56.0
+	var texture_max_dim := 0.0
+	if is_instance_valid(sprite_texture):
+		var texture_size = sprite_texture.get_size()
+		texture_max_dim = maxf(texture_size.x, texture_size.y)
+	if texture_max_dim <= 0.0:
+		return min_scale
+
+	var base_scale_max := 1.0
+	if is_instance_valid(sprite):
+		base_scale_max = maxf(abs(sprite.scale.x), abs(sprite.scale.y))
+	if base_scale_max <= 0.0:
+		base_scale_max = 1.0
+
+	var fit_scale = target_tile_pixels / (texture_max_dim * base_scale_max)
+	return clampf(fit_scale, 0.08, 1.0)
+
+
+func _find_nearest_free_tile_coord(world: Node, origin: Vector2i, max_radius: int = 12) -> Vector2i:
+	if _can_place_on_tile(origin):
+		return origin
+	for radius in range(1, max(max_radius, 1) + 1):
+		for dy in range(-radius, radius + 1):
+			for dx in range(-radius, radius + 1):
+				if abs(dx) != radius and abs(dy) != radius:
+					continue
+				var coord = origin + Vector2i(dx, dy)
+				if not world.in_bounds(coord):
+					continue
+				if _can_place_on_tile(coord):
+					return coord
+	return Vector2i(-1, -1)
+
+
+func _get_snap_target(candidate: Vector2) -> Vector2:
+	if not _uses_tile_snap():
+		return _clamp_position_to_world(candidate)
+
+	var world = _get_world_foundation_node()
+	var bounded_candidate = _clamp_position_to_world_rect(candidate)
+	var target_coord = _clamp_tile_coord(world, world.world_to_tile(bounded_candidate))
+	var current_coord = _clamp_tile_coord(world, world.world_to_tile(_clamp_position_to_world_rect(position)))
+	var free_coord = _find_nearest_free_tile_coord(world, target_coord, 12)
+	if free_coord.x >= 0 and free_coord.y >= 0:
+		return world.tile_to_world_center(free_coord)
+	if _can_place_on_tile(current_coord):
+		return world.tile_to_world_center(current_coord)
+	return world.tile_to_world_center(current_coord)
+
+
+func _begin_snap_to_nearest_tile(candidate: Vector2 = position) -> void:
+	if not _uses_tile_snap():
+		_tile_snap_in_progress = false
+		return
+	_tile_snap_target = _get_snap_target(candidate)
+	_tile_snap_in_progress = true
+
+
+func _cancel_tile_snap() -> void:
+	_tile_snap_in_progress = false
+
+
+func _advance_tile_snap(delta: float) -> void:
+	if not _tile_snap_in_progress:
+		return
+	var t = min(1.0, 14.0 * delta)
+	position = position.lerp(_tile_snap_target, t)
+	if position.distance_to(_tile_snap_target) < 0.5:
+		position = _tile_snap_target
+		_tile_snap_in_progress = false
+
+
+func _update_drag_tile_hint(world_pos: Vector2) -> void:
+	if not _uses_tile_snap():
+		_clear_drag_tile_hint()
+		return
+	var world = _get_world_foundation_node()
+	if not is_instance_valid(world):
+		return
+	if not world.has_method("set_drag_tile_hint"):
+		return
+	var bounded = _clamp_position_to_world_rect(world_pos)
+	var coord = _clamp_tile_coord(world, world.world_to_tile(bounded))
+	world.set_drag_tile_hint(coord, _can_place_on_tile(coord))
+	_drag_hint_active = true
+
+
+func _clear_drag_tile_hint() -> void:
+	if not _drag_hint_active:
+		return
+	var world = _get_world_foundation_node()
+	if is_instance_valid(world) and world.has_method("clear_drag_tile_hint"):
+		world.clear_drag_tile_hint()
+	_drag_hint_active = false
+
+
+func is_trade_locked_by_user_move() -> bool:
+	if not draggable:
+		return false
+	if is_dragging or _keyboard_moving:
+		return true
+	var is_active = is_instance_valid(Global.active_agent) and Global.active_agent == self
+	if is_active:
+		return Input.get_vector("left", "right", "up", "down") != Vector2.ZERO
+	return false
+
+
 func set_variables(a_dict) -> void:
 	#print("setup: ", a_dict)
 	
@@ -166,8 +407,12 @@ func set_variables(a_dict) -> void:
 	sprite = $Sprite2D
 	$Sprite2D.texture = sprite_texture
 	
-	if(Global.social_mode):
-		min_scale = 1
+	var applied_scale = min_scale
+	if str(type) == "tree":
+		applied_scale = minf(applied_scale, _get_tree_single_tile_spawn_scale())
+	elif Global.social_mode:
+		applied_scale = 1.0
+	min_scale = applied_scale
 	sprite.scale *= min_scale
 	
 	$GrowthTimer.wait_time = Global.growth_time
@@ -184,12 +429,12 @@ func set_variables(a_dict) -> void:
 		bars[bar].max_value = int(needs[bar]*1.2)
 		bars[bar].value = assets[bar]
 		bars_offset[bar] = bars[bar].position
-		bars[bar].position = (position + bars[bar].position)
 		bars[bar].tint_progress = Global.asset_colors[bar]
 	
 	bar_canvas = $CanvasLayer
 	if(Global.bars_on == false):
 		bar_canvas.visible = false
+	_update_bar_positions()
 		
 
 
@@ -377,6 +622,11 @@ func logistics():
 func kill_it():
 	#new_alpha = low_alpha
 	#self.queue_free()
+	_clear_drag_tile_hint()
+	_tile_snap_in_progress = false
+	if is_dragging:
+		is_dragging = false
+		Global.is_dragging = false
 	self.call_deferred("queue_free")
 	self.dead = true
 	
@@ -389,6 +639,7 @@ func kill_it():
 						box.clear_points()	
 						box.queue_free()
 				Global.active_agent = null
+				Global.prevent_auto_select = true
 	
 	
 	new_buddies = true
@@ -413,6 +664,10 @@ func kill_it():
 		
 	if( living == false and Global.mode != "tutorial"):
 		get_tree().change_scene_to_file("res://scenes/game_over.tscn")
+
+
+func _exit_tree() -> void:
+	_clear_drag_tile_hint()
 
 
 func evaporate():
@@ -447,24 +702,37 @@ func _input(event):
 	if(draggable == true):
 		if event is InputEventMouseButton:
 			if event.button_index == MOUSE_BUTTON_LEFT:
+				var world_click_pos = Global.screen_to_world(self, event.position)
 				
 				if event.pressed:
 					
-					if $Sprite2D.get_rect().has_point(to_local(event.position)):
+					if $Sprite2D.get_rect().has_point(to_local(world_click_pos)):
 						if(Global.is_dragging == false):
+							_press_started_here = true
 							is_dragging = true
 							Global.is_dragging = true
 							Global.active_agent = self
+							Global.prevent_auto_select = false
+							_cancel_tile_snap()
+					else:
+						_press_started_here = false
 						#is_dragging = true
 						#Global.active_agent = self
 						#print(" clicked: ", name)
 						
 				else:
-					is_dragging = false
-					Global.is_dragging = false
-					if $Sprite2D.get_rect().has_point(to_local(event.position)):
+					var pressed_here = _press_started_here
+					_press_started_here = false
+					var was_dragging = is_dragging
+					if was_dragging:
+						is_dragging = false
+						Global.is_dragging = false
+						_begin_snap_to_nearest_tile(position)
+						_clear_drag_tile_hint()
+					if pressed_here and $Sprite2D.get_rect().has_point(to_local(world_click_pos)):
 						#emit_signal("clicked_agent",self)
 						Global.active_agent = self
+						Global.prevent_auto_select = false
 						#print(" clicked: ", name)
 					
 
@@ -482,20 +750,10 @@ func _physics_process(delta):
 			kill_it()
 			return
 		
-		
-		new_buddies = true
-		#print(self.name, " new buddies children: ", children)
-		var children =  $"../../Agents".get_children()
-		for child in children:
-			#if child.type == 'myco': 
-			child.draw_lines = true
-			child.new_buddies = true
-			
-		
 		var t = min(1.0, delay * delta)
-		position = position.lerp(get_global_mouse_position(), t)
-		for bar in bars:
-			bars[bar].position = position + bars_offset[bar]
+		var dragged_target = position.lerp(get_global_mouse_position(), t)
+		position = _clamp_position_to_world(dragged_target)
+		_update_bar_positions()
 	
 	if(caught_by != null):
 		if(caught_by is Tuktuk):
@@ -506,44 +764,74 @@ func _physics_process(delta):
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 func _process(delta: float) -> void:
+	if Global.is_dragging and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		Global.is_dragging = false
+	if is_dragging and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		is_dragging = false
+		_begin_snap_to_nearest_tile(position)
+		_clear_drag_tile_hint()
+
 	if new_buddies:
 		generate_buddies()
 		new_buddies = false
 	if draw_lines and Global.draw_lines and self.type == "myco":
 		new_draw_line()
 		draw_lines = false
-	if(dead == false and is_instance_valid(self)):
-		logistics()
 	if not Global.get_world_rect(self).has_point(position):
 		self.kill_it()
-	if(is_instance_valid(self) and is_instance_valid(Global.active_agent)):
-		if(Global.active_agent.name == self.name):
-			if draw_box == true:
-				draw_selected_box()
-				draw_box=false
-			var direction = Input.get_vector("left","right","up","down")
-			#velocity = direction * speed
+	var is_active = is_instance_valid(self) and is_instance_valid(Global.active_agent) and Global.active_agent.name == self.name
+	if(is_active):
+		if draw_box == true:
+			draw_selected_box()
+			draw_box=false
+		var direction = Input.get_vector("left","right","up","down")
+		if direction != Vector2.ZERO:
+			_keyboard_moving = true
+			_cancel_tile_snap()
+			var moved_pos = position + direction * 200 * delta
+			position = _clamp_position_to_world(moved_pos)
+		elif _keyboard_moving:
+			_keyboard_moving = false
+			_begin_snap_to_nearest_tile(position)
+	else:
+		if _keyboard_moving:
+			_keyboard_moving = false
+			_begin_snap_to_nearest_tile(position)
+
+	if(dead == false and is_instance_valid(self) and not is_trade_locked_by_user_move()):
+		logistics()
+	
+	if not is_dragging and not _keyboard_moving:
+		_advance_tile_snap(delta)
+
+	if is_dragging:
+		_update_drag_tile_hint(position)
+	elif _keyboard_moving:
+		_update_drag_tile_hint(position)
+	elif _tile_snap_in_progress:
+		_update_drag_tile_hint(_tile_snap_target)
+	else:
+		_clear_drag_tile_hint()
+
+	if is_instance_valid(bar_canvas) and bar_canvas.visible:
+		_update_bar_positions()
 			
-			position += direction * 200 * delta
-			
-			if(position != last_position):
+	if(position != last_position):
 			#move_and_slide()
-				last_position = position
-				#move_and_slide()
-				#print("setting ")
-				new_buddies = true
-				var children =  $"../../Agents".get_children()
-				for child in children:
-					#if child.type == 'myco': 
-					child.draw_lines = true
-					child.new_buddies = true
-					
+		last_position = position
+		#move_and_slide()
+		#print("setting ")
+		new_buddies = true
+		var children =  $"../../Agents".get_children()
+		for child in children:
+			#if child.type == 'myco': 
+			child.draw_lines = true
+			child.new_buddies = true
 			
-				for bar in bars:
-					bars[bar].position = position + bars_offset[bar]
-				#if draw_box == true:
-				#	draw_selected_box()
-				draw_box = true
+	
+		#if draw_box == true:
+		#	draw_selected_box()
+		draw_box = true
 
 
 
@@ -606,6 +894,9 @@ func new_draw_line():
 								myco_line1.global_rotation = 0
 								#myco_line1.modulate = start_color
 								myco_line1.modulate = start_color#set_gradient( g )
+								myco_line1.set_meta("endpoint_a", self)
+								myco_line1.set_meta("endpoint_b", agent)
+								myco_line1.set_meta("base_color", start_color)
 								#var to = to_local(agent.position)#+agent.global_position		
 								var to = agent.position#+agent.global_position							
 								var new_pos1 = Vector2(to.x,from.y)
@@ -622,6 +913,9 @@ func new_draw_line():
 								myco_line2.antialiased = true
 								#myco_line2.global_rotation = 0
 								myco_line2.modulate = start_color
+								myco_line2.set_meta("endpoint_a", self)
+								myco_line2.set_meta("endpoint_b", agent)
+								myco_line2.set_meta("base_color", start_color)
 								#var to = to_local(agent.position)#+agent.global_position		
 								
 								myco_line2.add_point( from )
@@ -674,7 +968,9 @@ func _on_growth_timer_timeout() -> void:
 	#print(name, " assets: ", assets)
 	if all_in == true:	
 		if $Sprite2D.scale.x < max_scale and $Sprite2D.scale.y < max_scale:
-			newScale = $Sprite2D.scale * (1+scale_step_up)
+			var candidate_scale = $Sprite2D.scale * (1 + scale_step_up)
+			if _can_expand_to_scale(candidate_scale):
+				newScale = candidate_scale
 		
 		var old_modulate = modulate
 		var new_alpha = modulate.a+alpha_step_up

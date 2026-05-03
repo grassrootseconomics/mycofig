@@ -185,11 +185,10 @@ func _on_growth_timer_timeout() -> void:
 	var newScale = $Sprite2D.scale
 	#print(name, " assets: ", assets)
 	if all_in == true:	
-		
-		
-		
 		if $Sprite2D.scale.x < max_scale and $Sprite2D.scale.y < max_scale:
-			newScale = $Sprite2D.scale * (1+scale_step_up)
+			var candidate_scale = $Sprite2D.scale * (1 + scale_step_up)
+			if _can_expand_to_scale(candidate_scale):
+				newScale = candidate_scale
 			
 		var old_modulate = modulate
 		var new_alpha = modulate.a+alpha_step_up

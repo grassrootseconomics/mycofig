@@ -51,10 +51,12 @@ func set_variables(a_dict) -> void:
 		bars[bar].max_value = int(needs[bar]*1.2)
 		bars[bar].value = assets[bar]
 		bars_offset[bar] = bars[bar].position
-		bars[bar].position = (position + bars[bar].position)
 		bars[bar].tint_progress = Global.asset_colors[bar]
 		
 	bar_canvas = $CanvasLayer
+	if Global.bars_on == false:
+		bar_canvas.visible = false
+	_update_bar_positions()
 
 
 # Search for things to trade with in a radius
@@ -107,6 +109,9 @@ func logistics():
 			
 		#determine if there are extra resources (offers)
 		#find excess stock
+		for res in assets:
+			current_excess[res] = -999
+			current_needs[res] = -999
 		for res in assets:
 				
 				 
@@ -231,40 +236,41 @@ func _physics_process(delta):
 			kill_it()
 			#queue_free()
 			return
-			
-		
-		
-		new_buddies = true
-		var children =  $"../../Agents".get_children()
-		for child in children:
-			#if child.type == 'myco': 
-			child.draw_lines = true
-			child.new_buddies = true
-		
-		
-		
-			var t = min(1.0, delay * delta)
-			position = position.lerp(get_global_mouse_position(), t)
-			for bar in bars:
-				bars[bar].position = position + bars_offset[bar]
+		var t = min(1.0, delay * delta)
+		var dragged_target = position.lerp(get_global_mouse_position(), t)
+		position = _clamp_position_to_world(dragged_target)
+		_update_bar_positions()
 
 
 func _input(event):
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
+			var world_click_pos = Global.screen_to_world(self, event.position)
 			
 			if event.pressed:
-				if $Sprite2D.get_rect().has_point(to_local(event.position)):
+				if $Sprite2D.get_rect().has_point(to_local(world_click_pos)):
 					if(Global.is_dragging == false):
+						_press_started_here = true
 						is_dragging = true
 						Global.is_dragging = true
 						Global.active_agent = self
+						Global.prevent_auto_select = false
+						_cancel_tile_snap()
+				else:
+					_press_started_here = false
 			else:
-				is_dragging = false
-				Global.is_dragging = false
-				if $Sprite2D.get_rect().has_point(to_local(event.position)):
+				var pressed_here = _press_started_here
+				_press_started_here = false
+				var was_dragging = is_dragging
+				if was_dragging:
+					is_dragging = false
+					Global.is_dragging = false
+					_begin_snap_to_nearest_tile(position)
+					_clear_drag_tile_hint()
+				if pressed_here and $Sprite2D.get_rect().has_point(to_local(world_click_pos)):
 					#emit_signal("clicked_agent",self)
 					Global.active_agent = self
+					Global.prevent_auto_select = false
 				
 
 

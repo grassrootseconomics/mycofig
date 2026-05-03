@@ -40,13 +40,28 @@ Also toggle between plant/social views with the title screen checkboxes.
 
 ## Controls
 - `Left Click`: drag entities and place inventory items.
-- `Right Click + Drag` or `WASD/Arrow Keys`: pan camera across the larger tiled map.
+- `Left Click + Drag` (empty world) or `Right Click + Drag`: pan camera across the larger tiled map.
+- `WASD`: pan camera.
+- `Two-finger trackpad drag`: pan camera.
+- `Arrow Keys`: move the selected active agent.
+- `Shift + Arrow Keys`: also pan camera.
 - `Tab`: cycle active agent.
-- `A`: toggle baby/spawn behavior.
-- `B`: toggle resource bars.
+- `M`: toggle baby/spawn behavior.
+- `B`: toggle resource bars (bars start ON by default).
 - `+` / `-`: change movement speed.
 - `Esc` or `Q`: end run / go to game-over screen.
 - `2/3/4/5` (social mode): set connector count tuning.
+- Inventory panel visibility: no hotkey yet (always shown).
+
+Keybinding implementation:
+- All shared gameplay hotkeys are centralized in `scenes/level_helpers.gd` via `handle_gameplay_hotkeys(...)`.
+- `scenes/level.gd` and `scenes/sociallevel.gd` call that shared handler.
+
+Placement rules:
+- Plants/fungi move freely while dragging/keyboard movement, then snap smoothly to the nearest unoccupied tile center.
+- Only one plant/fungi can occupy a tile at a time.
+- While dragging or arrow-key moving plants/fungi: tile outline is `green` for available and `red` for occupied.
+- If the active moving sprite dies, no other sprite is auto-selected; camera focus stays where it is until manual selection.
 
 World foundation debug (test scene):
 - `F1`: toggle soil debug overlay.

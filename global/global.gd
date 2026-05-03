@@ -21,6 +21,7 @@ var world_bounds_enabled = false
 var world_rect = Rect2(Vector2.ZERO, Vector2.ZERO)
 var active_mode_id = ""
 var active_scenario_id = ""
+var prevent_auto_select = false
 
 
 

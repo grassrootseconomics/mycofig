@@ -45,6 +45,10 @@ func _get_world_center() -> Vector2:
 	return Global.get_world_center(self)
 
 
+func _resolve_tile_spawn_pos(pos: Vector2) -> Vector2:
+	return LevelHelpersRef.resolve_snapped_spawn_position(self, $Agents, pos)
+
+
 func _ready():
 	#get_tree().call_group('ui','set_health',health)
 	#var num_maize = $Agents.get_children().size()
@@ -53,6 +57,7 @@ func _ready():
 	#uix.connect('new_agent',_on_new_agent)
 	$UI.connect('new_agent',_on_new_agent)
 	$UI.setup()
+	Global.prevent_auto_select = false
 	DisplayServer.window_set_title("People Gardening")
 	$BirdLong.play()
 	var world = _get_world_foundation()
@@ -130,60 +135,12 @@ func _ready():
 	
 			
 func _input(event):
-	
-	if event is InputEventKey:
-		if event.pressed: 
-			if event.keycode == KEY_PLUS or event.keycode == KEY_EQUAL:
-				Global.move_rate +=1
-				Global.movement_speed+=50
-			elif event.keycode == KEY_MINUS or event.keycode == KEY_UNDERSCORE: 
-				Global.move_rate -=1
-				Global.movement_speed-=50
-				if Global.move_rate < 0:
-					Global.move_rate = 0
-					Global.movement_speed = 0
-			elif event.keycode == KEY_ESCAPE or event.keycode == KEY_Q:
-				#get_tree().change_scene_to_file("res://scenes/game_over.tscn")
-				get_tree().call_deferred("change_scene_to_file","res://scenes/game_over.tscn")
-			elif event.keycode == KEY_B:
-				Global.bars_on = not Global.bars_on
-				#print("Bars on: ", Global.bars_on )
-				
-				for agent in $Agents.get_children():
-					if agent.type != "myco":
-						agent.bar_canvas.visible = Global.bars_on
-			elif event.keycode == KEY_A:
-				Global.baby_mode = not Global.baby_mode
-				#print("Baby Mode: ", Global.baby_mode )
-			elif event.keycode == KEY_2:
-				Global.num_connectors = 2
-			elif event.keycode == KEY_3:
-				Global.num_connectors = 3
-			elif event.keycode == KEY_4:
-				Global.num_connectors = 4
-			elif event.keycode == KEY_5:
-				Global.num_connectors = 5
-			
-			elif event.keycode == KEY_TAB:
-				var index = 0
-				var found_it = -1
-				var agents = $Agents.get_children()
-				for agent in agents:
-					if(is_instance_valid(Global.active_agent)):
-						if(Global.active_agent.name == agent.name):
-							found_it = index
-							#print("found: ", found_it, " out of ", len(agents), " all agents: ", agents)
-							break
-					index +=1
-				
-				if(found_it >= len(agents)-1):
-					found_it = 0
-					#print("too high found: ", found_it)
-					Global.active_agent = agents[found_it]
-				else:
-					Global.active_agent = agents[found_it+1]
-				
-				Global.active_agent.draw_box = true
+	if LevelHelpersRef.handle_gameplay_hotkeys(event, self, $Agents, true):
+		return
+
+
+func _process(_delta: float) -> void:
+	LevelHelpersRef.refresh_trade_line_visuals($Lines)
 				
 				
 				
@@ -274,12 +231,12 @@ func _on_new_agent(agent_dict) -> void:
 		LevelHelpersRef.mark_all_buddies_dirty($Agents)
 		LevelHelpersRef.mark_myco_lines_dirty($Agents)
 		new_agent.peak_maturity = 4
-	if(Global.active_agent == null):
+	if(Global.active_agent == null and not Global.prevent_auto_select):
 		Global.active_agent = new_agent
 func make_squash(pos):
 	#print("Clicked On Squash. making")
 	
-	var squash_position = pos
+	var squash_position = _resolve_tile_spawn_pos(pos)
 	
 	var named = "Squash_" + str($Agents.get_child_count()+1)
 	
@@ -306,13 +263,14 @@ func make_squash(pos):
 func make_tree(pos):
 	#print("Clicked On Squash. making")
 	
+	var tree_position = _resolve_tile_spawn_pos(pos)
 	
 	var named = "Tree_" + str($Agents.get_child_count()+1)
 	
 	var tree_dict = {
 		"name": named,
 		"type": "tree",
-		"position": pos,
+		"position": tree_position,
 		"prod_res": ["R"],
 		"start_res": null,
 		"texture": TEX_TREE
@@ -322,6 +280,7 @@ func make_tree(pos):
 	tree.set_variables(tree_dict)
 	#tree.needs["R"]=20
 	$Agents.add_child(tree)
+	tree.position = LevelHelpersRef.resolve_snapped_position_for_agent(self, $Agents, tree, tree_position)
 	tree.buddy_radius = Global.social_buddy_radius
 	tree.draggable = false
 	tree.killable = false
@@ -345,7 +304,7 @@ func _spawn_bird():
 
 	
 func make_maize(pos):
-	var maize_position = pos
+	var maize_position = _resolve_tile_spawn_pos(pos)
 	
 	var named = "Maize_" + str($Agents.get_child_count()+1)
 	
@@ -368,7 +327,7 @@ func make_maize(pos):
 		
 func make_bean(pos):
 	
-	var bean_position = pos
+	var bean_position = _resolve_tile_spawn_pos(pos)
 	
 	var named = "Bean_" + str($Agents.get_child_count()+1)
 	
@@ -393,7 +352,7 @@ func make_bean(pos):
 
 
 func make_myco(pos):
-	var myco_position = pos
+	var myco_position = _resolve_tile_spawn_pos(pos)
 	
 	var named = "Myco_Basket" + str($Agents.get_child_count()+1)
 		
@@ -433,7 +392,7 @@ func make_bi_k_myco(pos):
 
 
 func _make_bi_myco(pos: Vector2, asset_key: String):
-	var myco_position = pos
+	var myco_position = _resolve_tile_spawn_pos(pos)
 	
 	var named = "Bi-" + asset_key + "-Mycorrhizal_" + str($Agents.get_child_count()+1)
 		

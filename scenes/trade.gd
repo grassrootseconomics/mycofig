@@ -86,7 +86,6 @@ func _process(delta: float) -> void:
 		#print("missing target - clearnup!")
 		self.call_deferred("queue_free")
 		
-	var height = get_viewport().get_visible_rect().size[1]
-	var width = get_viewport().get_visible_rect().size[0]
-	if position.y > height or position.y < 0 or position.x < 0 or position.x > width:
+	var world_rect = Global.get_world_rect(self)
+	if not world_rect.has_point(position):
 		self.call_deferred("queue_free")

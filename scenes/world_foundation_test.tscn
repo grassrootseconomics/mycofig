@@ -1,0 +1,30 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/world_foundation.tscn" id="1_4m21f"]
+
+[node name="WorldFoundationTest" type="Node2D"]
+
+[node name="WorldFoundation" parent="." instance=ExtResource("1_4m21f")]
+mode_id = "test"
+scenario_id = "test"
+debug_overlay_enabled = true
+debug_edit_enabled = true
+
+[node name="Instructions" type="CanvasLayer" parent="."]
+layer = 101
+
+[node name="Label" type="Label" parent="Instructions"]
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -420.0
+offset_top = -120.0
+offset_right = -10.0
+offset_bottom = -10.0
+grow_horizontal = 0
+grow_vertical = 0
+horizontal_alignment = 2
+vertical_alignment = 2
+text = "M1 Test Map\nRight-drag: pan\nWASD/Arrows: pan\nLeft-click: cycle stage\nF1 overlay | F2 reset | F3 edit"

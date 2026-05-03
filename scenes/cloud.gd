@@ -167,13 +167,15 @@ func _physics_process(delta):
 	if is_dragging:
 		
 		var hit = false
-		if $"../../UI/PalletContainer".get_rect().has_point(get_global_mouse_position()):
-			hit = true
-			#print("hit something-pallet: ", $PalletContainer.get_rect(), " point: ", event.position)
-		
-		if $"../../UI/MarginContainer".get_rect().has_point(get_global_mouse_position()):
-			hit = true
-		
+		var mouse_screen = Global.world_to_screen(self, get_global_mouse_position())
+		var ui_node = get_node_or_null("../../UI")
+		if is_instance_valid(ui_node):
+			var pallet = ui_node.get_node_or_null("MarginContainer/VBoxContainer/PalletContainer")
+			if is_instance_valid(pallet) and pallet.get_global_rect().has_point(mouse_screen):
+				hit = true
+			var margin = ui_node.get_node_or_null("MarginContainer")
+			if is_instance_valid(margin) and margin.get_global_rect().has_point(mouse_screen):
+				hit = true
 		if hit==true:
 			queue_free()
 			return

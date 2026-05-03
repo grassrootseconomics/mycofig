@@ -21,10 +21,13 @@ func reset():
 	#if(Global.social_mode == true):
 		
 	var rng :=  RandomNumberGenerator.new()
-	var width = get_viewport().get_visible_rect().size[0]
-	var height = get_viewport().get_visible_rect().size[1]
-	var random_x = rng.randi_range(-120, -40)
-	var random_y = rng.randi_range(100,height-200)
+	var world_rect = Global.get_world_rect(self)
+	var random_x = rng.randi_range(int(world_rect.position.x) - 120, int(world_rect.position.x) - 40)
+	var min_y = int(world_rect.position.y) + 100
+	var max_y = int(world_rect.position.y + world_rect.size.y) - 200
+	if max_y < min_y:
+		max_y = min_y
+	var random_y = rng.randi_range(min_y, max_y)
 	quarry_type = Global.quarry_type
 	position = Vector2(random_x,random_y)
 	
@@ -79,7 +82,8 @@ func _physics_process(delta: float) -> void:
 			var collision = move_and_collide(speed*going * delta)
 		
 		
-		if(position.x> get_viewport().get_visible_rect().size[0]+60 or position.y > get_viewport().get_visible_rect().size[1]+60 or position.y<-60):
+		var world_rect = Global.get_world_rect(self)
+		if(position.x > world_rect.end.x + 60 or position.y > world_rect.end.y + 60 or position.y < world_rect.position.y - 60):
 			if(the_quarry != null):
 				if(is_instance_valid(the_quarry)):
 					the_quarry.kill_it()

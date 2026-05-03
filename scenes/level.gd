@@ -33,6 +33,18 @@ var num_squash = 1
 var is_dragging = false
 var delay = 10
 
+
+func _get_world_foundation() -> Node:
+	return get_node_or_null("WorldFoundation")
+
+
+func _get_world_center() -> Vector2:
+	var world = _get_world_foundation()
+	if is_instance_valid(world) and world.has_method("get_world_center"):
+		return world.get_world_center()
+	return Global.get_world_center(self)
+
+
 func _ready():
 	#get_tree().call_group('ui','set_health',health)
 	#var num_maize = $Agents.get_children().size()
@@ -43,6 +55,9 @@ func _ready():
 	$UI.setup()
 	DisplayServer.window_set_title("Plants Gardening")
 	$BirdLong.play()
+	var world = _get_world_foundation()
+	if is_instance_valid(world) and world.has_method("set_context"):
+		world.set_context(Global.mode, "plants")
 	#$BirdLong.
 		 
 	$"UI/TutorialMarginContainer1".visible = false
@@ -51,8 +66,9 @@ func _ready():
 		$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
 		$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 
-	mid_width = int(get_viewport().get_visible_rect().size[0]/2)
-	mid_height = int(get_viewport().get_visible_rect().size[1]/2)
+	var world_center = _get_world_center()
+	mid_width = int(world_center.x)
+	mid_height = int(world_center.y)
 	
 	var maize_center_offset_x = 75
 	var maize_center_offset_y = 65
@@ -81,8 +97,8 @@ func _ready():
 	make_tree(tree_position)
 	
 	
-	var myco_width = int(get_viewport().get_visible_rect().size[0]/2)+40
-	var myco_height = int(get_viewport().get_visible_rect().size[1]/2)+100
+	var myco_width = mid_width + 40
+	var myco_height = mid_height + 100
 	var myco_position = Vector2(myco_width,myco_height)
 
 	var myco = make_myco(myco_position)
@@ -90,8 +106,8 @@ func _ready():
 	Global.active_agent = myco
 	
 	if(Global.is_raining == true):
-		var cloud_width = int(get_viewport().get_visible_rect().size[0]/2)+250
-		var cloud_height = int(get_viewport().get_visible_rect().size[1]/2)-300
+		var cloud_width = mid_width + 250
+		var cloud_height = mid_height - 300
 		var cloud_position = Vector2(cloud_width,cloud_height)
 
 		make_cloud(cloud_position)
@@ -309,12 +325,6 @@ func _spawn_bird():
 
 	
 func make_maize(pos):
-	
-	var mid_width = int(get_viewport().get_visible_rect().size[0]/2)
-	var mid_height = int(get_viewport().get_visible_rect().size[1]/2)
-	
-	var maize_center_offset_x = 160
-	var maize_center_offset_y = -20
 	var maize_position = pos
 	
 	var named = "Maize_" + str($Agents.get_child_count()+1)

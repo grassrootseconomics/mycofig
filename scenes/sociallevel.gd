@@ -33,6 +33,18 @@ var num_squash = 1
 var is_dragging = false
 var delay = 10
 
+
+func _get_world_foundation() -> Node:
+	return get_node_or_null("WorldFoundation")
+
+
+func _get_world_center() -> Vector2:
+	var world = _get_world_foundation()
+	if is_instance_valid(world) and world.has_method("get_world_center"):
+		return world.get_world_center()
+	return Global.get_world_center(self)
+
+
 func _ready():
 	#get_tree().call_group('ui','set_health',health)
 	#var num_maize = $Agents.get_children().size()
@@ -43,6 +55,9 @@ func _ready():
 	$UI.setup()
 	DisplayServer.window_set_title("People Gardening")
 	$BirdLong.play()
+	var world = _get_world_foundation()
+	if is_instance_valid(world) and world.has_method("set_context"):
+		world.set_context(Global.mode, "people")
 	#$BirdLong.
 		 
 	$"UI/TutorialMarginContainer1".visible = false
@@ -51,8 +66,9 @@ func _ready():
 		$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
 		$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
 
-	mid_width = int(get_viewport().get_visible_rect().size[0]/2)
-	mid_height = int(get_viewport().get_visible_rect().size[1]/2)
+	var world_center = _get_world_center()
+	mid_width = int(world_center.x)
+	mid_height = int(world_center.y)
 	
 	
 	var tree_center_offset_x = 220
@@ -63,8 +79,8 @@ func _ready():
 	
 	
 	
-	var myco_width = int(get_viewport().get_visible_rect().size[0]/2)+40
-	var myco_height = int(get_viewport().get_visible_rect().size[1]/2)+100
+	var myco_width = mid_width + 40
+	var myco_height = mid_height + 100
 	var myco_position = Vector2(myco_width,myco_height)
 
 	#var myco = make_myco(myco_position)
@@ -77,8 +93,8 @@ func _ready():
 	
 	make_bean(bean_position)
 	
-	var bi_myco_n_width = int(get_viewport().get_visible_rect().size[0]/2)+100
-	var bi_myco_n_height = int(get_viewport().get_visible_rect().size[1]/2)-210
+	var bi_myco_n_width = mid_width + 100
+	var bi_myco_n_height = mid_height - 210
 	var bi_myco_n_position = Vector2(bi_myco_n_width,bi_myco_n_height)
 
 	var bi_n_myco = make_bi_n_myco(bi_myco_n_position)
@@ -91,8 +107,8 @@ func _ready():
 	make_squash(squash_position)
 	
 
-	var bi_myco_p_width = int(get_viewport().get_visible_rect().size[0]/2)+160
-	var bi_myco_p_height = int(get_viewport().get_visible_rect().size[1]/2)-220
+	var bi_myco_p_width = mid_width + 160
+	var bi_myco_p_height = mid_height - 220
 	var bi_myco_p_position = Vector2(bi_myco_p_width,bi_myco_p_height)
 
 	var bi_p_myco = make_bi_p_myco(bi_myco_p_position)
@@ -106,8 +122,8 @@ func _ready():
 	make_maize(maize_position)
 
 	
-	var bi_myco_k_width = int(get_viewport().get_visible_rect().size[0]/2)+210
-	var bi_myco_k_height = int(get_viewport().get_visible_rect().size[1]/2)-230
+	var bi_myco_k_width = mid_width + 210
+	var bi_myco_k_height = mid_height - 230
 	var bi_myco_k_position = Vector2(bi_myco_k_width,bi_myco_k_height)
 
 	var bi_k_myco = make_bi_k_myco(bi_myco_k_position)
@@ -329,12 +345,6 @@ func _spawn_bird():
 
 	
 func make_maize(pos):
-	
-	var mid_width = int(get_viewport().get_visible_rect().size[0]/2)
-	var mid_height = int(get_viewport().get_visible_rect().size[1]/2)
-	
-	var maize_center_offset_x = 160
-	var maize_center_offset_y = -20
 	var maize_position = pos
 	
 	var named = "Maize_" + str($Agents.get_child_count()+1)

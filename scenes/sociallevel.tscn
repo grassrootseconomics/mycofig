@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3 uid="uid://bketp5uhgmluh"]
+[gd_scene load_steps=12 format=3 uid="uid://bketp5uhgmluh"]
 
 [ext_resource type="Script" path="res://scenes/sociallevel.gd" id="1_jw2pv"]
 [ext_resource type="Texture2D" uid="uid://cs87sc1knnnbq" path="res://graphics/social.png" id="2_rgcoq"]
@@ -10,11 +10,17 @@
 [ext_resource type="AudioStream" uid="uid://bksoh5ra6licd" path="res://audio/cardinal.mp3" id="8_cf52g"]
 [ext_resource type="AudioStream" uid="uid://d3fiyl7nscm1t" path="res://audio/binaural-birds-loop-short.mp3" id="9_habmw"]
 [ext_resource type="AudioStream" uid="uid://b73pb374nldbc" path="res://audio/old-car-horn.mp3" id="10_x0m0b"]
+[ext_resource type="PackedScene" path="res://scenes/world_foundation.tscn" id="11_h4a0o"]
 
 [node name="SocialLevel" type="Node2D"]
 script = ExtResource("1_jw2pv")
 
+[node name="WorldFoundation" parent="." instance=ExtResource("11_h4a0o")]
+mode_id = "challenge"
+scenario_id = "people"
+
 [node name="Control" type="Control" parent="."]
+visible = false
 layout_mode = 3
 anchors_preset = 8
 anchor_left = 0.5

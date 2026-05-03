@@ -1,0 +1,26 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scenes/world_foundation.gd" id="1_y5g3w"]
+
+[node name="WorldFoundation" type="Node2D"]
+script = ExtResource("1_y5g3w")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position_smoothing_enabled = true
+position_smoothing_speed = 8.0
+
+[node name="DebugCanvas" type="CanvasLayer" parent="."]
+layer = 100
+
+[node name="DebugLabel" type="Label" parent="DebugCanvas"]
+anchors_preset = 1
+anchor_right = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = 160.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(1, 1, 1, 0.95)
+theme_override_font_sizes/font_size = 14
+text = "WorldFoundation"
+visible = false

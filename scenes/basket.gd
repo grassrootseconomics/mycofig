@@ -222,8 +222,9 @@ func _physics_process(delta):
 		#			return
 				
 		var hit = false
+		var mouse_screen = Global.world_to_screen(self, get_global_mouse_position())
 		
-		if $"../../UI/MarginContainer".get_rect().has_point(get_global_mouse_position()):
+		if $"../../UI/MarginContainer".get_global_rect().has_point(mouse_screen):
 			hit = true
 		
 		if hit==true:

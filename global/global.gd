@@ -17,6 +17,10 @@ var baby_mode = true
 var draw_lines = false
 
 var social_mode = false
+var world_bounds_enabled = false
+var world_rect = Rect2(Vector2.ZERO, Vector2.ZERO)
+var active_mode_id = ""
+var active_scenario_id = ""
 
 
 
@@ -252,6 +256,53 @@ func _ready() -> void:
 	if is_mobile_platform:
 		# Smaller radius reduces partner scans and line churn on phones.
 		social_buddy_radius = 170
+
+
+func set_world_context(rect: Rect2, mode_id: String = "", scenario_id: String = "") -> void:
+	world_rect = rect
+	world_bounds_enabled = true
+	active_mode_id = mode_id
+	active_scenario_id = scenario_id
+
+
+func clear_world_context() -> void:
+	world_bounds_enabled = false
+	world_rect = Rect2(Vector2.ZERO, Vector2.ZERO)
+	active_mode_id = ""
+	active_scenario_id = ""
+
+
+func get_world_rect(node: Node = null) -> Rect2:
+	if world_bounds_enabled:
+		return world_rect
+	if is_instance_valid(node):
+		return node.get_viewport().get_visible_rect()
+	return Rect2(Vector2.ZERO, Vector2(720, 1280))
+
+
+func get_world_center(node: Node = null) -> Vector2:
+	var rect = get_world_rect(node)
+	return rect.position + rect.size * 0.5
+
+
+func screen_to_world(node: Node, screen_pos: Vector2) -> Vector2:
+	if not is_instance_valid(node):
+		return screen_pos
+	var camera = node.get_viewport().get_camera_2d()
+	if is_instance_valid(camera):
+		var view_size = node.get_viewport().get_visible_rect().size
+		return camera.get_screen_center_position() - view_size * 0.5 + screen_pos
+	return screen_pos
+
+
+func world_to_screen(node: Node, world_pos: Vector2) -> Vector2:
+	if not is_instance_valid(node):
+		return world_pos
+	var camera = node.get_viewport().get_camera_2d()
+	if is_instance_valid(camera):
+		var view_size = node.get_viewport().get_visible_rect().size
+		return world_pos - (camera.get_screen_center_position() - view_size * 0.5)
+	return world_pos
 
 
 func get_rank_threshold(score_value: int) -> int:

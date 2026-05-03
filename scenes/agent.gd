@@ -473,8 +473,9 @@ func _physics_process(delta):
 	if is_dragging:
 		
 		var hit = false
+		var mouse_screen = Global.world_to_screen(self, get_global_mouse_position())
 		
-		if $"../../UI/MarginContainer".get_rect().has_point(get_global_mouse_position()):
+		if $"../../UI/MarginContainer".get_global_rect().has_point(mouse_screen):
 			hit = true
 		
 		if hit==true:
@@ -513,7 +514,7 @@ func _process(delta: float) -> void:
 		draw_lines = false
 	if(dead == false and is_instance_valid(self)):
 		logistics()
-	if(position.x> get_viewport().get_visible_rect().size[0] or position.y > get_viewport().get_visible_rect().size[1] or position.y<0 or position.x<0):
+	if not Global.get_world_rect(self).has_point(position):
 		self.kill_it()
 	if(is_instance_valid(self) and is_instance_valid(Global.active_agent)):
 		if(Global.active_agent.name == self.name):
@@ -768,8 +769,9 @@ func have_babies()  -> void:
 		
 		var new_pos = Vector2(new_x, new_y )
 		var hit = false
+		var new_pos_screen = Global.world_to_screen(self, new_pos)
 		
-		if $"../../UI/MarginContainer".get_rect().has_point(new_pos):
+		if $"../../UI/MarginContainer".get_global_rect().has_point(new_pos_screen):
 			hit = true
 			#print("hit something-info")
 		
@@ -781,11 +783,11 @@ func have_babies()  -> void:
 			if rects.has_point(new_pos):
 				hit = true
 		
-			
+		
 		
 		if( hit == false):
-			var screen_rect = get_viewport().get_visible_rect()
-			if (screen_rect.has_point(new_pos)):
+			var world_rect = Global.get_world_rect(self)
+			if (world_rect.has_point(new_pos)):
 				var new_agent_dict = {
 					"name" : self.type,
 					"pos": new_pos

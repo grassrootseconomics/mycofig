@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3 uid="uid://cqxduy84bksgu"]
+[gd_scene load_steps=11 format=3 uid="uid://cqxduy84bksgu"]
 
 [ext_resource type="Texture2D" uid="uid://b0g4untp5lhx" path="res://graphics/soil-cutaway.png" id="1_2nhsr"]
 [ext_resource type="Script" path="res://scenes/level.gd" id="1_76h6v"]
@@ -9,11 +9,17 @@
 [ext_resource type="AudioStream" uid="uid://dlnowg5diunu5" path="res://audio/rustle-bush.mp3" id="7_t2wt4"]
 [ext_resource type="AudioStream" uid="uid://b73pb374nldbc" path="res://audio/old-car-horn.mp3" id="9_qsfbp"]
 [ext_resource type="AudioStream" uid="uid://d3fiyl7nscm1t" path="res://audio/binaural-birds-loop-short.mp3" id="9_x3sm0"]
+[ext_resource type="PackedScene" path="res://scenes/world_foundation.tscn" id="10_2u58w"]
 
 [node name="Level" type="Node2D"]
 script = ExtResource("1_76h6v")
 
+[node name="WorldFoundation" parent="." instance=ExtResource("10_2u58w")]
+mode_id = "challenge"
+scenario_id = "plants"
+
 [node name="Control" type="Control" parent="."]
+visible = false
 layout_mode = 3
 anchors_preset = 8
 anchor_left = 0.5

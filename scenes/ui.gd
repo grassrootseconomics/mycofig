@@ -218,6 +218,18 @@ func _get_agents_root() -> Node:
 	return get_node_or_null("../Agents")
 
 
+func _screen_to_world(screen_pos: Vector2) -> Vector2:
+	return Global.screen_to_world(self, screen_pos)
+
+
+func _world_to_screen(world_pos: Vector2) -> Vector2:
+	return Global.world_to_screen(self, world_pos)
+
+
+func _get_world_rect() -> Rect2:
+	return Global.get_world_rect(self)
+
+
 func _get_agent_edge_radius(agent: Node) -> float:
 	var radius := 24.0
 	var sprite_node = agent.get("sprite")
@@ -261,10 +273,12 @@ func _get_reach_anchors(agents_root: Node) -> Array:
 
 
 func _is_valid_auto_spawn_position(pos: Vector2, agents_root: Node, anchor: Node = null) -> bool:
-	var view = get_viewport().get_visible_rect()
-	if not view.has_point(pos):
+	var world_rect = _get_world_rect()
+	if not world_rect.has_point(pos):
 		return false
-	if $MarginContainer.get_global_rect().has_point(pos):
+	var pos_screen = _world_to_screen(pos)
+	var view = get_viewport().get_visible_rect()
+	if view.has_point(pos_screen) and $MarginContainer.get_global_rect().has_point(pos_screen):
 		return false
 	if is_instance_valid(anchor):
 		var reach = _get_anchor_reach_radius(anchor)
@@ -290,9 +304,9 @@ func _get_auto_spawn_target() -> Dictionary:
 	}
 	var agents_root = _get_agents_root()
 	var anchors = _get_reach_anchors(agents_root)
-	var view = get_viewport().get_visible_rect()
+	var world_rect = _get_world_rect()
 	if anchors.is_empty():
-		target["pos"] = Vector2(view.size.x * 0.5, view.size.y * 0.35)
+		target["pos"] = world_rect.position + world_rect.size * 0.5
 		return target
 	for _attempt in range(AUTO_SPAWN_ATTEMPTS):
 		var anchor = anchors[inventory_spawn_rng.randi_range(0, anchors.size() - 1)]
@@ -314,7 +328,7 @@ func _get_auto_spawn_target() -> Dictionary:
 				target["anchor"] = anchor
 				return target
 	var fallback_anchor = anchors[inventory_spawn_rng.randi_range(0, anchors.size() - 1)]
-	var toward_center = view.get_center() - fallback_anchor.global_position
+	var toward_center = world_rect.get_center() - fallback_anchor.global_position
 	if toward_center.length() < 0.001:
 		toward_center = Vector2.RIGHT
 	var fallback_pos = fallback_anchor.global_position + toward_center.normalized() * _get_anchor_reach_radius(fallback_anchor)
@@ -322,7 +336,7 @@ func _get_auto_spawn_target() -> Dictionary:
 		target["pos"] = fallback_pos
 		target["anchor"] = fallback_anchor
 		return target
-	target["pos"] = Vector2(view.size.x * 0.5, view.size.y * 0.35)
+	target["pos"] = world_rect.position + world_rect.size * 0.5
 	return target
 
 
@@ -331,7 +345,7 @@ func _drop_inventory_agent(drop_pos: Vector2) -> void:
 		return
 	if Global.inventory[next_agent] <= 0:
 		return
-	var target_pos = drop_pos
+	var target_pos = _screen_to_world(drop_pos)
 	var spawn_anchor = null
 	var view = get_viewport().get_visible_rect()
 	if $MarginContainer.get_global_rect().has_point(drop_pos) or not view.has_point(drop_pos):

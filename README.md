@@ -20,6 +20,7 @@ Run a specific scene:
 ```bash
 godot4 --path . --scene res://scenes/level.tscn
 godot4 --path . --scene res://scenes/sociallevel.tscn
+godot4 --path . --scene res://scenes/world_foundation_test.tscn
 ```
 
 Headless smoke test:
@@ -39,6 +40,7 @@ Also toggle between plant/social views with the title screen checkboxes.
 
 ## Controls
 - `Left Click`: drag entities and place inventory items.
+- `Right Click + Drag` or `WASD/Arrow Keys`: pan camera across the larger tiled map.
 - `Tab`: cycle active agent.
 - `A`: toggle baby/spawn behavior.
 - `B`: toggle resource bars.
@@ -46,10 +48,18 @@ Also toggle between plant/social views with the title screen checkboxes.
 - `Esc` or `Q`: end run / go to game-over screen.
 - `2/3/4/5` (social mode): set connector count tuning.
 
+World foundation debug (test scene):
+- `F1`: toggle soil debug overlay.
+- `F2`: reset static baseline map.
+- `F3`: toggle tile stage edit mode.
+- `Left Click` (with edit on): cycle tile stage `0 -> 1 -> 2 -> 3 -> 0`.
+
 ## Project Structure
 - `global/global.gd`: global state, rank thresholds, spawn scaling, platform tuning.
 - `scenes/level.gd`: plants gameplay scene controller.
 - `scenes/sociallevel.gd`: social gameplay scene controller.
+- `scenes/world_foundation.gd`: shared tiled world, soil tile model, stage rendering, camera clamp/pan.
+- `scenes/world_foundation_test.tscn`: static validation map for M1 grid foundation.
 - `scenes/agent.gd`, `scenes/socialagent.gd`, `scenes/basket.gd`: core actor logic.
 - `scenes/bird.gd`, `scenes/tuktuk.gd`: predator/raider logic.
 - `scenes/ui.gd`: in-game HUD, inventory placement, drag preview.

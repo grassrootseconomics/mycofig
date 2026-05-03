@@ -12,6 +12,7 @@ func _reset_run_state() -> void:
 	Global.is_dragging = false
 	Global.stage_inc = 0
 	Global.bars_on = true
+	Global.allow_agent_reposition = false
 
 
 func _ready():

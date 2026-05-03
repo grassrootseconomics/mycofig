@@ -6,6 +6,7 @@ const HOTKEY_SPEED_DOWN := [KEY_MINUS, KEY_UNDERSCORE]
 const HOTKEY_QUIT := [KEY_ESCAPE, KEY_Q]
 const HOTKEY_TOGGLE_BARS := [KEY_B]
 const HOTKEY_TOGGLE_BABY := [KEY_M]
+const HOTKEY_TOGGLE_REPOSITION := [KEY_G]
 const HOTKEY_CYCLE_ACTIVE := [KEY_TAB]
 const HOTKEY_CONNECTORS_2 := [KEY_2]
 const HOTKEY_CONNECTORS_3 := [KEY_3]
@@ -79,6 +80,10 @@ static func handle_gameplay_hotkeys(event: InputEvent, owner: Node, agents_root:
 		Global.baby_mode = not Global.baby_mode
 		return true
 
+	if _is_pressed_key(event, HOTKEY_TOGGLE_REPOSITION):
+		Global.allow_agent_reposition = not Global.allow_agent_reposition
+		return true
+
 	if include_connector_keys:
 		if _is_pressed_key(event, HOTKEY_CONNECTORS_2):
 			Global.num_connectors = 2
@@ -118,6 +123,8 @@ static func mark_myco_lines_dirty(agents_root: Node) -> void:
 static func mark_all_buddies_dirty(agents_root: Node) -> void:
 	for agent in agents_root.get_children():
 		agent.new_buddies = true
+		if agent.get("type") == "myco":
+			agent.draw_lines = true
 
 
 static func _get_world_foundation(level_root: Node) -> Node:

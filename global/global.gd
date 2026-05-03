@@ -2,8 +2,8 @@ extends Node
 
 var score := 0
 
-var move_rate = 6
-var movement_speed = 200
+var move_rate = 4 #6
+var movement_speed = 100 #200
 var social_buddy_radius = 200
 var num_connectors = 4
 var active_agent = null
@@ -14,6 +14,7 @@ var bars_on = true
 var stage_inc = 0
 var max_stage_inc = 5
 var baby_mode = true
+var allow_agent_reposition = false
 var draw_lines = false
 
 var social_mode = false

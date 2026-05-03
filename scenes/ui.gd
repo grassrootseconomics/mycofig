@@ -66,8 +66,6 @@ func setup():
 	"tree":  $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4/ChooseTree,
 	"myco": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/ChooseMyco
 	}
-	for inv in inventory_labels:
-		inventory_labels[inv].text = str(Global.inventory[inv])
 	if(Global.social_mode):
 		for invs in inventory_sprites:
 			if(invs=="bean"):
@@ -82,6 +80,7 @@ func setup():
 				inventory_labels[invs].visible = false
 			elif(invs=="myco"):
 				inventory_sprites[invs].texture = load("res://graphics/basket.png")
+	refresh_inventory_counts()
 		
 	
 	sliders = []
@@ -137,6 +136,17 @@ func setup():
 		valSlider.connect("drag_ended",_on_h_slider_drag_ended)
 		sliders.append(passed)
 		#print (" ui process: ", sliders)
+
+
+func refresh_inventory_counts() -> void:
+	for inv in inventory_labels:
+		if is_instance_valid(inventory_labels[inv]):
+			inventory_labels[inv].text = str(int(Global.inventory.get(inv, 0)))
+		if is_instance_valid(inventory_sprites[inv]):
+			if int(Global.inventory.get(inv, 0)) < 1:
+				inventory_sprites[inv].modulate.a = 0.5
+			else:
+				inventory_sprites[inv].modulate.a = 1.0
 
 
 
@@ -367,24 +377,23 @@ func _drop_inventory_agent(drop_pos: Vector2) -> void:
 		return
 	var target_pos = _screen_to_world(drop_pos)
 	var spawn_anchor = null
+	var allow_replace = true
 	var view = get_viewport().get_visible_rect()
 	if $MarginContainer.get_global_rect().has_point(drop_pos) or not view.has_point(drop_pos):
 		var auto_target = _get_auto_spawn_target()
 		target_pos = auto_target["pos"]
 		spawn_anchor = auto_target["anchor"]
+		allow_replace = false
 	var new_agent_dict = {
 		"name" : next_agent,
-		"pos": target_pos
+		"pos": target_pos,
+		"allow_replace": allow_replace
 	}
 	if is_instance_valid(spawn_anchor):
 		new_agent_dict["spawn_anchor"] = spawn_anchor
 	emit_signal("new_agent", new_agent_dict)
 	Global.inventory[next_agent] -=1
-	inventory_labels[next_agent].text = str(Global.inventory[next_agent])
-	if (Global.inventory[next_agent] <1):
-		inventory_sprites[next_agent].modulate.a = 0.5
-	else:
-		inventory_sprites[next_agent].modulate.a = 1
+	refresh_inventory_counts()
 
 
 func _input(event):

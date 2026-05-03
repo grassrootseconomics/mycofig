@@ -4,6 +4,41 @@ class_name Agent
 @export var speed: int
 
 const LevelHelpersRef = preload("res://scenes/level_helpers.gd")
+const TEX_BEAN_SEED_STAGE_PATH := "res://graphics/bean_seed_stage.png"
+const TEX_BEAN_SPROUT_STAGE_PATH := "res://graphics/bean_sprout_stage.png"
+const TEX_BEAN_VINE_STAGE_PATH := "res://graphics/bean_vine_stage.png"
+const TEX_BEAN_POD_STAGE_PATH := "res://graphics/bean_pod_stage.png"
+const TEX_BEAN_DEAD_STAGE_PATH := "res://graphics/bean_dead_stage.png"
+const TEX_SQUASH_SPROUT_STAGE_PATH := "res://graphics/squash_sprout_stage.png"
+const TEX_SQUASH_VINE_STAGE_PATH := "res://graphics/squash_vine_stage.png"
+const TEX_SQUASH_POD_STAGE_PATH := "res://graphics/squash_pod_stage.png"
+const TEX_SQUASH_DEAD_STAGE_PATH := "res://graphics/squash_dead_stage.png"
+const TEX_MAIZE_SPROUT_STAGE_PATH := "res://graphics/maize_sprout_stage.png"
+const TEX_MAIZE_VINE_STAGE_PATH := "res://graphics/maize_vine_stage.png"
+const TEX_MAIZE_POD_STAGE_PATH := "res://graphics/maize_pod_stage.png"
+const TEX_MAIZE_DEAD_STAGE_PATH := "res://graphics/maize_dead_stage.png"
+
+enum BeanGrowthStage {
+	SEED,
+	SPROUT,
+	VINE,
+	POD_READY,
+	DEAD
+}
+
+const BEAN_OVERRIPE_TICKS := 14
+const BEAN_DEAD_CLEANUP_TICKS := 6
+const BEAN_DEAD_RESPAWN_DELAY_TICKS := 1
+const BEAN_POST_HARVEST_TO_DEAD_TICKS := 2
+const BEAN_POD_BABY_TICK_INTERVAL := 4
+const BEAN_STAGE_CONSUMPTIONS_PER_ADVANCE := 3
+const BEAN_STAGE_ADVANCE_WAIT_TICKS := 1
+const BEAN_HARVEST_YIELD := 3
+const LIFECYCLE_POD_BABY_MIN := 0
+const LIFECYCLE_POD_BABY_MAX := 3
+const BASE_MOVE_RATE_FOR_STARVATION := 6.0
+const BASE_MOVEMENT_SPEED_FOR_STARVATION := 200.0
+const MIN_STARVATION_SPEED_SCALE := 0.2
 
 signal trade(pos)
 signal clicked
@@ -121,6 +156,21 @@ var _tile_snap_in_progress := false
 var _keyboard_moving := false
 var _drag_hint_active := false
 var _press_started_here := false
+var _harvest_drag_only := false
+var _harvest_drag_sprite: Sprite2D = null
+var bean_pod_ticks := 0
+var bean_dead_ticks := 0
+var bean_stage_consumptions := 0
+var bean_stage_wait_ticks := 0
+var bean_respawn_wait_ticks := 0
+var bean_respawn_requested := false
+var bean_post_harvest_senescence := false
+var bean_post_harvest_ticks := 0
+var bean_stage: int = BeanGrowthStage.SEED
+var bean_harvest_ready := false
+var bean_pod_sparkle_played := false
+var bean_stage_textures := {}
+var bean_base_scale := Vector2.ONE
 
 
 func _get_sprite_half_extents() -> Vector2:
@@ -346,6 +396,58 @@ func _clear_drag_tile_hint() -> void:
 	_drag_hint_active = false
 
 
+func _get_harvest_drag_texture() -> Texture2D:
+	if is_instance_valid(sprite_texture):
+		return sprite_texture
+	if is_instance_valid(sprite) and is_instance_valid(sprite.texture):
+		return sprite.texture
+	return null
+
+
+func _start_harvest_drag_proxy() -> void:
+	if not _harvest_drag_only:
+		_end_harvest_drag_proxy()
+		return
+	if is_instance_valid(_harvest_drag_sprite):
+		_update_harvest_drag_proxy_position()
+		return
+	var harvest_texture := _get_harvest_drag_texture()
+	if not is_instance_valid(harvest_texture):
+		return
+	var level_root = _get_level_root()
+	if not is_instance_valid(level_root):
+		return
+	var drag_sprite := Sprite2D.new()
+	drag_sprite.texture = harvest_texture
+	drag_sprite.top_level = true
+	drag_sprite.z_index = 2000
+	drag_sprite.z_as_relative = false
+	drag_sprite.modulate = Color(1.0, 1.0, 1.0, 0.96)
+	var drag_scale := Vector2.ONE
+	if _is_bean_lifecycle_enabled():
+		drag_scale = bean_base_scale
+	elif is_instance_valid(sprite):
+		drag_scale = sprite.scale
+	if drag_scale == Vector2.ZERO:
+		drag_scale = Vector2.ONE
+	drag_sprite.scale = drag_scale
+	level_root.add_child(drag_sprite)
+	_harvest_drag_sprite = drag_sprite
+	_update_harvest_drag_proxy_position()
+
+
+func _update_harvest_drag_proxy_position() -> void:
+	if not is_instance_valid(_harvest_drag_sprite):
+		return
+	_harvest_drag_sprite.global_position = get_global_mouse_position()
+
+
+func _end_harvest_drag_proxy() -> void:
+	if is_instance_valid(_harvest_drag_sprite):
+		_harvest_drag_sprite.queue_free()
+	_harvest_drag_sprite = null
+
+
 func is_trade_locked_by_user_move() -> bool:
 	if not draggable:
 		return false
@@ -355,6 +457,388 @@ func is_trade_locked_by_user_move() -> bool:
 	if is_active:
 		return Input.get_vector("left", "right", "up", "down") != Vector2.ZERO
 	return false
+
+
+func _clear_active_selection_if_self() -> void:
+	var active_matches_self := false
+	if Global.active_agent != null and is_instance_valid(Global.active_agent):
+		active_matches_self = Global.active_agent == self or Global.active_agent.name == self.name
+	if not active_matches_self:
+		return
+	for box in $"../../Boxes".get_children():
+		if box.has_method("clear_points"):
+			box.clear_points()
+		box.queue_free()
+	Global.active_agent = null
+	Global.prevent_auto_select = true
+
+
+func _is_reposition_subject() -> bool:
+	var entity_type = str(type)
+	return entity_type == "bean" or entity_type == "squash" or entity_type == "maize" or entity_type == "tree" or entity_type == "myco"
+
+
+func _can_user_reposition() -> bool:
+	if not _is_reposition_subject():
+		return true
+	return bool(Global.allow_agent_reposition)
+
+
+func can_drag_for_inventory_harvest() -> bool:
+	return _is_bean_lifecycle_enabled() and bean_harvest_ready and bean_stage == BeanGrowthStage.POD_READY
+
+
+func _can_start_user_drag() -> bool:
+	if _can_user_reposition():
+		return true
+	return can_drag_for_inventory_harvest()
+
+
+func _is_bean_lifecycle_enabled() -> bool:
+	if Global.social_mode:
+		return false
+	var crop_type = str(type)
+	return crop_type == "bean" or crop_type == "squash" or crop_type == "maize"
+
+
+func _get_lifecycle_crop_type() -> String:
+	var crop_type = str(type)
+	if crop_type == "maize":
+		return "maize"
+	if crop_type == "squash":
+		return "squash"
+	return "bean"
+
+
+func _get_trade_speed_ratio_for_starvation() -> float:
+	var move_rate_ratio := float(Global.move_rate) / BASE_MOVE_RATE_FOR_STARVATION
+	var movement_speed_ratio := float(Global.movement_speed) / BASE_MOVEMENT_SPEED_FOR_STARVATION
+	var combined_ratio := (move_rate_ratio + movement_speed_ratio) * 0.5
+	return clampf(combined_ratio, MIN_STARVATION_SPEED_SCALE, 1.0)
+
+
+func _get_starvation_alpha_step() -> float:
+	return maxf(alpha_step_down * _get_trade_speed_ratio_for_starvation(), 0.0001)
+
+
+func _spawn_growth_sparkle() -> void:
+	var sparkle = Global.sparkle_scene.instantiate()
+	sparkle.z_as_relative = false
+	sparkle.position = self.position
+	sparkle.global_position = self.global_position
+	$"../../Sparkles".add_child(sparkle)
+	sparkle.start(0.75)
+
+
+func _get_bean_stage_scale_multiplier(stage_value: int) -> float:
+	var crop_type = _get_lifecycle_crop_type()
+	if crop_type == "maize":
+		match stage_value:
+			BeanGrowthStage.SPROUT:
+				return 1.2
+			BeanGrowthStage.VINE:
+				return 1.95
+			BeanGrowthStage.POD_READY:
+				return 2.25
+			BeanGrowthStage.DEAD:
+				return 1.75
+			_:
+				return 1.2
+
+	if crop_type == "squash":
+		match stage_value:
+			BeanGrowthStage.SPROUT:
+				return 1.35
+			BeanGrowthStage.VINE:
+				return 1.85
+			BeanGrowthStage.POD_READY:
+				return 2.25
+			BeanGrowthStage.DEAD:
+				return 1.6
+			_:
+				return 1.35
+
+	match stage_value:
+		BeanGrowthStage.SPROUT:
+			return 1.5
+		BeanGrowthStage.VINE:
+			return 1.9
+		BeanGrowthStage.POD_READY:
+			return 2.4
+		BeanGrowthStage.DEAD:
+			return 1.7
+		_:
+			return 1.5
+
+
+func _get_bean_stage_target_scale(stage_value: int) -> Vector2:
+	return bean_base_scale * _get_bean_stage_scale_multiplier(stage_value)
+
+
+func _get_lifecycle_texture_scale_adjust(texture: Texture2D) -> Vector2:
+	if not is_instance_valid(texture):
+		return Vector2.ONE
+	if not is_instance_valid(sprite_texture):
+		return Vector2.ONE
+	var base_size: Vector2 = sprite_texture.get_size()
+	var stage_size: Vector2 = texture.get_size()
+	if base_size.x <= 0.0 or base_size.y <= 0.0:
+		return Vector2.ONE
+	if stage_size.x <= 0.0 or stage_size.y <= 0.0:
+		return Vector2.ONE
+	return Vector2(
+		base_size.x / stage_size.x,
+		base_size.y / stage_size.y
+	)
+
+
+func _get_lifecycle_stage_texture_path(stage_value: int) -> String:
+	var crop_type = _get_lifecycle_crop_type()
+	if crop_type == "maize":
+		match stage_value:
+			BeanGrowthStage.SEED:
+				return TEX_MAIZE_SPROUT_STAGE_PATH
+			BeanGrowthStage.SPROUT:
+				return TEX_MAIZE_SPROUT_STAGE_PATH
+			BeanGrowthStage.VINE:
+				return TEX_MAIZE_VINE_STAGE_PATH
+			BeanGrowthStage.POD_READY:
+				return TEX_MAIZE_POD_STAGE_PATH
+			BeanGrowthStage.DEAD:
+				return TEX_MAIZE_DEAD_STAGE_PATH
+		return TEX_MAIZE_SPROUT_STAGE_PATH
+
+	if crop_type == "squash":
+		match stage_value:
+			BeanGrowthStage.SEED:
+				return TEX_SQUASH_SPROUT_STAGE_PATH
+			BeanGrowthStage.SPROUT:
+				return TEX_SQUASH_SPROUT_STAGE_PATH
+			BeanGrowthStage.VINE:
+				return TEX_SQUASH_VINE_STAGE_PATH
+			BeanGrowthStage.POD_READY:
+				return TEX_SQUASH_POD_STAGE_PATH
+			BeanGrowthStage.DEAD:
+				return TEX_SQUASH_DEAD_STAGE_PATH
+		return TEX_SQUASH_SPROUT_STAGE_PATH
+
+	match stage_value:
+		BeanGrowthStage.SEED:
+			return TEX_BEAN_SPROUT_STAGE_PATH
+		BeanGrowthStage.SPROUT:
+			return TEX_BEAN_SPROUT_STAGE_PATH
+		BeanGrowthStage.VINE:
+			return TEX_BEAN_VINE_STAGE_PATH
+		BeanGrowthStage.POD_READY:
+			return TEX_BEAN_POD_STAGE_PATH
+		BeanGrowthStage.DEAD:
+			return TEX_BEAN_DEAD_STAGE_PATH
+	return TEX_BEAN_SPROUT_STAGE_PATH
+
+
+func _load_bean_stage_texture(path: String) -> Texture2D:
+	if bean_stage_textures.has(path):
+		var cached = bean_stage_textures[path]
+		if cached is Texture2D:
+			return cached
+	var loaded = ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_REPLACE)
+	if not (loaded is Texture2D):
+		loaded = ResourceLoader.load(path)
+	if loaded is Texture2D:
+		bean_stage_textures[path] = loaded
+		return loaded
+	return null
+
+
+func _set_bean_stage(new_stage: int, force: bool = false) -> void:
+	if not _is_bean_lifecycle_enabled():
+		return
+	if new_stage == BeanGrowthStage.SEED:
+		new_stage = BeanGrowthStage.SPROUT
+	if not force and bean_stage == new_stage:
+		return
+
+	bean_stage = new_stage
+	bean_harvest_ready = bean_stage == BeanGrowthStage.POD_READY
+	draggable = bean_stage != BeanGrowthStage.DEAD
+	if bean_stage == BeanGrowthStage.DEAD:
+		_clear_active_selection_if_self()
+		if bean_respawn_wait_ticks <= 0:
+			bean_respawn_wait_ticks = BEAN_DEAD_RESPAWN_DELAY_TICKS
+		bean_respawn_requested = false
+		bean_post_harvest_senescence = false
+		bean_post_harvest_ticks = 0
+	var next_path = _get_lifecycle_stage_texture_path(bean_stage)
+	var next_texture: Texture2D = _load_bean_stage_texture(next_path)
+	if not is_instance_valid(next_texture):
+		next_texture = sprite_texture
+
+	if is_instance_valid(sprite):
+		sprite.texture = next_texture
+		sprite.modulate = Color.WHITE
+		var stage_scale = _get_bean_stage_target_scale(bean_stage)
+		stage_scale *= _get_lifecycle_texture_scale_adjust(next_texture)
+		if bean_stage == BeanGrowthStage.DEAD:
+			sprite.modulate = Color(0.92, 0.86, 0.78, 1.0)
+			sprite.scale = stage_scale
+		elif not force:
+			var base_scale: Vector2 = stage_scale
+			sprite.scale = base_scale
+			var tween = get_tree().create_tween()
+			tween.tween_property(sprite, "scale", base_scale * 1.05, 0.07)
+			tween.tween_property(sprite, "scale", base_scale, 0.09)
+		else:
+			sprite.scale = stage_scale
+
+	if bean_stage == BeanGrowthStage.POD_READY and not bean_pod_sparkle_played:
+		_spawn_growth_sparkle()
+		bean_pod_sparkle_played = true
+
+
+func _reset_bean_lifecycle() -> void:
+	bean_pod_ticks = 0
+	bean_dead_ticks = 0
+	bean_stage_consumptions = 0
+	bean_stage_wait_ticks = 0
+	bean_respawn_wait_ticks = 0
+	bean_respawn_requested = false
+	bean_post_harvest_senescence = false
+	bean_post_harvest_ticks = 0
+	bean_harvest_ready = false
+	bean_pod_sparkle_played = false
+	bean_stage = BeanGrowthStage.SPROUT
+	_set_bean_stage(BeanGrowthStage.SPROUT, true)
+
+
+func _emit_death_cycle_regrowth_request() -> void:
+	if not _is_bean_lifecycle_enabled():
+		return
+	var world_pos := global_position
+	var world = _get_world_foundation_node()
+	if is_instance_valid(world) and world.has_method("world_to_tile") and world.has_method("tile_to_world_center") and world.has_method("in_bounds"):
+		var coord = Vector2i(world.world_to_tile(_clamp_position_to_world_rect(global_position)))
+		if not world.in_bounds(coord):
+			return
+		world_pos = world.tile_to_world_center(coord)
+	var new_agent_dict = {
+		"name": str(type),
+		"pos": world_pos,
+		"require_exact_tile": true,
+		"ignore_agent": self
+	}
+	emit_signal("new_agent", new_agent_dict)
+
+
+func _advance_bean_lifecycle(consumed_all_nutrients: bool) -> void:
+	if not _is_bean_lifecycle_enabled():
+		return
+
+	if bean_stage == BeanGrowthStage.DEAD:
+		bean_dead_ticks += 1
+		if is_instance_valid(sprite):
+			var fade_left = 1.0 - (float(bean_dead_ticks) / float(max(BEAN_DEAD_CLEANUP_TICKS, 1)))
+			var c = sprite.modulate
+			c.a = clampf(fade_left, 0.0, 1.0)
+			sprite.modulate = c
+		if bean_dead_ticks < BEAN_DEAD_CLEANUP_TICKS:
+			return
+		if bean_respawn_wait_ticks > 0:
+			bean_respawn_wait_ticks -= 1
+			return
+		if not bean_respawn_requested:
+			bean_respawn_requested = true
+			dead = true
+			_emit_death_cycle_regrowth_request()
+		if killable:
+			kill_it()
+		return
+
+	if bean_post_harvest_senescence:
+		bean_post_harvest_ticks += 1
+		if bean_post_harvest_ticks >= BEAN_POST_HARVEST_TO_DEAD_TICKS:
+			bean_harvest_ready = false
+			bean_dead_ticks = 0
+			bean_respawn_wait_ticks = BEAN_DEAD_RESPAWN_DELAY_TICKS
+			bean_respawn_requested = false
+			bean_post_harvest_senescence = false
+			bean_post_harvest_ticks = 0
+			_set_bean_stage(BeanGrowthStage.DEAD)
+		return
+
+	if bean_stage == BeanGrowthStage.POD_READY:
+		bean_pod_ticks += 1
+		var pod_baby_tick = bean_pod_ticks > 0 and (bean_pod_ticks % BEAN_POD_BABY_TICK_INTERVAL) == 0
+		if pod_baby_tick and bean_harvest_ready and Global.baby_mode:
+			var pod_baby_roll := random.randi_range(LIFECYCLE_POD_BABY_MIN, LIFECYCLE_POD_BABY_MAX)
+			for _i in range(pod_baby_roll):
+				have_babies(true)
+		if bean_pod_ticks >= BEAN_OVERRIPE_TICKS:
+			bean_harvest_ready = false
+			bean_dead_ticks = 0
+			bean_respawn_wait_ticks = BEAN_DEAD_RESPAWN_DELAY_TICKS
+			bean_respawn_requested = false
+			bean_post_harvest_senescence = false
+			bean_post_harvest_ticks = 0
+			_set_bean_stage(BeanGrowthStage.DEAD)
+		return
+
+	if bean_stage_wait_ticks > 0:
+		bean_stage_wait_ticks -= 1
+
+	if not consumed_all_nutrients:
+		return
+
+	if bean_stage_wait_ticks > 0:
+		return
+
+	bean_stage_consumptions += 1
+	if bean_stage_consumptions < BEAN_STAGE_CONSUMPTIONS_PER_ADVANCE:
+		return
+
+	bean_stage_consumptions = 0
+	bean_stage_wait_ticks = BEAN_STAGE_ADVANCE_WAIT_TICKS
+
+	if bean_stage == BeanGrowthStage.SPROUT:
+		_set_bean_stage(BeanGrowthStage.VINE)
+	elif bean_stage == BeanGrowthStage.VINE:
+		bean_pod_ticks = 0
+		_set_bean_stage(BeanGrowthStage.POD_READY)
+
+
+func _try_harvest_to_inventory() -> bool:
+	if not _is_bean_lifecycle_enabled():
+		return false
+	if not bean_harvest_ready or bean_stage != BeanGrowthStage.POD_READY:
+		return false
+	var harvest_key = str(type)
+	Global.inventory[harvest_key] = int(Global.inventory.get(harvest_key, 0)) + BEAN_HARVEST_YIELD
+	var ui_node = get_node_or_null("../../UI")
+	if is_instance_valid(ui_node) and ui_node.has_method("refresh_inventory_counts"):
+		ui_node.refresh_inventory_counts()
+	bean_harvest_ready = false
+	bean_pod_ticks = 0
+	bean_stage_consumptions = 0
+	bean_stage_wait_ticks = 0
+	bean_respawn_requested = false
+	bean_post_harvest_senescence = true
+	bean_post_harvest_ticks = 0
+	_set_bean_stage(BeanGrowthStage.VINE, true)
+	if is_dragging:
+		is_dragging = false
+		Global.is_dragging = false
+	_clear_drag_tile_hint()
+	_begin_snap_to_nearest_tile(position)
+	return true
+
+
+func supports_inventory_harvest() -> bool:
+	return _is_bean_lifecycle_enabled()
+
+
+func try_harvest_to_inventory() -> bool:
+	if not supports_inventory_harvest():
+		return false
+	return _try_harvest_to_inventory()
 
 
 func set_variables(a_dict) -> void:
@@ -414,6 +898,9 @@ func set_variables(a_dict) -> void:
 		applied_scale = 1.0
 	min_scale = applied_scale
 	sprite.scale *= min_scale
+	bean_base_scale = sprite.scale
+	if _is_bean_lifecycle_enabled():
+		_reset_bean_lifecycle()
 	
 	$GrowthTimer.wait_time = Global.growth_time
 	$EvaporateTimer.wait_time = Global.evap_time
@@ -624,22 +1111,14 @@ func kill_it():
 	#self.queue_free()
 	_clear_drag_tile_hint()
 	_tile_snap_in_progress = false
+	_harvest_drag_only = false
+	_end_harvest_drag_proxy()
 	if is_dragging:
 		is_dragging = false
 		Global.is_dragging = false
 	self.call_deferred("queue_free")
 	self.dead = true
-	
-
-	if(Global.active_agent != null):
-		if(is_instance_valid(Global.active_agent)):
-			if(Global.active_agent.name == self.name):
-				if(draw_box):
-					for box in $"../../Boxes".get_children():
-						box.clear_points()	
-						box.queue_free()
-				Global.active_agent = null
-				Global.prevent_auto_select = true
+	_clear_active_selection_if_self()
 	
 	
 	new_buddies = true
@@ -668,6 +1147,7 @@ func kill_it():
 
 func _exit_tree() -> void:
 	_clear_drag_tile_hint()
+	_end_harvest_drag_proxy()
 
 
 func evaporate():
@@ -707,13 +1187,21 @@ func _input(event):
 				if event.pressed:
 					
 					if $Sprite2D.get_rect().has_point(to_local(world_click_pos)):
-						if(Global.is_dragging == false):
-							_press_started_here = true
+						_press_started_here = true
+						if(Global.is_dragging == false and _can_start_user_drag()):
+							_harvest_drag_only = can_drag_for_inventory_harvest()
 							is_dragging = true
 							Global.is_dragging = true
 							Global.active_agent = self
 							Global.prevent_auto_select = false
 							_cancel_tile_snap()
+							if _harvest_drag_only:
+								_start_harvest_drag_proxy()
+							else:
+								_end_harvest_drag_proxy()
+						else:
+							Global.active_agent = self
+							Global.prevent_auto_select = false
 					else:
 						_press_started_here = false
 						#is_dragging = true
@@ -727,7 +1215,11 @@ func _input(event):
 					if was_dragging:
 						is_dragging = false
 						Global.is_dragging = false
-						_begin_snap_to_nearest_tile(position)
+						if _harvest_drag_only:
+							_end_harvest_drag_proxy()
+						else:
+							_begin_snap_to_nearest_tile(position)
+						_harvest_drag_only = false
 						_clear_drag_tile_hint()
 					if pressed_here and $Sprite2D.get_rect().has_point(to_local(world_click_pos)):
 						#emit_signal("clicked_agent",self)
@@ -747,13 +1239,30 @@ func _physics_process(delta):
 			hit = true
 		
 		if hit==true:
-			kill_it()
+			if supports_inventory_harvest():
+				if try_harvest_to_inventory():
+					_end_harvest_drag_proxy()
+					_harvest_drag_only = false
+					return
+				is_dragging = false
+				Global.is_dragging = false
+				if _harvest_drag_only:
+					_end_harvest_drag_proxy()
+				else:
+					_begin_snap_to_nearest_tile(position)
+				_harvest_drag_only = false
+			else:
+				kill_it()
+			_clear_drag_tile_hint()
 			return
 		
-		var t = min(1.0, delay * delta)
-		var dragged_target = position.lerp(get_global_mouse_position(), t)
-		position = _clamp_position_to_world(dragged_target)
-		_update_bar_positions()
+		if _harvest_drag_only:
+			_update_harvest_drag_proxy_position()
+		else:
+			var t = min(1.0, delay * delta)
+			var dragged_target = position.lerp(get_global_mouse_position(), t)
+			position = _clamp_position_to_world(dragged_target)
+			_update_bar_positions()
 	
 	if(caught_by != null):
 		if(caught_by is Tuktuk):
@@ -768,7 +1277,11 @@ func _process(delta: float) -> void:
 		Global.is_dragging = false
 	if is_dragging and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		is_dragging = false
-		_begin_snap_to_nearest_tile(position)
+		if _harvest_drag_only:
+			_end_harvest_drag_proxy()
+		else:
+			_begin_snap_to_nearest_tile(position)
+		_harvest_drag_only = false
 		_clear_drag_tile_hint()
 
 	if new_buddies:
@@ -785,11 +1298,15 @@ func _process(delta: float) -> void:
 			draw_selected_box()
 			draw_box=false
 		var direction = Input.get_vector("left","right","up","down")
-		if direction != Vector2.ZERO:
+		if direction != Vector2.ZERO and _can_user_reposition():
 			_keyboard_moving = true
 			_cancel_tile_snap()
 			var moved_pos = position + direction * 200 * delta
 			position = _clamp_position_to_world(moved_pos)
+		elif direction != Vector2.ZERO:
+			if _keyboard_moving:
+				_keyboard_moving = false
+				_begin_snap_to_nearest_tile(position)
 		elif _keyboard_moving:
 			_keyboard_moving = false
 			_begin_snap_to_nearest_tile(position)
@@ -798,13 +1315,14 @@ func _process(delta: float) -> void:
 			_keyboard_moving = false
 			_begin_snap_to_nearest_tile(position)
 
-	if(dead == false and is_instance_valid(self) and not is_trade_locked_by_user_move()):
+	var bean_dead_phase = _is_bean_lifecycle_enabled() and bean_stage == BeanGrowthStage.DEAD
+	if(dead == false and not bean_dead_phase and is_instance_valid(self) and not is_trade_locked_by_user_move()):
 		logistics()
 	
 	if not is_dragging and not _keyboard_moving:
 		_advance_tile_snap(delta)
 
-	if is_dragging:
+	if is_dragging and not _harvest_drag_only:
 		_update_drag_tile_hint(position)
 	elif _keyboard_moving:
 		_update_drag_tile_hint(position)
@@ -963,7 +1481,45 @@ func _on_growth_timer_timeout() -> void:
 	for res in assets:
 		if assets[res] <= 0:
 			all_in = false
-			
+	var starvation_alpha_step := _get_starvation_alpha_step()
+
+	if _is_bean_lifecycle_enabled():
+		var consumed_all_nutrients := false
+		if all_in:
+			var old_modulate_up = modulate
+			var new_alpha_up = modulate.a + alpha_step_up
+			if new_alpha_up > high_alpha:
+				new_alpha_up = high_alpha
+			self.modulate = Color(old_modulate_up, new_alpha_up)
+
+			Global.score += 400
+			emit_signal("update_score")
+			for res in assets:
+				assets[res] -= 1
+				bars[res].value = assets[res]
+			consumed_all_nutrients = true
+		elif bean_stage != BeanGrowthStage.DEAD:
+			var old_modulate_down = modulate
+			var new_alpha_down = modulate.a - starvation_alpha_step
+			if new_alpha_down < low_alpha:
+				new_alpha_down = low_alpha
+				if Global.is_killing and killable:
+					if bean_stage == BeanGrowthStage.POD_READY or bean_post_harvest_senescence:
+						bean_harvest_ready = false
+						bean_dead_ticks = 0
+						bean_respawn_wait_ticks = BEAN_DEAD_RESPAWN_DELAY_TICKS
+						bean_respawn_requested = false
+						bean_post_harvest_senescence = false
+						bean_post_harvest_ticks = 0
+						_set_bean_stage(BeanGrowthStage.DEAD)
+					else:
+						kill_it()
+					return
+			self.modulate = Color(old_modulate_down, new_alpha_down)
+
+		_advance_bean_lifecycle(consumed_all_nutrients)
+		return
+
 	var newScale = $Sprite2D.scale
 	#print(name, " assets: ", assets)
 	if all_in == true:	
@@ -997,7 +1553,7 @@ func _on_growth_timer_timeout() -> void:
 			#print($Sprite2D.scale)
 			
 		var old_modulate = modulate
-		var new_alpha = modulate.a-alpha_step_down
+		var new_alpha = modulate.a - starvation_alpha_step
 		if new_alpha < low_alpha:
 			new_alpha = low_alpha
 			
@@ -1013,15 +1569,7 @@ func _on_growth_timer_timeout() -> void:
 		#tween.set_parallel(true)	
 		
 	if newScale.x >= max_scale and newScale.y >= max_scale and modulate.a >= 1:
-		#print("increase score and twinkle")
-		var sparkle = Global.sparkle_scene.instantiate()
-		
-		sparkle.z_as_relative = false
-		sparkle.position = self.position
-		sparkle.global_position = self.global_position
-		#sparkle.z_index =-1
-		$"../../Sparkles".add_child(sparkle)
-		sparkle.start(0.75)
+		_spawn_growth_sparkle()
 	
 		if Global.baby_mode:
 			if(Global.is_max_babies == true):
@@ -1030,7 +1578,9 @@ func _on_growth_timer_timeout() -> void:
 			else:
 				have_babies()
 	
-func have_babies()  -> void:
+func have_babies(force_spawn: bool = false)  -> void:
+	if _is_bean_lifecycle_enabled() and bean_stage != BeanGrowthStage.POD_READY:
+		return
 	
 	var max_rounds = 10
 	var current_round = 0
@@ -1089,12 +1639,17 @@ func have_babies()  -> void:
 					"pos": new_pos
 				}
 				#print("old pos: x: ",global_position.x, " y: ", global_position.y , "new agent signal: ", new_agent_dict)
-				current_maturity +=1 
-				if(current_maturity >= peak_maturity):
+				if force_spawn:
 					emit_signal("new_agent", new_agent_dict)
 					baby_made = true
 					current_babies +=1
-					current_maturity = 0
+				else:
+					current_maturity +=1 
+					if(current_maturity >= peak_maturity):
+						emit_signal("new_agent", new_agent_dict)
+						baby_made = true
+						current_babies +=1
+						current_maturity = 0
 				
 				#make_squash(event.position)		
 
@@ -1121,6 +1676,7 @@ func _on_body_entered(body: Node2D) -> void:
 			if(body is Bird):
 				sprite.rotate(PI/4)
 			self.dead = true
+			_clear_active_selection_if_self()
 			
 			var living = false
 			

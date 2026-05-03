@@ -249,13 +249,17 @@ func _input(event):
 			
 			if event.pressed:
 				if $Sprite2D.get_rect().has_point(to_local(world_click_pos)):
-					if(Global.is_dragging == false):
+					if(Global.is_dragging == false and _can_start_user_drag()):
 						_press_started_here = true
 						is_dragging = true
 						Global.is_dragging = true
 						Global.active_agent = self
 						Global.prevent_auto_select = false
 						_cancel_tile_snap()
+					else:
+						_press_started_here = true
+						Global.active_agent = self
+						Global.prevent_auto_select = false
 				else:
 					_press_started_here = false
 			else:
@@ -334,6 +338,13 @@ func kill_it():
 	#self.queue_free()
 	self.call_deferred("queue_free")
 	self.dead = true
+	if Global.active_agent != null:
+		if is_instance_valid(Global.active_agent) and Global.active_agent.name == self.name:
+			for box in $"../../Boxes".get_children():
+				box.clear_points()
+				box.queue_free()
+			Global.active_agent = null
+			Global.prevent_auto_select = true
 	
 	trade_buddies = []
 	new_buddies = true

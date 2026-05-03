@@ -50,6 +50,53 @@ func _resolve_tile_spawn_pos(pos: Vector2) -> Vector2:
 	return LevelHelpersRef.resolve_snapped_spawn_position(self, $Agents, pos)
 
 
+func _resolve_exact_tile_spawn_pos(pos: Vector2, ignore_agent: Variant = null) -> Dictionary:
+	var result := {
+		"ok": true,
+		"pos": pos
+	}
+	var world = _get_world_foundation()
+	if not is_instance_valid(world):
+		return result
+	if not (world.has_method("world_to_tile") and world.has_method("tile_to_world_center") and world.has_method("in_bounds")):
+		return result
+	var coord = Vector2i(world.world_to_tile(pos))
+	if not world.in_bounds(coord):
+		result["ok"] = false
+		return result
+	if LevelHelpersRef.is_tile_occupied(self, $Agents, coord, ignore_agent):
+		result["ok"] = false
+		return result
+	result["pos"] = world.tile_to_world_center(coord)
+	return result
+
+
+func _find_replaceable_agent_at_world_pos(pos: Vector2, ignore_agent: Variant = null) -> Node:
+	var world = _get_world_foundation()
+	if not is_instance_valid(world):
+		return null
+	if not (world.has_method("world_to_tile") and world.has_method("tile_to_world_center") and world.has_method("in_bounds")):
+		return null
+	var coord = Vector2i(world.world_to_tile(pos))
+	if not world.in_bounds(coord):
+		return null
+	for agent in $Agents.get_children():
+		if not is_instance_valid(agent):
+			continue
+		if is_instance_valid(ignore_agent) and agent == ignore_agent:
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if str(agent.get("type")) == "cloud":
+			continue
+		if not bool(agent.get("killable")):
+			continue
+		var occupied_tiles = LevelHelpersRef.get_agent_occupied_tiles(self, agent)
+		if occupied_tiles.has(coord):
+			return agent
+	return null
+
+
 func _ready():
 	#get_tree().call_group('ui','set_health',health)
 	#var num_maize = $Agents.get_children().size()
@@ -211,21 +258,38 @@ func _on_update_score() -> void:
 func _on_new_agent(agent_dict) -> void:
 	#print("found signal: ", agent_dict)
 	var new_agent = null
+	var spawn_pos = agent_dict["pos"]
+	var ignore_agent = agent_dict.get("ignore_agent", null)
+	var require_exact_tile = bool(agent_dict.get("require_exact_tile", false))
+	if bool(agent_dict.get("allow_replace", false)):
+		var replace_target = _find_replaceable_agent_at_world_pos(spawn_pos, ignore_agent)
+		if is_instance_valid(replace_target):
+			ignore_agent = replace_target
+			if replace_target.has_method("kill_it"):
+				replace_target.kill_it()
+			else:
+				replace_target.call_deferred("queue_free")
+			require_exact_tile = true
+	if require_exact_tile:
+		var exact_spawn = _resolve_exact_tile_spawn_pos(spawn_pos, ignore_agent)
+		if not bool(exact_spawn["ok"]):
+			return
+		spawn_pos = exact_spawn["pos"]
 	if agent_dict["name"]  == "squash":
 		$TwinkleSound.play()
-		new_agent = make_squash(agent_dict["pos"])
+		new_agent = make_squash(spawn_pos)
 	elif agent_dict["name"]  == "bean":
 		$TwinkleSound.play()
-		new_agent = make_bean(agent_dict["pos"])
+		new_agent = make_bean(spawn_pos)
 	elif agent_dict["name"]  == "maize":
 		$TwinkleSound.play()
-		new_agent = make_maize(agent_dict["pos"])
+		new_agent = make_maize(spawn_pos)
 	elif agent_dict["name"]  == "myco":
 		$SquelchSound.play()
-		new_agent = make_myco(agent_dict["pos"])
+		new_agent = make_myco(spawn_pos)
 	elif agent_dict["name"]  == "tree":
 		$BushSound.play()
-		new_agent = make_tree(agent_dict["pos"])
+		new_agent = make_tree(spawn_pos)
 	
 	if is_instance_valid(new_agent):
 		if agent_dict.has("spawn_anchor"):

@@ -1,4 +1,5 @@
 extends CanvasLayer
+const MiniMapPanelRef = preload("res://scenes/minimap_panel.gd")
 var time_elapsed := 0
 
 #signal sliderChanged(info_dict)
@@ -12,6 +13,10 @@ var last_agent = null
 var next_agent = null
 var resContainer = null
 var drag_preview_sprite: Sprite2D = null
+var minimap_panel: Control = null
+var _farm_tab_button: Button = null
+var _village_tab_button: Button = null
+var _farm_stock_label: Label = null
 var inventory_spawn_rng := RandomNumberGenerator.new()
 const AUTO_SPAWN_ATTEMPTS := 96
 const AUTO_SPAWN_SWEEP_STEPS := 48
@@ -23,6 +28,15 @@ const PARENT_BOUNDED_TYPES := {
 	"squash": true,
 	"maize": true
 }
+const FARM_TAB_ITEMS := ["bean", "squash", "maize", "tree", "myco"]
+const VILLAGE_TAB_ITEMS := ["farmer", "vendor", "cook", "basket"]
+
+var _current_inventory_tab := "farm"
+var _village_tab_unlocked := false
+var _slot_icons: Array = []
+var _slot_labels: Array = []
+var _slot_items: Array = []
+var _inventory_texture_cache: Dictionary = {}
 
 func _ready() -> void:
 	#$PalletContainer2/HBoxContainer/ActiveTexture.texture = Global.active_agent.sprite_texture
@@ -40,126 +54,177 @@ var mouseOverTree = false
 
 
 
-var inventory_labels = { #how many of each plant do we have to use
-	"bean": null,
-	"squash": null,				
-	"maize": null,
-	"tree": null,
-	"myco": null
-	}
-
-var inventory_sprites = { #how many of each plant do we have to use
-	"bean": null,
-	"squash": null,				
-	"maize": null,
-	"tree": null,
-	"myco": null
-	}
+var inventory_labels = {}
+var inventory_sprites = {}
 
 
 func setup():
-	
-	
-	inventory_labels = { #how many of each plant do we have to use
-	"bean": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/BeanInv,
-	"squash": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/SquashInv,
-	"maize": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3/MaizeInv,
-	"tree":  $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4/TreeInv,
-	"myco": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/MycoInv
-	}
-	inventory_sprites = { #how many of each plant do we have to use
-	"bean": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/ChooseBeans,
-	"squash": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/ChooseSquash,
-	"maize": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3/ChooseMaize,
-	"tree":  $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4/ChooseTree,
-	"myco": $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/ChooseMyco
-	}
-	if(Global.social_mode):
-		for invs in inventory_sprites:
-			if(invs=="bean"):
-				inventory_sprites[invs].texture = load("res://graphics/farmer.png")
-			elif(invs=="squash"):
-				inventory_sprites[invs].texture = load("res://graphics/mama.png")
-			elif(invs=="maize"):
-				inventory_sprites[invs].texture = load("res://graphics/cook.png")
-			elif(invs=="tree"):
-				inventory_sprites[invs].texture = load("res://graphics/bank.png")
-				inventory_sprites[invs].visible = false
-				inventory_labels[invs].visible = false
-			elif(invs=="myco"):
-				inventory_sprites[invs].texture = load("res://graphics/basket.png")
+	_slot_icons = [
+		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/ChooseBeans,
+		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/ChooseSquash,
+		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3/ChooseMaize,
+		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4/ChooseTree,
+		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/ChooseMyco
+	]
+	_slot_labels = [
+		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/BeanInv,
+		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/SquashInv,
+		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3/MaizeInv,
+		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4/TreeInv,
+		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/MycoInv
+	]
+	_slot_items = ["", "", "", "", ""]
+	_ensure_inventory_tabs()
+	_ensure_minimap_panel()
+	_set_inventory_tab("farm")
+	# Legacy valuation bars are retained in scene/code but hidden from runtime.
+	$MarginContainer/VBoxContainer/HBoxContainer/ResVBoxContainer.visible = false
+	$MarginContainer/VBoxContainer/HBoxContainer/ValVBoxContainer.visible = false
 	refresh_inventory_counts()
-		
-	
-	sliders = []
-	
-	#var assets = agent.assets
-	var resContainer = $MarginContainer/VBoxContainer/HBoxContainer/ResVBoxContainer
-	var valContainer = $MarginContainer/VBoxContainer/HBoxContainer/ValVBoxContainer
-	
-	for child in resContainer.get_children():
-		child.queue_free()
-		await child.tree_exited
-	for child in valContainer.get_children():
-		child.queue_free()
-		await child.tree_exited
-	
 
-	var assetLabel = Label.new()
-	assetLabel.text = "Resource"
-	assetLabel.name = "Title"
-	assetLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	resContainer.add_child(assetLabel)
-	
-	var valLabel = Label.new()
-	valLabel.text = "Relative Value"
-	valLabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	valContainer.add_child(valLabel)
-	
 
-	for asset in Global.values:
-		var resText = Label.new()
-		resText.name = str(asset)
-		if(Global.social_mode==true):
-			resText.text = str(Global.assets_social[asset]) + str(" ") + str(Global.values[asset])
+func _ensure_inventory_tabs() -> void:
+	if is_instance_valid(_farm_tab_button) and is_instance_valid(_village_tab_button):
+		return
+	var tabs_row = HBoxContainer.new()
+	tabs_row.name = "InventoryTabs"
+	tabs_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	tabs_row.add_theme_constant_override("separation", 8)
+	var pallet_vbox = $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer
+	pallet_vbox.add_child(tabs_row)
+	pallet_vbox.move_child(tabs_row, 0)
+
+	_farm_tab_button = Button.new()
+	_farm_tab_button.text = "Farm"
+	_farm_tab_button.pressed.connect(func() -> void: _set_inventory_tab("farm"))
+	tabs_row.add_child(_farm_tab_button)
+
+	_village_tab_button = Button.new()
+	_village_tab_button.text = "Village"
+	_village_tab_button.pressed.connect(func() -> void:
+		if _village_tab_unlocked:
+			_set_inventory_tab("village")
+	)
+	tabs_row.add_child(_village_tab_button)
+
+
+func _ensure_minimap_panel() -> void:
+	if is_instance_valid(minimap_panel):
+		return
+	var host = $MarginContainer/VBoxContainer/HBoxContainer
+	minimap_panel = MiniMapPanelRef.new()
+	minimap_panel.name = "MiniMapPanel"
+	minimap_panel.custom_minimum_size = Vector2(180, 120)
+	minimap_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	minimap_panel.size_flags_vertical = Control.SIZE_FILL
+	host.add_child(minimap_panel)
+	minimap_panel.camera_pan_requested.connect(_on_minimap_camera_requested)
+	var level_root = get_parent()
+	var world = get_node_or_null("../WorldFoundation")
+	var agents = get_node_or_null("../Agents")
+	minimap_panel.configure(level_root, world, agents)
+
+	_farm_stock_label = Label.new()
+	_farm_stock_label.name = "FarmerStockLabel"
+	_farm_stock_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_farm_stock_label.text = ""
+	host.add_child(_farm_stock_label)
+
+
+func _set_inventory_tab(tab_id: String) -> void:
+	if tab_id == "village" and not _village_tab_unlocked:
+		tab_id = "farm"
+	_current_inventory_tab = tab_id
+	var items = FARM_TAB_ITEMS if tab_id == "farm" else VILLAGE_TAB_ITEMS
+	for idx in range(_slot_icons.size()):
+		var icon: TextureRect = _slot_icons[idx]
+		var label: Label = _slot_labels[idx]
+		if idx < items.size():
+			var item = str(items[idx])
+			_slot_items[idx] = item
+			icon.visible = true
+			label.visible = true
+			icon.texture = _get_inventory_item_texture(item)
+			icon.set_meta("item_name", item)
 		else:
-			resText.text = str(Global.assets_plant[asset]) + str(" ") + str(Global.values[asset])
-		resText.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		resContainer.add_child(resText)
-		
-		
-		var valSlider = HSlider.new()
-		valSlider.min_value = 1
-		valSlider.max_value = 300
-		valSlider.value = Global.values[asset]*100
-		valSlider.modulate= Global.asset_colors[asset]
-		valSlider.tick_count =4
-		valSlider.ticks_on_borders = true
-		
-		valContainer.add_child(valSlider)
-		var passed = {
-			"slider":valSlider,
-			"res": asset
-		}
-		valSlider.connect("drag_ended",_on_h_slider_drag_ended)
-		sliders.append(passed)
-		#print (" ui process: ", sliders)
+			_slot_items[idx] = ""
+			icon.visible = false
+			label.visible = false
+			icon.texture = null
+			if icon.has_meta("item_name"):
+				icon.remove_meta("item_name")
+	if is_instance_valid(_farm_tab_button):
+		_farm_tab_button.disabled = tab_id == "farm"
+	if is_instance_valid(_village_tab_button):
+		_village_tab_button.disabled = tab_id == "village" or not _village_tab_unlocked
+	refresh_inventory_counts()
+
+
+func _get_inventory_item_texture(item_name: String) -> Texture2D:
+	if _inventory_texture_cache.has(item_name):
+		return _inventory_texture_cache[item_name]
+	var path := ""
+	match item_name:
+		"bean":
+			path = "res://graphics/bean.png"
+		"squash":
+			path = "res://graphics/squash_32.png"
+		"maize":
+			path = "res://graphics/maize_32.png"
+		"tree":
+			path = "res://graphics/acorn_32.png"
+		"myco":
+			path = "res://graphics/mushroom_32.png"
+		"farmer":
+			path = "res://graphics/farmer.png"
+		"vendor":
+			path = "res://graphics/mama.png"
+		"cook":
+			path = "res://graphics/cook.png"
+		"basket":
+			path = "res://graphics/basket.png"
+		_:
+			path = "res://graphics/bean.png"
+	var tex = load(path)
+	_inventory_texture_cache[item_name] = tex
+	return tex
 
 
 func refresh_inventory_counts() -> void:
-	for inv in inventory_labels:
-		if is_instance_valid(inventory_labels[inv]):
-			inventory_labels[inv].text = str(int(Global.inventory.get(inv, 0)))
-		if is_instance_valid(inventory_sprites[inv]):
-			if int(Global.inventory.get(inv, 0)) < 1:
-				inventory_sprites[inv].modulate.a = 0.5
-			else:
-				inventory_sprites[inv].modulate.a = 1.0
+	for idx in range(_slot_icons.size()):
+		var icon: TextureRect = _slot_icons[idx]
+		var label: Label = _slot_labels[idx]
+		if not is_instance_valid(icon) or not is_instance_valid(label):
+			continue
+		var item = str(_slot_items[idx])
+		if item == "":
+			continue
+		var count = int(Global.inventory.get(item, 0))
+		label.text = str(count)
+		icon.modulate.a = 1.0 if count > 0 else 0.5
+
+	if is_instance_valid(_village_tab_button):
+		_village_tab_button.disabled = _current_inventory_tab == "village" or not _village_tab_unlocked
+	if is_instance_valid(_farm_stock_label):
+		if Global.mode == "story":
+			_farm_stock_label.visible = true
+			var current_stock = int(Global.farmer_crop_stock_total)
+			var max_stock = maxi(int(Global.farmer_crop_stock_max), 1)
+			_farm_stock_label.text = str("Farmer Crop Stock: ", current_stock, "/", max_stock)
+		else:
+			_farm_stock_label.visible = false
 
 
 func get_inventory_icon_center(agent_name: String) -> Vector2:
-	var icon = inventory_sprites.get(agent_name)
-	if is_instance_valid(icon):
+	for icon in _slot_icons:
+		if not is_instance_valid(icon):
+			continue
+		if not icon.visible:
+			continue
+		if not icon.has_meta("item_name"):
+			continue
+		if str(icon.get_meta("item_name")) != agent_name:
+			continue
 		var icon_rect = icon.get_global_rect()
 		return icon_rect.position + icon_rect.size * 0.5
 	var panel_rect = $MarginContainer.get_global_rect()
@@ -221,20 +286,25 @@ func _ensure_drag_preview() -> void:
 
 
 func _get_inventory_agent_at(mouse_pos: Vector2) -> String:
-	for agent_name in inventory_sprites:
-		var icon = inventory_sprites[agent_name]
+	for icon in _slot_icons:
 		if not is_instance_valid(icon):
 			continue
 		if not icon.visible:
 			continue
+		if not icon.has_meta("item_name"):
+			continue
 		if icon.get_global_rect().has_point(mouse_pos):
-			return agent_name
+			return str(icon.get_meta("item_name"))
 	return ""
 
 
 func _start_inventory_drag(agent_name: String, mouse_pos: Vector2) -> void:
 	_ensure_drag_preview()
-	var icon = inventory_sprites.get(agent_name)
+	var icon: TextureRect = null
+	for candidate in _slot_icons:
+		if is_instance_valid(candidate) and candidate.visible and candidate.has_meta("item_name") and str(candidate.get_meta("item_name")) == agent_name:
+			icon = candidate
+			break
 	if is_instance_valid(icon):
 		drag_preview_sprite.texture = icon.texture
 	drag_preview_sprite.global_position = mouse_pos
@@ -290,6 +360,9 @@ func _emit_inventory_drag_preview(agent_name: String, screen_pos: Vector2, activ
 	if not active:
 		emit_signal("inventory_drag_preview", agent_name, Vector2.ZERO, false)
 		return
+	if _is_story_village_inventory_item(agent_name):
+		emit_signal("inventory_drag_preview", agent_name, Vector2.ZERO, false)
+		return
 	var view = get_viewport().get_visible_rect()
 	if not view.has_point(screen_pos):
 		emit_signal("inventory_drag_preview", agent_name, Vector2.ZERO, false)
@@ -303,6 +376,10 @@ func _emit_inventory_drag_preview(agent_name: String, screen_pos: Vector2, activ
 		emit_signal("inventory_drag_preview", agent_name, Vector2.ZERO, false)
 		return
 	emit_signal("inventory_drag_preview", agent_name, world_pos, true)
+
+
+func _is_story_village_inventory_item(agent_name: String) -> bool:
+	return agent_name == "farmer" or agent_name == "vendor" or agent_name == "cook" or agent_name == "basket"
 
 
 func _get_agent_edge_radius(agent: Node) -> float:
@@ -395,6 +472,10 @@ func _is_valid_auto_spawn_position(pos: Vector2, agents_root: Node, anchor: Node
 	var world_rect = _get_world_rect()
 	if not world_rect.has_point(pos):
 		return false
+	var world = _get_world_foundation()
+	if is_instance_valid(world) and world.has_method("is_world_pos_revealed"):
+		if not bool(world.is_world_pos_revealed(pos)):
+			return false
 	var pos_screen = _world_to_screen(pos)
 	var view = get_viewport().get_visible_rect()
 	if view.has_point(pos_screen) and $MarginContainer.get_global_rect().has_point(pos_screen):
@@ -529,6 +610,10 @@ func _drop_inventory_agent(drop_pos: Vector2) -> void:
 		spawn_anchor = _get_nearest_living_myco_anchor(target_pos, _get_agents_root())
 		if not is_instance_valid(spawn_anchor):
 			return
+	var world = _get_world_foundation()
+	if is_instance_valid(world) and world.has_method("is_world_pos_revealed"):
+		if not bool(world.is_world_pos_revealed(target_pos)):
+			return
 	var new_agent_dict = {
 		"name" : spawn_name,
 		"pos": target_pos,
@@ -565,6 +650,30 @@ func _input(event):
 				_emit_inventory_drag_preview(next_agent, event.position, false)
 			next_agent = null
 			_end_inventory_drag()
+
+
+func set_village_inventory_unlocked(unlocked: bool) -> void:
+	_village_tab_unlocked = unlocked
+	if not unlocked and _current_inventory_tab == "village":
+		_set_inventory_tab("farm")
+	refresh_inventory_counts()
+
+
+func set_story_village_marker(world_pos: Vector2, visible: bool) -> void:
+	if is_instance_valid(minimap_panel):
+		minimap_panel.set_village_marker(world_pos, visible)
+
+
+func set_farmer_crop_stock(current_stock: int, max_stock: int) -> void:
+	Global.farmer_crop_stock_total = maxi(current_stock, 0)
+	Global.farmer_crop_stock_max = maxi(max_stock, 0)
+	refresh_inventory_counts()
+
+
+func _on_minimap_camera_requested(world_pos: Vector2) -> void:
+	var world = _get_world_foundation()
+	if is_instance_valid(world) and world.has_method("set_camera_world_center"):
+		world.set_camera_world_center(world_pos)
 
 
 func _on_choose_myco_mouse_entered() -> void:

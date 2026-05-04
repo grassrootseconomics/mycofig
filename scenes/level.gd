@@ -97,6 +97,26 @@ func _find_replaceable_agent_at_world_pos(pos: Vector2, ignore_agent: Variant = 
 	return null
 
 
+func _supports_world_tiles(world: Node) -> bool:
+	if not is_instance_valid(world):
+		return false
+	return world.has_method("world_to_tile") and world.has_method("tile_to_world_center") and world.has_method("in_bounds")
+
+
+func _clamp_tile_coord(world: Node, coord: Vector2i) -> Vector2i:
+	var columns = max(int(world.get("columns")), 1)
+	var rows = max(int(world.get("rows")), 1)
+	return Vector2i(
+		clampi(coord.x, 0, columns - 1),
+		clampi(coord.y, 0, rows - 1)
+	)
+
+
+func _tile_pos_from_center(world: Node, center: Vector2i, delta: Vector2i) -> Vector2:
+	var coord = _clamp_tile_coord(world, center + delta)
+	return world.tile_to_world_center(coord)
+
+
 func _ready():
 	#get_tree().call_group('ui','set_health',health)
 	#var num_maize = $Agents.get_children().size()
@@ -123,39 +143,47 @@ func _ready():
 	var world_center = _get_world_center()
 	mid_width = int(world_center.x)
 	mid_height = int(world_center.y)
-	
-	var maize_center_offset_x = 75
-	var maize_center_offset_y = 65
-	var maize_position = Vector2(mid_width+maize_center_offset_x,mid_height+maize_center_offset_y)
-	
-	make_maize(maize_position)
 
-	
-	var bean_center_offset_x = -75
-	var bean_center_offset_y = 0
-	var bean_position = Vector2(mid_width+bean_center_offset_x,mid_height+bean_center_offset_y)
-	
-	make_bean(bean_position)
-	
-	
-	var squash_center_offset_x = 0
-	var squash_center_offset_y = -90
-	var squash_position = Vector2(mid_width+squash_center_offset_x,mid_height+squash_center_offset_y)
-	
-	make_squash(squash_position)
-	
-	var tree_center_offset_x = 75
-	var tree_center_offset_y = -50
-	var tree_position = Vector2(mid_width+tree_center_offset_x,mid_height+tree_center_offset_y)
-	
-	make_tree(tree_position)
-	
-	
-	var myco_width = mid_width + 40
-	var myco_height = mid_height + 100
-	var myco_position = Vector2(myco_width,myco_height)
+	var myco = null
+	var clustered_start = Global.mode == "tutorial" or Global.mode == "challenge"
+	if clustered_start and _supports_world_tiles(world):
+		var center_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(world_center)))
+		var myco_position = _tile_pos_from_center(world, center_coord, Vector2i(0, 0))
+		var bean_position = _tile_pos_from_center(world, center_coord, Vector2i(-1, 0))
+		var squash_position = _tile_pos_from_center(world, center_coord, Vector2i(0, -1))
+		var maize_position = _tile_pos_from_center(world, center_coord, Vector2i(1, 0))
+		var tree_position = _tile_pos_from_center(world, center_coord, Vector2i(0, 1))
 
-	var myco = make_myco(myco_position)
+		myco = make_myco(myco_position)
+		make_bean(bean_position)
+		make_squash(squash_position)
+		make_maize(maize_position)
+		make_tree(tree_position)
+	else:
+		var maize_center_offset_x = 75
+		var maize_center_offset_y = 65
+		var maize_position = Vector2(mid_width + maize_center_offset_x, mid_height + maize_center_offset_y)
+		make_maize(maize_position)
+
+		var bean_center_offset_x = -75
+		var bean_center_offset_y = 0
+		var bean_position = Vector2(mid_width + bean_center_offset_x, mid_height + bean_center_offset_y)
+		make_bean(bean_position)
+
+		var squash_center_offset_x = 0
+		var squash_center_offset_y = -90
+		var squash_position = Vector2(mid_width + squash_center_offset_x, mid_height + squash_center_offset_y)
+		make_squash(squash_position)
+
+		var tree_center_offset_x = 75
+		var tree_center_offset_y = -50
+		var tree_position = Vector2(mid_width + tree_center_offset_x, mid_height + tree_center_offset_y)
+		make_tree(tree_position)
+
+		var myco_width = mid_width + 40
+		var myco_height = mid_height + 100
+		var myco_position = Vector2(myco_width, myco_height)
+		myco = make_myco(myco_position)
 
 	Global.active_agent = myco
 	

@@ -36,6 +36,7 @@ var _slot_icons: Array = []
 var _slot_labels: Array = []
 var _slot_items: Array = []
 var _inventory_texture_cache: Dictionary = {}
+var _active_touch_drag_id := -1
 
 func _ready() -> void:
 	#$PalletContainer2/HBoxContainer/ActiveTexture.texture = Global.active_agent.sprite_texture
@@ -284,7 +285,10 @@ func _get_inventory_agent_at(mouse_pos: Vector2) -> String:
 			continue
 		if not icon.has_meta("item_name"):
 			continue
-		if icon.get_global_rect().has_point(mouse_pos):
+		var touch_rect = icon.get_global_rect()
+		if Global.is_mobile_platform:
+			touch_rect = touch_rect.grow(14.0)
+		if touch_rect.has_point(mouse_pos):
 			return str(icon.get_meta("item_name"))
 	return ""
 
@@ -632,26 +636,61 @@ func _drop_inventory_agent(drop_pos: Vector2) -> void:
 	refresh_inventory_counts()
 
 
+func _on_inventory_pointer_moved(screen_pos: Vector2) -> void:
+	if next_agent != null:
+		_update_inventory_drag(screen_pos)
+		_emit_inventory_drag_preview(next_agent, screen_pos, true)
+
+
+func _on_inventory_pointer_pressed(screen_pos: Vector2) -> void:
+	var selected = _get_inventory_agent_at(screen_pos)
+	if selected != "" and Global.inventory[selected] > 0:
+		next_agent = selected
+		_start_inventory_drag(selected, screen_pos)
+		_emit_inventory_drag_preview(selected, screen_pos, true)
+
+
+func _on_inventory_pointer_released(screen_pos: Vector2) -> void:
+	if next_agent != null:
+		_drop_inventory_agent(screen_pos)
+		_emit_inventory_drag_preview(next_agent, screen_pos, false)
+	next_agent = null
+	_end_inventory_drag()
+
+
 func _input(event):
 	if event is InputEventMouseMotion:
-		if next_agent != null:
-			_update_inventory_drag(event.position)
-			_emit_inventory_drag_preview(next_agent, event.position, true)
+		if Global.is_mobile_platform:
+			return
+		_on_inventory_pointer_moved(event.position)
 		return
 
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if Global.is_mobile_platform:
+			return
 		if event.pressed:
-			var selected = _get_inventory_agent_at(event.position)
-			if selected != "" and Global.inventory[selected] > 0:
-				next_agent = selected
-				_start_inventory_drag(selected, event.position)
-				_emit_inventory_drag_preview(selected, event.position, true)
+			_on_inventory_pointer_pressed(event.position)
 		else:
-			if next_agent != null:
-				_drop_inventory_agent(event.position)
-				_emit_inventory_drag_preview(next_agent, event.position, false)
-			next_agent = null
-			_end_inventory_drag()
+			_on_inventory_pointer_released(event.position)
+		return
+
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			if _active_touch_drag_id != -1 and event.index != _active_touch_drag_id:
+				return
+			_active_touch_drag_id = event.index
+			_on_inventory_pointer_pressed(event.position)
+		else:
+			if event.index != _active_touch_drag_id:
+				return
+			_on_inventory_pointer_released(event.position)
+			_active_touch_drag_id = -1
+		return
+
+	if event is InputEventScreenDrag:
+		if event.index != _active_touch_drag_id:
+			return
+		_on_inventory_pointer_moved(event.position)
 
 
 func set_village_inventory_unlocked(unlocked: bool) -> void:

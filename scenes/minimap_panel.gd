@@ -12,6 +12,7 @@ var _level_root: Node = null
 var _world_node: Node = null
 var _agents_root: Node = null
 var _dragging := false
+var _touch_drag_id := -1
 var _village_marker_world := Vector2.ZERO
 var _village_marker_visible := false
 
@@ -38,13 +39,36 @@ func _process(_delta: float) -> void:
 
 
 func _gui_input(event: InputEvent) -> void:
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			if _touch_drag_id != -1 and event.index != _touch_drag_id:
+				return
+			_touch_drag_id = event.index
+			_dragging = true
+			_emit_pan_for_local(event.position)
+		else:
+			if event.index != _touch_drag_id:
+				return
+			_touch_drag_id = -1
+			_dragging = false
+		return
+	if event is InputEventScreenDrag:
+		if event.index != _touch_drag_id:
+			return
+		_dragging = true
+		_emit_pan_for_local(event.position)
+		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if Global.is_mobile_platform:
+			return
 		if event.pressed:
 			_dragging = true
 			_emit_pan_for_local(event.position)
 		else:
 			_dragging = false
 	elif event is InputEventMouseMotion and _dragging:
+		if Global.is_mobile_platform:
+			return
 		_emit_pan_for_local(event.position)
 
 

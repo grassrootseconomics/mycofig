@@ -106,8 +106,8 @@ text = "Challenge"
 layout_mode = 2
 size_flags_horizontal = 4
 theme_override_font_sizes/font_size = 30
-text = "* Resource Coordination"
-uri = "https://willruddick.substack.com/p/three-sisters-meet-a-funguy"
+text = "Grassroots Economics"
+uri = "https://grassrootseconomics.org/book"
 
 [node name="CofiButton" type="Button" parent="CenterContainer/VBoxContainer"]
 visible = false

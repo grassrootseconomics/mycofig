@@ -111,23 +111,37 @@ var _story_phase5_traded_villager_ids: Dictionary = {}
 var _story_phase5_all_villagers_trading := false
 var _story_phase5_basket_placed := false
 var _ambient_tree_audio_base_db := 0.0
+@onready var _bird_sound_player: AudioStreamPlayer2D = get_node_or_null("BirdSound")
+@onready var _bird_long_player: AudioStreamPlayer = get_node_or_null("BirdLong")
+@onready var _car_sound_player: AudioStreamPlayer2D = get_node_or_null("CarSound")
+@onready var _squelch_sound_player: AudioStreamPlayer2D = get_node_or_null("SquelchSound")
+@onready var _twinkle_sound_player: AudioStreamPlayer2D = get_node_or_null("TwinkleSound")
+@onready var _bush_sound_player: AudioStreamPlayer2D = get_node_or_null("BushSound")
 
 
 func _is_headless_runtime() -> bool:
 	return DisplayServer.get_name() == "headless" or OS.has_feature("dedicated_server")
 
 
+func _get_runtime_audio_players() -> Array:
+	var players: Array = []
+	for player in [
+		_bird_sound_player,
+		_bird_long_player,
+		_car_sound_player,
+		_squelch_sound_player,
+		_twinkle_sound_player,
+		_bush_sound_player
+	]:
+		if is_instance_valid(player):
+			players.append(player)
+	return players
+
+
 func _mute_runtime_audio_if_headless() -> void:
 	if not _is_headless_runtime():
 		return
-	LevelHelpersRef.stop_audio_players([
-		$BirdSound,
-		$BirdLong,
-		$CarSound,
-		$SquelchSound,
-		$TwinkleSound,
-		$BushSound
-	])
+	LevelHelpersRef.stop_audio_players(_get_runtime_audio_players())
 
 
 func _get_world_foundation() -> Node:
@@ -151,10 +165,10 @@ func _get_listener_world_position() -> Vector2:
 func _update_tree_ambient_audio(delta: float) -> void:
 	if _is_headless_runtime():
 		return
-	if not is_instance_valid($BirdLong):
+	if not is_instance_valid(_bird_long_player):
 		return
-	if not $BirdLong.playing:
-		$BirdLong.play()
+	if not _bird_long_player.playing:
+		_bird_long_player.play()
 	var world = _get_world_foundation()
 	var tile_size_world := 64.0
 	if is_instance_valid(world):
@@ -178,7 +192,7 @@ func _update_tree_ambient_audio(delta: float) -> void:
 	if nearest_tree_dist <= radius_world:
 		var normalized = clampf(1.0 - (nearest_tree_dist / radius_world), 0.0, 1.0)
 		target_db = lerpf(AMBIENT_TREE_AUDIO_SILENT_DB, _ambient_tree_audio_base_db, normalized)
-	$BirdLong.volume_db = move_toward($BirdLong.volume_db, target_db, AMBIENT_TREE_AUDIO_FADE_SPEED_DB * delta)
+	_bird_long_player.volume_db = move_toward(_bird_long_player.volume_db, target_db, AMBIENT_TREE_AUDIO_FADE_SPEED_DB * delta)
 
 
 func _is_story_mode() -> bool:
@@ -978,10 +992,11 @@ func _ready():
 	_setup_perf_monitor()
 	Global.prevent_auto_select = false
 	DisplayServer.window_set_title("Social Soil Gardening")
-	_ambient_tree_audio_base_db = $BirdLong.volume_db
-	$BirdLong.volume_db = AMBIENT_TREE_AUDIO_SILENT_DB
-	if not _is_headless_runtime():
-		$BirdLong.play()
+	if is_instance_valid(_bird_long_player):
+		_ambient_tree_audio_base_db = _bird_long_player.volume_db
+		_bird_long_player.volume_db = AMBIENT_TREE_AUDIO_SILENT_DB
+		if not _is_headless_runtime():
+			_bird_long_player.play()
 	var world = _get_world_foundation()
 	if _is_story_mode() and is_instance_valid(world) and world.has_method("configure_dimensions"):
 		world.configure_dimensions(STORY_WORLD_COLUMNS, STORY_WORLD_ROWS)
@@ -1301,9 +1316,11 @@ func _on_agent_lifecycle_residue(coord: Vector2i, biomass: float, source_type: S
 
 func _play_predator_alert() -> void:
 	if _is_story_mode() and Global.enable_tuktuk_predators and _story_village_revealed and _story_phase_id >= STORY_TUKTUK_START_PHASE:
-		$CarSound.play()
+		if is_instance_valid(_car_sound_player):
+			_car_sound_player.play()
 	else:
-		$BirdSound.play()
+		if is_instance_valid(_bird_sound_player):
+			_bird_sound_player.play()
 
 
 func _spawn_predators(requested_count: int, play_alert: bool = false) -> void:
@@ -1451,13 +1468,16 @@ func _on_new_agent(agent_dict) -> void:
 		if is_instance_valid(myco_gate_result["anchor"]):
 			agent_dict["spawn_anchor"] = myco_gate_result["anchor"]
 	if spawn_name == "squash":
-		$TwinkleSound.play()
+		if is_instance_valid(_twinkle_sound_player):
+			_twinkle_sound_player.play()
 		new_agent = make_squash(spawn_pos, spawn_already_snapped)
 	elif spawn_name == "bean":
-		$TwinkleSound.play()
+		if is_instance_valid(_twinkle_sound_player):
+			_twinkle_sound_player.play()
 		new_agent = make_bean(spawn_pos, spawn_already_snapped)
 	elif spawn_name == "maize":
-		$TwinkleSound.play()
+		if is_instance_valid(_twinkle_sound_player):
+			_twinkle_sound_player.play()
 		new_agent = make_maize(spawn_pos, spawn_already_snapped)
 	elif spawn_name == "myco":
 		if myco_gate_result.is_empty():
@@ -1468,10 +1488,12 @@ func _on_new_agent(agent_dict) -> void:
 			return
 		if is_instance_valid(myco_gate_result["anchor"]):
 			agent_dict["spawn_anchor"] = myco_gate_result["anchor"]
-		$SquelchSound.play()
+		if is_instance_valid(_squelch_sound_player):
+			_squelch_sound_player.play()
 		new_agent = make_myco(spawn_pos, spawn_already_snapped)
 	elif spawn_name == "tree":
-		$BushSound.play()
+		if is_instance_valid(_bush_sound_player):
+			_bush_sound_player.play()
 		new_agent = make_tree(spawn_pos, spawn_already_snapped)
 	elif spawn_name == "farmer":
 		new_agent = make_farmer(spawn_pos)
@@ -1944,14 +1966,7 @@ func _release_audio() -> void:
 	_shutdown_cleanup_done = true
 	LevelHelpersRef.clear_trade_line_cache($Lines, true)
 	LevelHelpersRef.clear_inventory_connection_preview_lines(inventory_preview_lines, true)
-	LevelHelpersRef.stop_audio_players([
-		$BirdSound,
-		$BirdLong,
-		$CarSound,
-		$SquelchSound,
-		$TwinkleSound,
-		$BushSound
-	], true)
+	LevelHelpersRef.stop_audio_players(_get_runtime_audio_players(), true)
 	for active_trade in $Trades.get_children():
 		if is_instance_valid(active_trade):
 			if active_trade.get_parent() != null:

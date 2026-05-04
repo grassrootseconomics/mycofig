@@ -191,6 +191,11 @@ static func update_agent_hover_focus(level_root: Node, agents_root: Node) -> voi
 			if _agent_supports_hover_focus(agent):
 				agent.set_hover_focus(bool(agent.get("is_dragging")))
 		return
+	if Global.is_mobile_platform:
+		for agent in agents_root.get_children():
+			if _agent_supports_hover_focus(agent):
+				agent.set_hover_focus(false)
+		return
 	var viewport = level_root.get_viewport()
 	if viewport == null:
 		return

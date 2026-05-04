@@ -167,6 +167,10 @@ var _keyboard_moving := false
 var _drag_hint_active := false
 var _press_started_here := false
 var _harvest_drag_only := false
+var _active_touch_id := -1
+var _drag_pointer_screen_pos := Vector2.ZERO
+var _has_drag_pointer_screen_pos := false
+var _drag_pointer_down := false
 var _harvest_drag_sprite: Sprite2D = null
 var bean_pod_ticks := 0
 var bean_dead_ticks := 0
@@ -259,6 +263,8 @@ func _should_show_resource_bars() -> bool:
 	if dead or caught_by != null:
 		return false
 	if Global.bars_on:
+		return true
+	if Global.is_mobile_platform and _is_selected_agent():
 		return true
 	if not _is_hover_bar_subject():
 		return false
@@ -353,9 +359,103 @@ func _is_tree_harvest_hotspot_hit(world_pos: Vector2) -> bool:
 func _is_press_hit(world_pos: Vector2) -> bool:
 	if _is_tree_harvest_hotspot_hit(world_pos):
 		return true
-	if not is_instance_valid(sprite) or not sprite.has_method("get_rect"):
+	if is_instance_valid(sprite) and sprite.has_method("get_rect"):
+		if sprite.get_rect().has_point(to_local(world_pos)):
+			return true
+	if not Global.is_mobile_platform:
 		return false
-	return sprite.get_rect().has_point(to_local(world_pos))
+	# Keep mature-tree harvest strict to acorn hotspot even on touch devices.
+	if _is_tree_lifecycle_type() and can_drag_for_inventory_harvest():
+		return false
+	var world = _get_world_foundation_node()
+	var level_root = _get_level_root()
+	if not is_instance_valid(world) or not is_instance_valid(level_root):
+		return false
+	if not (world.has_method("world_to_tile") and world.has_method("in_bounds")):
+		return false
+	var coord = Vector2i(world.world_to_tile(_clamp_position_to_world_rect(world_pos)))
+	if not world.in_bounds(coord):
+		return false
+	var occupied_tiles = LevelHelpersRef.get_agent_occupied_tiles(level_root, self)
+	return occupied_tiles.has(coord)
+
+
+func _set_drag_pointer_screen_pos(screen_pos: Vector2) -> void:
+	_drag_pointer_screen_pos = screen_pos
+	_has_drag_pointer_screen_pos = true
+
+
+func _get_drag_pointer_screen_pos() -> Vector2:
+	if _has_drag_pointer_screen_pos:
+		return _drag_pointer_screen_pos
+	var viewport = get_viewport()
+	if viewport != null:
+		return viewport.get_mouse_position()
+	return Vector2.ZERO
+
+
+func _get_drag_pointer_world_pos() -> Vector2:
+	return Global.screen_to_world(self, _get_drag_pointer_screen_pos())
+
+
+func _is_drag_pointer_held() -> bool:
+	return _drag_pointer_down or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+
+
+func _on_pointer_press(screen_pos: Vector2) -> void:
+	_set_drag_pointer_screen_pos(screen_pos)
+	var world_click_pos = Global.screen_to_world(self, screen_pos)
+	var clicked_self = _is_press_hit(world_click_pos)
+	_drag_pointer_down = clicked_self
+	if clicked_self:
+		_press_started_here = true
+		if(Global.is_dragging == false and _can_start_user_drag()):
+			_harvest_drag_only = can_drag_for_inventory_harvest()
+			is_dragging = true
+			Global.is_dragging = true
+			Global.active_agent = self
+			Global.prevent_auto_select = false
+			_refresh_all_agent_bar_visibility()
+			_cancel_tile_snap()
+			if _harvest_drag_only:
+				_start_harvest_drag_proxy()
+			else:
+				_end_harvest_drag_proxy()
+		else:
+			Global.active_agent = self
+			Global.prevent_auto_select = false
+			_refresh_all_agent_bar_visibility()
+	else:
+		_press_started_here = false
+
+
+func _on_pointer_release(screen_pos: Vector2) -> void:
+	_set_drag_pointer_screen_pos(screen_pos)
+	_drag_pointer_down = false
+	var world_click_pos = Global.screen_to_world(self, screen_pos)
+	var clicked_self = _is_press_hit(world_click_pos)
+	var pressed_here = _press_started_here
+	_press_started_here = false
+	var was_dragging = is_dragging
+	if was_dragging:
+		is_dragging = false
+		Global.is_dragging = false
+		if _harvest_drag_only:
+			var dropped_to_story_target := false
+			var level_root = _get_level_root()
+			if is_instance_valid(level_root) and level_root.has_method("try_story_harvest_drop"):
+				dropped_to_story_target = bool(level_root.try_story_harvest_drop(self, _get_drag_pointer_world_pos()))
+			_end_harvest_drag_proxy()
+			if not dropped_to_story_target:
+				_begin_snap_to_nearest_tile(position)
+		else:
+			_begin_snap_to_nearest_tile(position)
+		_harvest_drag_only = false
+		_clear_drag_tile_hint()
+	if pressed_here and clicked_self:
+		Global.active_agent = self
+		Global.prevent_auto_select = false
+		_refresh_all_agent_bar_visibility()
 
 
 func _get_level_root() -> Node:
@@ -661,9 +761,9 @@ func _update_harvest_drag_proxy_position() -> void:
 	if not is_instance_valid(_harvest_drag_sprite):
 		return
 	if _harvest_drag_proxy_in_ui:
-		_harvest_drag_sprite.global_position = get_viewport().get_mouse_position()
+		_harvest_drag_sprite.global_position = _get_drag_pointer_screen_pos()
 	else:
-		_harvest_drag_sprite.global_position = get_global_mouse_position()
+		_harvest_drag_sprite.global_position = _get_drag_pointer_world_pos()
 
 
 func _end_harvest_drag_proxy() -> void:
@@ -1694,63 +1794,38 @@ func evaporate():
 
 
 func _input(event):
-	if(draggable == true):
-		if event is InputEventMouseButton:
-			if event.button_index == MOUSE_BUTTON_LEFT:
-				var world_click_pos = Global.screen_to_world(self, event.position)
-				var clicked_self = _is_press_hit(world_click_pos)
-				
-				if event.pressed:
-					
-					if clicked_self:
-						_press_started_here = true
-						if(Global.is_dragging == false and _can_start_user_drag()):
-							_harvest_drag_only = can_drag_for_inventory_harvest()
-							is_dragging = true
-							Global.is_dragging = true
-							Global.active_agent = self
-							Global.prevent_auto_select = false
-							_refresh_all_agent_bar_visibility()
-							_cancel_tile_snap()
-							if _harvest_drag_only:
-								_start_harvest_drag_proxy()
-							else:
-								_end_harvest_drag_proxy()
-						else:
-							Global.active_agent = self
-							Global.prevent_auto_select = false
-							_refresh_all_agent_bar_visibility()
-					else:
-						_press_started_here = false
-						#is_dragging = true
-						#Global.active_agent = self
-						#print(" clicked: ", name)
-						
-				else:
-					var pressed_here = _press_started_here
-					_press_started_here = false
-					var was_dragging = is_dragging
-					if was_dragging:
-						is_dragging = false
-						Global.is_dragging = false
-						if _harvest_drag_only:
-							var dropped_to_story_target := false
-							var level_root = _get_level_root()
-							if is_instance_valid(level_root) and level_root.has_method("try_story_harvest_drop"):
-								dropped_to_story_target = bool(level_root.try_story_harvest_drop(self, get_global_mouse_position()))
-							_end_harvest_drag_proxy()
-							if not dropped_to_story_target:
-								_begin_snap_to_nearest_tile(position)
-						else:
-							_begin_snap_to_nearest_tile(position)
-						_harvest_drag_only = false
-						_clear_drag_tile_hint()
-					if pressed_here and clicked_self:
-						#emit_signal("clicked_agent",self)
-						Global.active_agent = self
-						Global.prevent_auto_select = false
-						_refresh_all_agent_bar_visibility()
-						#print(" clicked: ", name)
+	if not draggable:
+		return
+	if event is InputEventMouseMotion:
+		_set_drag_pointer_screen_pos(event.position)
+		return
+	if event is InputEventScreenDrag:
+		if _active_touch_id != -1 and event.index == _active_touch_id:
+			_set_drag_pointer_screen_pos(event.position)
+		return
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			if _active_touch_id != -1 and event.index != _active_touch_id:
+				return
+			var world_touch_pos = Global.screen_to_world(self, event.position)
+			if _is_press_hit(world_touch_pos):
+				_active_touch_id = event.index
+				_on_pointer_press(event.position)
+			else:
+				_press_started_here = false
+		else:
+			if event.index != _active_touch_id:
+				return
+			_on_pointer_release(event.position)
+			_active_touch_id = -1
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if Global.is_mobile_platform:
+			return
+		if event.pressed:
+			_on_pointer_press(event.position)
+		else:
+			_on_pointer_release(event.position)
 					
 
 func _physics_process(delta):
@@ -1760,9 +1835,10 @@ func _physics_process(delta):
 	if is_dragging:
 		
 		var hit = false
-		var mouse_screen = Global.world_to_screen(self, get_global_mouse_position())
+		var pointer_world_pos = _get_drag_pointer_world_pos()
+		var pointer_screen_pos = _get_drag_pointer_screen_pos()
 		
-		if $"../../UI/MarginContainer".get_global_rect().has_point(mouse_screen):
+		if $"../../UI/MarginContainer".get_global_rect().has_point(pointer_screen_pos):
 			hit = true
 		
 		if hit==true:
@@ -1798,7 +1874,7 @@ func _physics_process(delta):
 			_update_harvest_drag_proxy_position()
 		else:
 			var t = min(1.0, delay * delta)
-			var dragged_target = position.lerp(get_global_mouse_position(), t)
+			var dragged_target = position.lerp(pointer_world_pos, t)
 			position = _clamp_position_to_world(dragged_target)
 	
 	if(caught_by != null):
@@ -1810,9 +1886,9 @@ func _physics_process(delta):
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 func _process(delta: float) -> void:
-	if Global.is_dragging and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+	if Global.is_dragging and not _is_drag_pointer_held():
 		Global.is_dragging = false
-	if is_dragging and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+	if is_dragging and not _is_drag_pointer_held():
 		is_dragging = false
 		if _harvest_drag_only:
 			_end_harvest_drag_proxy()

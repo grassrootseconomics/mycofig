@@ -149,6 +149,16 @@ func refresh_inventory_counts() -> void:
 				inventory_sprites[inv].modulate.a = 1.0
 
 
+func refund_inventory_item(agent_name: String, amount: int = 1) -> void:
+	if agent_name == "":
+		return
+	var safe_amount = maxi(amount, 0)
+	if safe_amount <= 0:
+		return
+	Global.inventory[agent_name] = int(Global.inventory.get(agent_name, 0)) + safe_amount
+	refresh_inventory_counts()
+
+
 
 func _process(delta: float) -> void:
 	pass	
@@ -387,7 +397,8 @@ func _drop_inventory_agent(drop_pos: Vector2) -> void:
 	var new_agent_dict = {
 		"name" : next_agent,
 		"pos": target_pos,
-		"allow_replace": allow_replace
+		"allow_replace": allow_replace,
+		"from_inventory": true
 	}
 	if is_instance_valid(spawn_anchor):
 		new_agent_dict["spawn_anchor"] = spawn_anchor

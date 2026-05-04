@@ -117,6 +117,97 @@ func _tile_pos_from_center(world: Node, center: Vector2i, delta: Vector2i) -> Ve
 	return world.tile_to_world_center(coord)
 
 
+func _refund_inventory_item(agent_name: String, amount: int = 1) -> void:
+	if agent_name == "":
+		return
+	var safe_amount = maxi(amount, 0)
+	if safe_amount <= 0:
+		return
+	var ui_node = get_node_or_null("UI")
+	if is_instance_valid(ui_node) and ui_node.has_method("refund_inventory_item"):
+		ui_node.refund_inventory_item(agent_name, safe_amount)
+		return
+	Global.inventory[agent_name] = int(Global.inventory.get(agent_name, 0)) + safe_amount
+
+
+func _count_living_myco(ignore_agent: Variant = null) -> int:
+	var total := 0
+	for agent in $Agents.get_children():
+		if not is_instance_valid(agent):
+			continue
+		if is_instance_valid(ignore_agent) and agent == ignore_agent:
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if str(agent.get("type")) != "myco":
+			continue
+		total += 1
+	return total
+
+
+func _find_adjacent_healthy_myco_anchor(world: Node, coord: Vector2i, ignore_agent: Variant = null) -> Node:
+	for agent in $Agents.get_children():
+		if not is_instance_valid(agent):
+			continue
+		if is_instance_valid(ignore_agent) and agent == ignore_agent:
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if str(agent.get("type")) != "myco":
+			continue
+		var myco_coord = Vector2i(world.world_to_tile(agent.global_position))
+		if not world.in_bounds(myco_coord):
+			continue
+		if maxi(abs(myco_coord.x - coord.x), abs(myco_coord.y - coord.y)) > 1:
+			continue
+		var myco_tile = world.get_tile(myco_coord)
+		if myco_tile.is_empty():
+			continue
+		if int(myco_tile.get("stage", 0)) >= 3:
+			return agent
+	return null
+
+
+func _validate_myco_spawn(spawn_pos: Vector2, ignore_agent: Variant = null) -> Dictionary:
+	var result := {
+		"ok": false,
+		"coord": Vector2i(-1, -1),
+		"anchor": null
+	}
+	var world = _get_world_foundation()
+	if not is_instance_valid(world):
+		result["ok"] = true
+		return result
+	if not (world.has_method("world_to_tile") and world.has_method("tile_to_world_center") and world.has_method("in_bounds")):
+		result["ok"] = true
+		return result
+
+	var coord = Vector2i(world.world_to_tile(spawn_pos))
+	result["coord"] = coord
+	if not world.in_bounds(coord):
+		return result
+	if LevelHelpersRef.is_tile_occupied(self, $Agents, coord, ignore_agent):
+		return result
+	if world.has_method("can_place_myco_on_tile"):
+		if not bool(world.call("can_place_myco_on_tile", coord)):
+			return result
+	else:
+		var tile = world.get_tile(coord)
+		if tile.is_empty() or int(tile.get("stage", 0)) < 2:
+			return result
+
+	if _count_living_myco(ignore_agent) <= 0:
+		result["ok"] = true
+		return result
+
+	var anchor = _find_adjacent_healthy_myco_anchor(world, coord, ignore_agent)
+	if not is_instance_valid(anchor):
+		return result
+	result["ok"] = true
+	result["anchor"] = anchor
+	return result
+
+
 func _ready():
 	#get_tree().call_group('ui','set_health',health)
 	#var num_maize = $Agents.get_children().size()
@@ -286,9 +377,12 @@ func _on_update_score() -> void:
 func _on_new_agent(agent_dict) -> void:
 	#print("found signal: ", agent_dict)
 	var new_agent = null
+	var spawn_name = str(agent_dict["name"])
 	var spawn_pos = agent_dict["pos"]
 	var ignore_agent = agent_dict.get("ignore_agent", null)
 	var require_exact_tile = bool(agent_dict.get("require_exact_tile", false))
+	var from_inventory = bool(agent_dict.get("from_inventory", false))
+	var myco_gate_result: Dictionary = {}
 	if bool(agent_dict.get("allow_replace", false)):
 		var replace_target = _find_replaceable_agent_at_world_pos(spawn_pos, ignore_agent)
 		if is_instance_valid(replace_target):
@@ -301,21 +395,40 @@ func _on_new_agent(agent_dict) -> void:
 	if require_exact_tile:
 		var exact_spawn = _resolve_exact_tile_spawn_pos(spawn_pos, ignore_agent)
 		if not bool(exact_spawn["ok"]):
+			if from_inventory:
+				_refund_inventory_item(spawn_name, 1)
 			return
 		spawn_pos = exact_spawn["pos"]
-	if agent_dict["name"]  == "squash":
+	if spawn_name == "myco" and not require_exact_tile:
+		spawn_pos = _resolve_tile_spawn_pos(spawn_pos)
+		myco_gate_result = _validate_myco_spawn(spawn_pos, ignore_agent)
+		if not bool(myco_gate_result["ok"]):
+			if from_inventory:
+				_refund_inventory_item("myco", 1)
+			return
+		if is_instance_valid(myco_gate_result["anchor"]):
+			agent_dict["spawn_anchor"] = myco_gate_result["anchor"]
+	if spawn_name == "squash":
 		$TwinkleSound.play()
 		new_agent = make_squash(spawn_pos)
-	elif agent_dict["name"]  == "bean":
+	elif spawn_name == "bean":
 		$TwinkleSound.play()
 		new_agent = make_bean(spawn_pos)
-	elif agent_dict["name"]  == "maize":
+	elif spawn_name == "maize":
 		$TwinkleSound.play()
 		new_agent = make_maize(spawn_pos)
-	elif agent_dict["name"]  == "myco":
+	elif spawn_name == "myco":
+		if myco_gate_result.is_empty():
+			myco_gate_result = _validate_myco_spawn(spawn_pos, ignore_agent)
+		if not bool(myco_gate_result["ok"]):
+			if from_inventory:
+				_refund_inventory_item("myco", 1)
+			return
+		if is_instance_valid(myco_gate_result["anchor"]):
+			agent_dict["spawn_anchor"] = myco_gate_result["anchor"]
 		$SquelchSound.play()
-		new_agent = make_myco(spawn_pos)
-	elif agent_dict["name"]  == "tree":
+		new_agent = make_myco(spawn_pos, true)
+	elif spawn_name == "tree":
 		$BushSound.play()
 		new_agent = make_tree(spawn_pos)
 	
@@ -453,8 +566,10 @@ func make_cloud(pos):
 	return cloud
 
 
-func make_myco(pos):
-	var myco_position = _resolve_tile_spawn_pos(pos)
+func make_myco(pos, already_snapped: bool = false):
+	var myco_position = pos
+	if not already_snapped:
+		myco_position = _resolve_tile_spawn_pos(pos)
 	
 	var named = "Mycorrhizal_" + str($Agents.get_child_count()+1)
 		

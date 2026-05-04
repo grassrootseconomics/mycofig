@@ -219,7 +219,7 @@ func _ready():
 	_mute_runtime_audio_if_headless()
 	_setup_perf_monitor()
 	Global.prevent_auto_select = false
-	DisplayServer.window_set_title("People Gardening")
+	DisplayServer.window_set_title("Social Soil Gardening")
 	if not _is_headless_runtime():
 		$BirdLong.play()
 	var world = _get_world_foundation()

@@ -977,7 +977,7 @@ func _ready():
 	_mute_runtime_audio_if_headless()
 	_setup_perf_monitor()
 	Global.prevent_auto_select = false
-	DisplayServer.window_set_title("Plants Gardening")
+	DisplayServer.window_set_title("Social Soil Gardening")
 	_ambient_tree_audio_base_db = $BirdLong.volume_db
 	$BirdLong.volume_db = AMBIENT_TREE_AUDIO_SILENT_DB
 	if not _is_headless_runtime():

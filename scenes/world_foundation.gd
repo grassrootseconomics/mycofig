@@ -28,6 +28,7 @@ const SOIL_SCORE_DRY_MAX := 0.30
 const SOIL_SCORE_RECOVERING_MAX := 0.48
 const SOIL_SCORE_SEMI_HEALTHY_MAX := 0.68
 const DEFAULT_RESIDUE_LIFETIME_TICKS := 8
+const SOIL_INFLUENCE_RADIUS := 2
 
 @export var columns: int = 48
 @export var rows: int = 27
@@ -330,9 +331,13 @@ func _start_soil_tick() -> void:
 
 func _on_soil_tick_timeout() -> void:
 	var residue_by_tile = _consume_residue_tick()
+	var residue_influence: Dictionary = {}
+	for coord_variant in residue_by_tile.keys():
+		var coord = Vector2i(coord_variant)
+		var biomass = float(residue_by_tile[coord_variant])
+		_add_radial_influence(residue_influence, coord, biomass, SOIL_INFLUENCE_RADIUS)
 	var influences = _collect_soil_influences()
-	var myco_core: Dictionary = influences["myco_core"]
-	var myco_adjacent: Dictionary = influences["myco_adjacent"]
+	var myco_influence: Dictionary = influences["myco_influence"]
 	var live_plants: Dictionary = influences["live_plants"]
 	var stage_changes: Dictionary = {}
 
@@ -346,21 +351,19 @@ func _on_soil_tick_timeout() -> void:
 			var compaction = float(tile["compaction"]) + SOIL_BASE_COMPACTION_DELTA
 			var organic_matter = float(tile["organic_matter"]) + SOIL_BASE_ORGANIC_DELTA
 
-			if myco_core.has(coord):
-				moisture += SOIL_MYCO_CORE_MOISTURE_DELTA
-				compaction += SOIL_MYCO_CORE_COMPACTION_DELTA
-			elif myco_adjacent.has(coord):
-				moisture += SOIL_MYCO_NEIGHBOR_MOISTURE_DELTA
-				compaction += SOIL_MYCO_NEIGHBOR_COMPACTION_DELTA
+			var myco_strength = minf(float(myco_influence.get(coord, 0.0)), 2.0)
+			if myco_strength > 0.0:
+				moisture += SOIL_MYCO_CORE_MOISTURE_DELTA * myco_strength
+				compaction += SOIL_MYCO_CORE_COMPACTION_DELTA * myco_strength
 
 			if live_plants.has(coord):
 				moisture += SOIL_LIVE_PLANT_MOISTURE_DELTA
 				organic_matter += SOIL_LIVE_PLANT_ORGANIC_DELTA
 
-			var residue_biomass = float(residue_by_tile.get(coord, 0.0))
-			if residue_biomass > 0.0:
-				moisture += SOIL_RESIDUE_MOISTURE_DELTA * residue_biomass
-				organic_matter += SOIL_RESIDUE_ORGANIC_DELTA * residue_biomass
+			var residue_strength = minf(float(residue_influence.get(coord, 0.0)), 3.0)
+			if residue_strength > 0.0:
+				moisture += SOIL_RESIDUE_MOISTURE_DELTA * residue_strength
+				organic_matter += SOIL_RESIDUE_ORGANIC_DELTA * residue_strength
 
 			moisture = _clamp01(moisture)
 			compaction = _clamp01(compaction)
@@ -409,14 +412,12 @@ func _consume_residue_tick() -> Dictionary:
 
 
 func _collect_soil_influences() -> Dictionary:
-	var myco_core: Dictionary = {}
-	var myco_adjacent: Dictionary = {}
+	var myco_influence: Dictionary = {}
 	var live_plants: Dictionary = {}
 	var agents_root = _get_agents_root()
 	if not is_instance_valid(agents_root):
 		return {
-			"myco_core": myco_core,
-			"myco_adjacent": myco_adjacent,
+			"myco_influence": myco_influence,
 			"live_plants": live_plants
 		}
 
@@ -429,24 +430,13 @@ func _collect_soil_influences() -> Dictionary:
 			continue
 		if agent_type == "myco":
 			for coord in occupied_tiles:
-				myco_core[coord] = true
-				for dy in range(-1, 2):
-					for dx in range(-1, 2):
-						var near = coord + Vector2i(dx, dy)
-						if not in_bounds(near):
-							continue
-						myco_adjacent[near] = true
+				_add_radial_influence(myco_influence, coord, 1.0, SOIL_INFLUENCE_RADIUS)
 		elif agent_type == "bean" or agent_type == "squash" or agent_type == "maize" or agent_type == "tree":
 			for coord in occupied_tiles:
 				live_plants[coord] = true
 
-	for coord in myco_core.keys():
-		if myco_adjacent.has(coord):
-			myco_adjacent.erase(coord)
-
 	return {
-		"myco_core": myco_core,
-		"myco_adjacent": myco_adjacent,
+		"myco_influence": myco_influence,
 		"live_plants": live_plants
 	}
 
@@ -559,6 +549,34 @@ func _apply_stage_changes(stage_changes: Dictionary) -> void:
 
 func _clamp01(value: float) -> float:
 	return clampf(value, 0.0, 1.0)
+
+
+func _falloff_weight(distance: int) -> float:
+	if distance <= 0:
+		return 1.0
+	if distance == 1:
+		return 0.75
+	if distance == 2:
+		return 0.5
+	return 0.0
+
+
+func _add_radial_influence(influence_map: Dictionary, origin: Vector2i, magnitude: float, radius: int = SOIL_INFLUENCE_RADIUS) -> void:
+	if magnitude <= 0.0:
+		return
+	var capped_radius = maxi(radius, 0)
+	for dy in range(-capped_radius, capped_radius + 1):
+		for dx in range(-capped_radius, capped_radius + 1):
+			var distance = maxi(abs(dx), abs(dy))
+			if distance > capped_radius:
+				continue
+			var weight = _falloff_weight(distance)
+			if weight <= 0.0:
+				continue
+			var coord = origin + Vector2i(dx, dy)
+			if not in_bounds(coord):
+				continue
+			influence_map[coord] = float(influence_map.get(coord, 0.0)) + (magnitude * weight)
 
 
 func _initialize_tile_data() -> void:

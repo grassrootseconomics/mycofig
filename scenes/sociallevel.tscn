@@ -89,7 +89,7 @@ stream = ExtResource("7_msnna")
 [node name="BirdSound" type="AudioStreamPlayer2D" parent="."]
 stream = ExtResource("8_cf52g")
 
-[node name="BirdLong" type="AudioStreamPlayer2D" parent="."]
+[node name="BirdLong" type="AudioStreamPlayer" parent="."]
 stream = ExtResource("9_habmw")
 
 [node name="CarSound" type="AudioStreamPlayer2D" parent="."]

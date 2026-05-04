@@ -68,12 +68,14 @@ func generate_buddies() -> void:
 	for child in children:
 		if(is_instance_valid(self) and is_instance_valid(child)):
 			if child.type == 'myco' and child.name != self.name:
+				if not _can_share_story_trade_network(child):
+					continue
 				var dist = global_position.distance_to(child.global_position)
 				if dist <= buddy_radius:
 					if len(trade_buddies) < num_buddies:
 						trade_buddies.append(child)
-				#else:
-				#print(self.name, " is too far from myco: ", dist)
+			#else:
+			#print(self.name, " is too far from myco: ", dist)
 	#print("final new buddies: ", trade_buddies)
 
 	pass

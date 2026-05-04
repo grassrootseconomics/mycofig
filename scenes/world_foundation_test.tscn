@@ -27,4 +27,4 @@ grow_horizontal = 0
 grow_vertical = 0
 horizontal_alignment = 2
 vertical_alignment = 2
-text = "M1 Test Map\nRight-drag: pan\nWASD/Arrows: pan\nLeft-click: cycle stage\nF1 overlay | F2 reset | F3 edit"
+text = "M1 Test Map\nRight-drag: pan\nWASD/Arrows: pan\nLeft-click: cycle stage\nZ overlay | X reset | C edit"

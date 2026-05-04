@@ -1153,6 +1153,18 @@ static func _is_preview_candidate(agent: Node) -> bool:
 	return true
 
 
+static func _is_story_mode_runtime() -> bool:
+	return str(Global.mode) == "story"
+
+
+static func _is_story_village_actor_node(node: Variant) -> bool:
+	return is_instance_valid(node) and bool(node.get_meta("story_village_actor", false))
+
+
+static func _is_preview_village_item_type(agent_type: String) -> bool:
+	return agent_type == "farmer" or agent_type == "vendor" or agent_type == "cook" or agent_type == "basket" or agent_type == "bank"
+
+
 static func _get_preview_myco_radius(agents_root: Node) -> float:
 	if not is_instance_valid(agents_root):
 		return 200.0
@@ -1228,10 +1240,15 @@ static func update_inventory_connection_preview(level_root: Node, agents_root: N
 
 	var safe_type = str(dragged_agent_type)
 	var preview_is_myco = safe_type == "myco"
+	var preview_is_village_actor = _is_preview_village_item_type(safe_type)
 	var myco_radius = _get_preview_myco_radius(agents_root)
 	for agent in agents_root.get_children():
 		if not _is_preview_candidate(agent):
 			continue
+		if _is_story_mode_runtime():
+			var candidate_is_village_actor = _is_story_village_actor_node(agent)
+			if preview_is_village_actor != candidate_is_village_actor:
+				continue
 		var agent_type = str(agent.get("type"))
 		if preview_is_myco:
 			if agent_type == "myco" or agent_type == "cloud":

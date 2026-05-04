@@ -45,6 +45,7 @@ const BASE_MOVE_RATE_FOR_STARVATION := 6.0
 const BASE_MOVEMENT_SPEED_FOR_STARVATION := 200.0
 const MIN_STARVATION_SPEED_SCALE := 0.2
 const STORY_PREDATOR_DISRUPT_SECONDS := 4.0
+const LIFECYCLE_PARENT_BOUND_TILES := 4
 
 signal trade(pos)
 signal clicked
@@ -52,6 +53,7 @@ signal clicked_agent(agent)
 signal new_agent(agent_dict)
 signal update_score
 signal lifecycle_residue(coord, biomass, source_type)
+signal harvest_committed(harvest_type, destination)
 
 var my_lines = []
 var buddy_radius = 250
@@ -258,7 +260,7 @@ func _should_show_resource_bars() -> bool:
 		return false
 	if Global.bars_on:
 		return true
-	if not _is_reposition_subject():
+	if not _is_hover_bar_subject():
 		return false
 	return _hover_visual_focus
 
@@ -704,6 +706,37 @@ func _is_reposition_subject() -> bool:
 	return entity_type == "bean" or entity_type == "squash" or entity_type == "maize" or entity_type == "tree" or entity_type == "myco"
 
 
+func _is_hover_bar_subject() -> bool:
+	if _is_reposition_subject():
+		return true
+	if _is_story_village_actor_node(self):
+		return true
+	var entity_type = str(type)
+	return entity_type == "farmer" or entity_type == "vendor" or entity_type == "cook" or entity_type == "basket"
+
+
+func _is_story_mode_runtime() -> bool:
+	return str(Global.mode) == "story"
+
+
+func _is_story_village_actor_node(node: Variant) -> bool:
+	return is_instance_valid(node) and bool(node.get_meta("story_village_actor", false))
+
+
+func _can_share_story_trade_network(candidate: Variant) -> bool:
+	if not is_instance_valid(candidate):
+		return false
+	if bool(candidate.get("dead")):
+		return false
+	if str(candidate.get("type")) == "cloud":
+		return false
+	if not _is_story_mode_runtime():
+		return true
+	var self_is_village_actor = _is_story_village_actor_node(self)
+	var candidate_is_village_actor = _is_story_village_actor_node(candidate)
+	return self_is_village_actor == candidate_is_village_actor
+
+
 func _can_user_reposition() -> bool:
 	if not _is_reposition_subject():
 		return true
@@ -756,6 +789,50 @@ func _spawn_growth_sparkle() -> void:
 	sparkle.global_position = self.global_position
 	$"../../Sparkles".add_child(sparkle)
 	sparkle.start(0.75)
+
+
+func _find_nearby_living_myco_anchor(reference_pos: Vector2, max_tiles: int = LIFECYCLE_PARENT_BOUND_TILES) -> Node:
+	var agents_root = _get_agents_root()
+	if not is_instance_valid(agents_root):
+		return null
+	var world = _get_world_foundation_node()
+	var use_tiles = _uses_tile_snap() and is_instance_valid(world)
+	var safe_max_tiles = maxi(max_tiles, 0)
+	var reference_coord := Vector2i.ZERO
+	var max_pixel_distance := float(safe_max_tiles) * 64.0
+	if is_instance_valid(world):
+		var tile_size = float(world.get("tile_size"))
+		if tile_size > 0.0:
+			max_pixel_distance = float(safe_max_tiles) * tile_size
+	if use_tiles:
+		reference_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(_clamp_position_to_world_rect(reference_pos))))
+	var best_anchor: Node = null
+	var best_distance := INF
+	for candidate in agents_root.get_children():
+		if not is_instance_valid(candidate):
+			continue
+		if candidate == self:
+			continue
+		if bool(candidate.get("dead")):
+			continue
+		if str(candidate.get("type")) != "myco":
+			continue
+		if _is_story_mode_runtime() and _is_story_village_actor_node(candidate):
+			continue
+		var distance_value := INF
+		if use_tiles:
+			var candidate_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(_clamp_position_to_world_rect(candidate.global_position))))
+			distance_value = float(maxi(abs(candidate_coord.x - reference_coord.x), abs(candidate_coord.y - reference_coord.y)))
+			if distance_value > float(safe_max_tiles):
+				continue
+		else:
+			distance_value = candidate.global_position.distance_to(reference_pos)
+			if distance_value > max_pixel_distance:
+				continue
+		if distance_value < best_distance:
+			best_distance = distance_value
+			best_anchor = candidate
+	return best_anchor
 
 
 func _get_bean_stage_scale_multiplier(stage_value: int) -> float:
@@ -988,17 +1065,23 @@ func _emit_death_cycle_regrowth_request() -> void:
 	if not _is_bean_lifecycle_enabled():
 		return
 	var world_pos := global_position
+	var parent_anchor: Node = null
 	var world = _get_world_foundation_node()
 	if is_instance_valid(world) and world.has_method("world_to_tile") and world.has_method("tile_to_world_center") and world.has_method("in_bounds"):
 		var coord = Vector2i(world.world_to_tile(_clamp_position_to_world_rect(global_position)))
 		if not world.in_bounds(coord):
 			return
 		world_pos = world.tile_to_world_center(coord)
+	parent_anchor = _find_nearby_living_myco_anchor(world_pos, LIFECYCLE_PARENT_BOUND_TILES)
+	if not is_instance_valid(parent_anchor):
+		return
 	var new_agent_dict = {
 		"name": str(type),
 		"pos": world_pos,
 		"require_exact_tile": true,
-		"ignore_agent": self
+		"ignore_agent": self,
+		"parent_anchor": parent_anchor,
+		"max_parent_tiles": LIFECYCLE_PARENT_BOUND_TILES
 	}
 	emit_signal("new_agent", new_agent_dict)
 
@@ -1214,6 +1297,7 @@ func _try_harvest_to_inventory() -> bool:
 	if is_instance_valid(ui_node) and ui_node.has_method("refresh_inventory_counts"):
 		ui_node.refresh_inventory_counts()
 	_apply_crop_harvest_commit_state()
+	emit_signal("harvest_committed", harvest_key, "inventory")
 	return true
 
 
@@ -1222,7 +1306,9 @@ func _try_harvest_to_farmer(_target_farmer: Node = null) -> bool:
 		return false
 	if not bean_harvest_ready or bean_stage != BeanGrowthStage.POD_READY:
 		return false
+	var harvest_key = str(type)
 	_apply_crop_harvest_commit_state()
+	emit_signal("harvest_committed", harvest_key, "farmer")
 	return true
 
 
@@ -1244,7 +1330,29 @@ func try_harvest_to_farmer(target_farmer: Node = null) -> bool:
 
 func set_variables(a_dict) -> void:
 	#print("setup: ", a_dict)
-	
+	# Reinitialize mutable per-agent state so new spawns cannot inherit stale
+	# dictionary contents from previous instances.
+	assets = {
+		"N": 0,
+		"P": 0,
+		"K": 0,
+		"R": 0
+	}
+	current_needs = {
+		"N": 0,
+		"P": 0,
+		"K": 0,
+		"R": 0
+	}
+	current_excess = {
+		"N": 0,
+		"P": 0,
+		"K": 0,
+		"R": 0
+	}
+	trade_buddies = []
+	trades = []
+		
 	var asset_dict = {
 		"long_name": "Nitrogen",
 		"symbol": "N",
@@ -1806,6 +1914,8 @@ func generate_buddies() -> void:
 			continue
 		if child.type != "myco":
 			continue
+		if not _can_share_story_trade_network(child):
+			continue
 		var dist = global_position.distance_to(child.global_position)
 		if dist <= child.buddy_radius and len(trade_buddies) < num_buddies:
 			trade_buddies.append(child)
@@ -1972,6 +2082,9 @@ func have_babies(force_spawn: bool = false)  -> void:
 		return
 	if _is_bean_lifecycle_enabled() and bean_stage != BeanGrowthStage.POD_READY:
 		return
+	var parent_anchor = _find_nearby_living_myco_anchor(global_position, LIFECYCLE_PARENT_BOUND_TILES)
+	if _is_bean_lifecycle_enabled() and not is_instance_valid(parent_anchor):
+		return
 	
 	var max_rounds = 10
 	var current_round = 0
@@ -1983,9 +2096,14 @@ func have_babies(force_spawn: bool = false)  -> void:
 	
 	var new_x = global_position.x
 	var new_y = global_position.y
-	
-	var size_x = sprite.get_rect().size[0]
-	var size_y = sprite.get_rect().size[1]
+	var world = _get_world_foundation_node()
+	var use_tile_sampling = _uses_tile_snap() and is_instance_valid(world) and world.has_method("world_to_tile") and world.has_method("tile_to_world_center")
+	var anchor_pos = global_position
+	if is_instance_valid(parent_anchor):
+		anchor_pos = parent_anchor.global_position
+	var anchor_coord := Vector2i.ZERO
+	if use_tile_sampling:
+		anchor_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(_clamp_position_to_world_rect(anchor_pos))))
 	var rng = random
 	
 	while(baby_made == false and current_round < max_rounds):
@@ -1996,13 +2114,21 @@ func have_babies(force_spawn: bool = false)  -> void:
 		new_x = global_position.x
 		new_y = global_position.y
 		current_round+=1
-		#print(" sizes: x: ", sprite.get_rect().size[0], " y: ", sprite.get_rect().size[1])
-		var random_x = rng.randi_range(-1*size_x*4,size_x*4)
-		var random_y = rng.randi_range(-1*size_y*4,size_y*4)
-		
-		#print(" rand_x: ", random_x, " rand_y: ", random_y)
-		new_x = new_x + random_x
-		new_y = new_y + random_y
+		if use_tile_sampling:
+			var sample_coord = anchor_coord + Vector2i(
+				rng.randi_range(-LIFECYCLE_PARENT_BOUND_TILES, LIFECYCLE_PARENT_BOUND_TILES),
+				rng.randi_range(-LIFECYCLE_PARENT_BOUND_TILES, LIFECYCLE_PARENT_BOUND_TILES)
+			)
+			sample_coord = _clamp_tile_coord(world, sample_coord)
+			var sampled_world_pos = world.tile_to_world_center(sample_coord)
+			new_x = sampled_world_pos.x
+			new_y = sampled_world_pos.y
+		else:
+			var pixel_radius = int(maxf(48.0, _get_sprite_half_extents().x * 2.0))
+			var random_x = rng.randi_range(-pixel_radius, pixel_radius)
+			var random_y = rng.randi_range(-pixel_radius, pixel_radius)
+			new_x = new_x + random_x
+			new_y = new_y + random_y
 		
 		var new_pos = Vector2(new_x, new_y )
 		var hit = false
@@ -2029,6 +2155,11 @@ func have_babies(force_spawn: bool = false)  -> void:
 					"name" : self.type,
 					"pos": new_pos
 				}
+				if is_instance_valid(parent_anchor):
+					new_agent_dict["parent_anchor"] = parent_anchor
+					new_agent_dict["max_parent_tiles"] = LIFECYCLE_PARENT_BOUND_TILES
+				if use_tile_sampling:
+					new_agent_dict["require_exact_tile"] = true
 				#print("old pos: x: ",global_position.x, " y: ", global_position.y , "new agent signal: ", new_agent_dict)
 				if force_spawn:
 					emit_signal("new_agent", new_agent_dict)
@@ -2057,6 +2188,9 @@ func _on_evaporate_timer_timeout() -> void:
 
 
 func _on_body_entered(body: Node2D) -> void:
+	if body is Bird and str(type) == "tree":
+		# Birds never steal trees/acorns.
+		return
 	if (self.type == body.quarry_type):#"maize"):
 		if body is Tuktuk and bool(get_meta("story_villager", false)):
 			story_predator_disrupt_timer = maxf(story_predator_disrupt_timer, STORY_PREDATOR_DISRUPT_SECONDS)

@@ -125,6 +125,8 @@ func _has_supporting_neighbors() -> bool:
 		var child_type = str(child.get("type"))
 		if child_type == "cloud":
 			continue
+		if not _can_share_story_trade_network(child):
+			continue
 		if global_position.distance_to(child.global_position) <= buddy_radius:
 			return true
 	return false
@@ -311,6 +313,29 @@ func try_harvest_to_inventory() -> bool:
 	# Harvesting removes only the mushroom; the myco body remains and regrows.
 	_set_myco_stage(MycoGrowthStage.RHIZO_GROW, true)
 	_commit_harvest_visual_detach()
+	emit_signal("harvest_committed", "myco", "inventory")
+	_emit_harvest_spore_births()
+	return true
+
+
+func try_harvest_to_farmer(_target_farmer: Node = null) -> bool:
+	if not supports_inventory_harvest():
+		return false
+	if not myco_harvest_ready or myco_stage != MycoGrowthStage.POD_READY:
+		return false
+	if is_dragging:
+		is_dragging = false
+		Global.is_dragging = false
+	_clear_drag_tile_hint()
+	_begin_snap_to_nearest_tile(position)
+	myco_harvest_ready = false
+	myco_pod_ticks = 0
+	myco_stage_consumptions = 0
+	myco_stage_wait_ticks = 0
+	# Harvesting removes only the mushroom; the myco body remains and regrows.
+	_set_myco_stage(MycoGrowthStage.RHIZO_GROW, true)
+	_commit_harvest_visual_detach()
+	emit_signal("harvest_committed", "myco", "farmer")
 	_emit_harvest_spore_births()
 	return true
 
@@ -406,6 +431,8 @@ func generate_buddies() -> void:
 		if bool(child.get("dead")):
 			continue
 		if child.type != "myco" or child.name == self.name:
+			continue
+		if not _can_share_story_trade_network(child):
 			continue
 		var dist = global_position.distance_to(child.global_position)
 		if dist <= buddy_radius and len(trade_buddies) < num_buddies:

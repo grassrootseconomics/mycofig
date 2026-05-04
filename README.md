@@ -57,12 +57,17 @@ Choose mode from title screen:
 - `+` / `-`: change movement speed.
 - `Esc` or `Q`: end run / go to game-over screen.
 - Inventory panel visibility: no hotkey yet (always shown).
-- `F8`: toggle runtime performance overlay.
+- `N`: toggle runtime performance overlay.
+- `V`: toggle Story fog-of-war on/off (debug runtime toggle).
 - Minimap (HUD): click or drag to move camera.
 
 Story-specific controls/behavior:
 - Farm and Village inventory tabs (Village unlocks on story reveal).
 - In village phase, ripe crop harvest can only be dropped on `Farmer` (not inventory/other villagers/baskets).
+- Story farmers do not passively regenerate resources.
+- Any successful drop onto a farmer refills the farmer's `N` resource bar to full (`needs["N"] * 2`).
+- Story village trading uses native social-agent resources/bars only (no separate hidden farmer stock meter).
+- Story tuktuk predators are temporarily disabled by default via `Global.enable_tuktuk_predators = false` (story-only; birds still spawn).
 
 Keybinding implementation:
 - All shared gameplay hotkeys are centralized in `scenes/level_helpers.gd` via `handle_gameplay_hotkeys(...)`.
@@ -141,9 +146,10 @@ Fungi lifecycle (plants mode):
 - Rhizomorphic radius growth/shrink is visual reach only; fungi occupancy remains single-tile.
 
 World foundation debug (test scene):
-- `F1`: toggle soil debug overlay.
-- `F2`: reset static baseline map.
-- `F3`: toggle tile stage edit mode.
+- `Z`: toggle soil debug overlay.
+- `X`: reset static baseline map.
+- `C`: toggle tile stage edit mode.
+- `V`: toggle Story fog-of-war on/off.
 - `Left Click` (with edit on): cycle tile stage `0 -> 1 -> 2 -> 3 -> 0`.
 
 ## Project Structure

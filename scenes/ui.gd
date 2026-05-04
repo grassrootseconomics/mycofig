@@ -16,7 +16,6 @@ var drag_preview_sprite: Sprite2D = null
 var minimap_panel: Control = null
 var _farm_tab_button: Button = null
 var _village_tab_button: Button = null
-var _farm_stock_label: Label = null
 var inventory_spawn_rng := RandomNumberGenerator.new()
 const AUTO_SPAWN_ATTEMPTS := 96
 const AUTO_SPAWN_SWEEP_STEPS := 48
@@ -105,17 +104,23 @@ func _ensure_inventory_tabs() -> void:
 		if _village_tab_unlocked:
 			_set_inventory_tab("village")
 	)
+	_village_tab_button.visible = _village_tab_unlocked
 	tabs_row.add_child(_village_tab_button)
 
 
 func _ensure_minimap_panel() -> void:
 	if is_instance_valid(minimap_panel):
 		return
-	var host = $MarginContainer/VBoxContainer/HBoxContainer
+	var inventory_vbox = $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer
+	var host = CenterContainer.new()
+	host.name = "MiniMapHost"
+	host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	host.size_flags_vertical = Control.SIZE_FILL
+	inventory_vbox.add_child(host)
 	minimap_panel = MiniMapPanelRef.new()
 	minimap_panel.name = "MiniMapPanel"
 	minimap_panel.custom_minimum_size = Vector2(180, 120)
-	minimap_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	minimap_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	minimap_panel.size_flags_vertical = Control.SIZE_FILL
 	host.add_child(minimap_panel)
 	minimap_panel.camera_pan_requested.connect(_on_minimap_camera_requested)
@@ -123,12 +128,6 @@ func _ensure_minimap_panel() -> void:
 	var world = get_node_or_null("../WorldFoundation")
 	var agents = get_node_or_null("../Agents")
 	minimap_panel.configure(level_root, world, agents)
-
-	_farm_stock_label = Label.new()
-	_farm_stock_label.name = "FarmerStockLabel"
-	_farm_stock_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_farm_stock_label.text = ""
-	host.add_child(_farm_stock_label)
 
 
 func _set_inventory_tab(tab_id: String) -> void:
@@ -205,14 +204,6 @@ func refresh_inventory_counts() -> void:
 
 	if is_instance_valid(_village_tab_button):
 		_village_tab_button.disabled = _current_inventory_tab == "village" or not _village_tab_unlocked
-	if is_instance_valid(_farm_stock_label):
-		if Global.mode == "story":
-			_farm_stock_label.visible = true
-			var current_stock = int(Global.farmer_crop_stock_total)
-			var max_stock = maxi(int(Global.farmer_crop_stock_max), 1)
-			_farm_stock_label.text = str("Farmer Crop Stock: ", current_stock, "/", max_stock)
-		else:
-			_farm_stock_label.visible = false
 
 
 func get_inventory_icon_center(agent_name: String) -> Vector2:
@@ -596,8 +587,17 @@ func _drop_inventory_agent(drop_pos: Vector2) -> void:
 		return
 	var constrained_type = _is_parent_bounded_inventory_type(spawn_name)
 	var target_pos = _screen_to_world(drop_pos)
+	var level_root = get_node_or_null("..")
+	if is_instance_valid(level_root) and level_root.has_method("try_story_inventory_delivery"):
+		# Story farmer-delivery path must be evaluated before parent-anchor checks
+		# so constrained crop/myco inventory items can still refill farmer stock.
+		if bool(level_root.try_story_inventory_delivery(spawn_name, target_pos)):
+			Global.inventory[spawn_name] = int(Global.inventory.get(spawn_name, 0)) - 1
+			refresh_inventory_counts()
+			return
 	var spawn_anchor = null
 	var allow_replace = true
+	var manual_placement = true
 	var view = get_viewport().get_visible_rect()
 	if $MarginContainer.get_global_rect().has_point(drop_pos) or not view.has_point(drop_pos):
 		var auto_target = _get_auto_spawn_target(spawn_name)
@@ -606,6 +606,7 @@ func _drop_inventory_agent(drop_pos: Vector2) -> void:
 		target_pos = auto_target["pos"]
 		spawn_anchor = auto_target["anchor"]
 		allow_replace = false
+		manual_placement = false
 	elif constrained_type:
 		spawn_anchor = _get_nearest_living_myco_anchor(target_pos, _get_agents_root())
 		if not is_instance_valid(spawn_anchor):
@@ -618,7 +619,8 @@ func _drop_inventory_agent(drop_pos: Vector2) -> void:
 		"name" : spawn_name,
 		"pos": target_pos,
 		"allow_replace": allow_replace,
-		"from_inventory": true
+		"from_inventory": true,
+		"manual_placement": manual_placement
 	}
 	if is_instance_valid(spawn_anchor):
 		new_agent_dict["spawn_anchor"] = spawn_anchor
@@ -654,6 +656,8 @@ func _input(event):
 
 func set_village_inventory_unlocked(unlocked: bool) -> void:
 	_village_tab_unlocked = unlocked
+	if is_instance_valid(_village_tab_button):
+		_village_tab_button.visible = unlocked
 	if not unlocked and _current_inventory_tab == "village":
 		_set_inventory_tab("farm")
 	refresh_inventory_counts()
@@ -662,12 +666,6 @@ func set_village_inventory_unlocked(unlocked: bool) -> void:
 func set_story_village_marker(world_pos: Vector2, visible: bool) -> void:
 	if is_instance_valid(minimap_panel):
 		minimap_panel.set_village_marker(world_pos, visible)
-
-
-func set_farmer_crop_stock(current_stock: int, max_stock: int) -> void:
-	Global.farmer_crop_stock_total = maxi(current_stock, 0)
-	Global.farmer_crop_stock_max = maxi(max_stock, 0)
-	refresh_inventory_counts()
 
 
 func _on_minimap_camera_requested(world_pos: Vector2) -> void:

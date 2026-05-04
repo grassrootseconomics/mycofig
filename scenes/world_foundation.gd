@@ -32,10 +32,14 @@ const SOIL_SCORE_RECOVERING_MAX := 0.48
 const SOIL_SCORE_SEMI_HEALTHY_MAX := 0.68
 const DEFAULT_RESIDUE_LIFETIME_TICKS := 8
 const SOIL_INFLUENCE_RADIUS := 4
-const STORY_WORLD_COLUMNS := 96
+const STORY_WORLD_COLUMNS := 26
 const STORY_WORLD_ROWS := 27
 const STORY_FOG_TICK_SECONDS := 0.25
-const STORY_FOG_COLOR := Color(0.02, 0.03, 0.04, 0.96)
+const STORY_FOG_COLOR := Color(0.02, 0.03, 0.04, 0.62)
+const HOTKEY_WORLD_DEBUG_OVERLAY := KEY_Z
+const HOTKEY_WORLD_RESET_BASELINE := KEY_X
+const HOTKEY_WORLD_EDIT_TILES := KEY_C
+const HOTKEY_WORLD_TOGGLE_FOG := KEY_V
 
 @export var columns: int = 48
 @export var rows: int = 27
@@ -53,6 +57,7 @@ const STORY_FOG_COLOR := Color(0.02, 0.03, 0.04, 0.96)
 @export var enable_touch_pan: bool = true
 @export var debug_overlay_enabled: bool = false
 @export var debug_edit_enabled: bool = false
+@export var story_fog_enabled: bool = true
 @export var drag_hint_available_color: Color = Color(0.20, 0.95, 0.35, 0.95)
 @export var drag_hint_blocked_color: Color = Color(0.95, 0.20, 0.20, 0.95)
 
@@ -76,6 +81,7 @@ var _occupancy_by_tile: Dictionary = {}
 var _footprint_by_agent: Dictionary = {}
 var _influence_kernel: Array = []
 var _revealed_tiles: PackedByteArray = PackedByteArray()
+var _permanent_revealed_tiles: PackedByteArray = PackedByteArray()
 
 
 func _ready() -> void:
@@ -379,8 +385,40 @@ func is_world_pos_revealed(world_pos: Vector2) -> bool:
 	return is_tile_revealed(coord)
 
 
+func reveal_rect_permanent(rect: Rect2i, buffer_tiles: int = 0) -> void:
+	if _permanent_revealed_tiles.size() != columns * rows:
+		_initialize_reveal_data()
+	var safe_buffer = maxi(buffer_tiles, 0)
+	var min_x = rect.position.x - safe_buffer
+	var min_y = rect.position.y - safe_buffer
+	var max_x = rect.position.x + rect.size.x - 1 + safe_buffer
+	var max_y = rect.position.y + rect.size.y - 1 + safe_buffer
+	for y in range(min_y, max_y + 1):
+		for x in range(min_x, max_x + 1):
+			var coord = Vector2i(x, y)
+			if not in_bounds(coord):
+				continue
+			var idx = _index_for(coord)
+			if idx < 0 or idx >= _permanent_revealed_tiles.size():
+				continue
+			_permanent_revealed_tiles[idx] = 1
+	_refresh_story_fog_map()
+
+
+func clear_permanent_reveal() -> void:
+	if _permanent_revealed_tiles.size() != columns * rows:
+		_initialize_reveal_data()
+	for idx in range(_permanent_revealed_tiles.size()):
+		_permanent_revealed_tiles[idx] = 0
+	_refresh_story_fog_map()
+
+
 func reset_to_baseline() -> void:
 	_residue_records.clear()
+	if _permanent_revealed_tiles.size() != columns * rows:
+		_initialize_reveal_data()
+	for idx in range(_permanent_revealed_tiles.size()):
+		_permanent_revealed_tiles[idx] = 0
 	for y in range(rows):
 		for x in range(columns):
 			var coord = Vector2i(x, y)
@@ -448,14 +486,18 @@ func _draw() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_F1:
+		if event.keycode == HOTKEY_WORLD_DEBUG_OVERLAY:
 			debug_overlay_enabled = not debug_overlay_enabled
 			queue_redraw()
 			_update_debug_label()
-		elif event.keycode == KEY_F2:
+		elif event.keycode == HOTKEY_WORLD_RESET_BASELINE:
 			reset_to_baseline()
-		elif event.keycode == KEY_F3:
+		elif event.keycode == HOTKEY_WORLD_EDIT_TILES:
 			debug_edit_enabled = not debug_edit_enabled
+			_update_debug_label()
+		elif event.keycode == HOTKEY_WORLD_TOGGLE_FOG:
+			story_fog_enabled = not story_fog_enabled
+			_refresh_story_fog_map()
 			_update_debug_label()
 
 	if event is InputEventMouseButton:
@@ -536,18 +578,20 @@ func _start_fog_tick() -> void:
 
 
 func _uses_story_fog() -> bool:
-	return str(Global.mode) == "story"
+	return str(Global.mode) == "story" and story_fog_enabled
 
 
 func _initialize_reveal_data() -> void:
 	var tile_count = maxi(columns * rows, 0)
 	_revealed_tiles.resize(tile_count)
+	_permanent_revealed_tiles.resize(tile_count)
 	for idx in range(tile_count):
 		_revealed_tiles[idx] = 0
+		_permanent_revealed_tiles[idx] = 0
 
 
 func _refresh_story_fog_map() -> void:
-	if _revealed_tiles.size() != columns * rows:
+	if _revealed_tiles.size() != columns * rows or _permanent_revealed_tiles.size() != columns * rows:
 		_initialize_reveal_data()
 	if not _uses_story_fog():
 		for idx in range(_revealed_tiles.size()):
@@ -556,7 +600,7 @@ func _refresh_story_fog_map() -> void:
 		return
 
 	for idx in range(_revealed_tiles.size()):
-		_revealed_tiles[idx] = 0
+		_revealed_tiles[idx] = _permanent_revealed_tiles[idx]
 	var agents_root = _get_agents_root()
 	if is_instance_valid(agents_root):
 		for agent in agents_root.get_children():
@@ -739,6 +783,8 @@ func _is_live_agent_for_soil(agent: Node) -> bool:
 	if bool(agent.get("dead")):
 		return false
 	if str(agent.get("type")) == "cloud":
+		return false
+	if str(Global.mode) == "story" and bool(agent.get_meta("story_village_actor", false)):
 		return false
 	return true
 
@@ -1235,8 +1281,9 @@ func _update_debug_label(coord_hint: Vector2i = Vector2i(-1, -1)) -> void:
 		str("grid=", columns, "x", rows, " tile=", tile_size),
 		str("world_rect=", rect),
 		str("hover=", hover_text),
+		str("story_fog_enabled=", story_fog_enabled),
 		str("edit=", debug_edit_enabled, "  overlay=", debug_overlay_enabled),
-		"F1 overlay | F2 reset | F3 edit"
+		"Z overlay | X reset | C edit | V fog"
 	]
 	debug_label.text = "\n".join(lines)
 

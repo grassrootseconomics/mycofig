@@ -51,6 +51,26 @@ var bars_offset = { #list of needed assets with need level
 
 
 
+func _is_story_mode_runtime() -> bool:
+	return str(Global.mode) == "story"
+
+
+func _is_story_village_actor_node(node: Variant) -> bool:
+	return is_instance_valid(node) and bool(node.get_meta("story_village_actor", false))
+
+
+func _can_target_in_story_network(candidate: Variant) -> bool:
+	if not is_instance_valid(candidate):
+		return false
+	if bool(candidate.get("dead")):
+		return false
+	if not _is_story_mode_runtime():
+		return true
+	var self_is_village_actor = _is_story_village_actor_node(self)
+	var candidate_is_village_actor = _is_story_village_actor_node(candidate)
+	return self_is_village_actor == candidate_is_village_actor
+
+
 func set_variables(a_dict) -> void:
 	#print("setup: ", a_dict)
 	name = a_dict.get("name")
@@ -100,6 +120,8 @@ func logistics():
 		for child in children:
 			if(assets[prod_res[0]] - needs[prod_res[0]]  >= 1):
 				if(is_instance_valid(child)):
+					if not _can_target_in_story_network(child):
+						continue
 					if child.type != 'myco' and child.type != 'cloud':
 						#print(child.name, " needs: ", prod_res)
 						#if child.name != 'Maize':

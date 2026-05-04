@@ -25,8 +25,7 @@ var active_scenario_id = ""
 var story_chapter_id := 1
 var village_revealed := false
 var village_objective_flags := {}
-var farmer_crop_stock_total := 0
-var farmer_crop_stock_max := 0
+var enable_tuktuk_predators := false
 var prevent_auto_select = false
 var perf_adaptive_enabled = true
 var perf_quality_override = -1
@@ -97,11 +96,12 @@ var assets_social = { #list of assets -
 	}
 
 var story_stage_text = {
-	1: "Story 1: Place crops and myco from inventory to start restoring soil.",
-	2: "Story 2: Harvest ripe crops to increase your farm inventory.",
-	3: "Story 3: Expand toward the village marked with ? on the minimap.",
-	4: "Story 4: The village is visible. Place village items and keep farmer crop stock alive.",
-	5: "Story 5: Support village trade by delivering ripe crop harvests to farmers."
+	1: "Phase 1: Place bean, squash, maize, tree, and fungi from inventory to begin restoring soil. Fungi can only be placed on Semi-Healthy or Healthy soil, so this may take time. Hover or select agents to check resource bars and spot shortages.",
+	2: "Phase 2: Harvest one ripe bean, squash, maize, acorn, and mushroom to grow your inventory. Birds are hungry, so grow more crops.",
+	3: "Phase 3: Expand toward the ? on the map.",
+	4: "Phase 4: You found a village! Looks like they need food. Deliver at least one harvest item to any farmer so village trading can begin.",
+	5: "Phase 5: Place a basket from your inventory and help all villagers exchange even if they don't have money.",
+	6: "Phase 6: Complete! You restored soil health, revived the ecosystem, and helped the village recover. Well done!"
 }
 	
 var assets_plant = { #list of assets - 

@@ -156,7 +156,8 @@ func _spawn_random_agent(allow_replace: bool, include_myco: bool = true) -> bool
 		"name": spawn_type,
 		"pos": spawn_pos,
 		"require_exact_tile": true,
-		"allow_replace": allow_replace
+		"allow_replace": allow_replace,
+		"allow_unanchored_spawn": true
 	})
 	return agents_root.get_child_count() > before
 

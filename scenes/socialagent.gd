@@ -167,7 +167,8 @@ func _on_growth_timer_timeout() -> void:
 	#production_ready = true
 	#if production_ready:		
 	#	production_ready = false
-	if(prod_res[0] != null):
+	var disable_story_farmer_production = bool(get_meta("story_disable_farmer_production", false))
+	if not disable_story_farmer_production and prod_res.size() > 0 and prod_res[0] != null:
 		for res in prod_res:
 			assets[res]+=3
 			if assets[res]> needs[res] *2:

@@ -38,6 +38,7 @@ const PRESSURE_WEIGHTS := {
 	"bars": 0.02,
 	"occ": 0.01
 }
+const HOTKEY_PERF_OVERLAY := KEY_N
 
 var _level_root: Node = null
 var _agents_root: Node = null
@@ -81,7 +82,7 @@ func _create_overlay() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_F8:
+		if event.keycode == HOTKEY_PERF_OVERLAY:
 			overlay_enabled = not overlay_enabled
 			if is_instance_valid(_overlay_label):
 				_overlay_label.visible = overlay_enabled
@@ -244,7 +245,7 @@ func _update_overlay(sample: Dictionary) -> void:
 	if not overlay_enabled:
 		return
 	var lines = [
-		"Perf Monitor (F8)",
+		"Perf Monitor (N)",
 		str("tier=", sample.get("quality_tier", 0), " avg=", _fmt(sample.get("frame_avg_ms", 0.0)), "ms p95=", _fmt(sample.get("frame_p95_ms", 0.0)), "ms"),
 		str("pressure t1=", _fmt(sample.get("pressure_t1", 0.0)), " t2=", _fmt(sample.get("pressure_t2", 0.0))),
 		str("agents=", sample.get("active_agents", 0), " moving=", sample.get("moving_agents", 0)),

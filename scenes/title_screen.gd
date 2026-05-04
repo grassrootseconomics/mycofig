@@ -17,8 +17,6 @@ func _reset_run_state() -> void:
 	Global.story_chapter_id = 1
 	Global.village_revealed = false
 	Global.village_objective_flags = {}
-	Global.farmer_crop_stock_total = 0
-	Global.farmer_crop_stock_max = 0
 
 
 func _ready():

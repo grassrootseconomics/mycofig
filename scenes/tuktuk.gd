@@ -23,18 +23,25 @@ func reset():
 		
 	var rng :=  RandomNumberGenerator.new()
 	var world_rect = Global.get_world_rect(self)
-	var random_x = rng.randi_range(int(world_rect.position.x) - 120, int(world_rect.position.x) - 40)
-	var min_y = int(world_rect.position.y) + 100
-	var max_y = int(world_rect.position.y + world_rect.size.y) - 200
-	if max_y < min_y:
-		max_y = min_y
-	var random_y = rng.randi_range(min_y, max_y)
+	var level_root = get_node_or_null("../..")
+	var spawned_near_story_village := false
+	if str(Global.mode) == "story" and is_instance_valid(level_root) and level_root.has_method("get_story_tuktuk_spawn_position"):
+		var story_spawn = level_root.get_story_tuktuk_spawn_position()
+		if typeof(story_spawn) == TYPE_VECTOR2:
+			position = story_spawn
+			spawned_near_story_village = true
+	if not spawned_near_story_village:
+		var random_x = rng.randi_range(int(world_rect.position.x) - 120, int(world_rect.position.x) - 40)
+		var min_y = int(world_rect.position.y) + 100
+		var max_y = int(world_rect.position.y + world_rect.size.y) - 200
+		if max_y < min_y:
+			max_y = min_y
+		var random_y = rng.randi_range(min_y, max_y)
+		position = Vector2(random_x, random_y)
 	quarry_type = Global.quarry_type
-	position = Vector2(random_x,random_y)
 	
 	#position = START_POS
 	set_rotation(0)
-	var level_root = get_node_or_null("../..")
 	var children =  $"../../Agents".get_children()
 	children.shuffle()
 		
@@ -48,13 +55,15 @@ func reset():
 			valid_target = bool(level_root.is_valid_predator_target(self, child))
 		else:
 			valid_target = child.type == quarry_type
-		if not valid_target:
-			continue
-		if child.position.x > self.position.x + 10:
+			if not valid_target:
+				continue
 			quarry_found = true
 			the_quarry = child
 			quarry_type = str(child.type)
 			break
+	if not quarry_found:
+		# In story mode tuktuks are village-local; despawn if no local target exists.
+		call_deferred("queue_free")
 
 	
 func _physics_process(delta: float) -> void:

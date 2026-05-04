@@ -32,6 +32,10 @@ const SOIL_SCORE_RECOVERING_MAX := 0.48
 const SOIL_SCORE_SEMI_HEALTHY_MAX := 0.68
 const DEFAULT_RESIDUE_LIFETIME_TICKS := 8
 const SOIL_INFLUENCE_RADIUS := 4
+const STORY_WORLD_COLUMNS := 96
+const STORY_WORLD_ROWS := 27
+const STORY_FOG_TICK_SECONDS := 0.25
+const STORY_FOG_COLOR := Color(0.02, 0.03, 0.04, 0.96)
 
 @export var columns: int = 48
 @export var rows: int = 27
@@ -66,18 +70,25 @@ var _drag_hint_visible := false
 var _drag_hint_coord := Vector2i(-1, -1)
 var _drag_hint_available := true
 var _soil_tick_timer: Timer = null
+var _fog_tick_timer: Timer = null
 var _residue_records: Array = []
 var _occupancy_by_tile: Dictionary = {}
 var _footprint_by_agent: Dictionary = {}
 var _influence_kernel: Array = []
+var _revealed_tiles: PackedByteArray = PackedByteArray()
 
 
 func _ready() -> void:
+	if str(Global.mode) == "story":
+		columns = STORY_WORLD_COLUMNS
+		rows = STORY_WORLD_ROWS
 	_initialize_tile_data()
+	_initialize_reveal_data()
 	_build_influence_kernel(SOIL_INFLUENCE_RADIUS)
 	_build_baseline_pattern()
 	reset_to_baseline()
 	_start_soil_tick()
+	_start_fog_tick()
 	_ensure_camera_pan_actions()
 	_setup_camera()
 	if get_viewport().has_signal("size_changed"):
@@ -89,6 +100,9 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	if is_instance_valid(_fog_tick_timer):
+		_fog_tick_timer.stop()
+		_fog_tick_timer.queue_free()
 	if Global.world_bounds_enabled:
 		Global.clear_world_context()
 
@@ -107,6 +121,23 @@ func get_world_rect() -> Rect2:
 func get_world_center() -> Vector2:
 	var rect = get_world_rect()
 	return rect.position + rect.size * 0.5
+
+
+func configure_dimensions(new_columns: int, new_rows: int) -> void:
+	var safe_cols = maxi(new_columns, 1)
+	var safe_rows = maxi(new_rows, 1)
+	if safe_cols == columns and safe_rows == rows:
+		return
+	columns = safe_cols
+	rows = safe_rows
+	_initialize_tile_data()
+	_initialize_reveal_data()
+	_build_baseline_pattern()
+	reset_to_baseline()
+	_sync_global_world_context()
+	_setup_camera()
+	queue_redraw()
+	emit_signal("world_initialized", get_world_rect())
 
 
 func get_tile(coord: Vector2i) -> Dictionary:
@@ -332,6 +363,22 @@ func in_bounds(coord: Vector2i) -> bool:
 	return coord.x >= 0 and coord.y >= 0 and coord.x < columns and coord.y < rows
 
 
+func is_tile_revealed(coord: Vector2i) -> bool:
+	if not in_bounds(coord):
+		return false
+	if not _uses_story_fog():
+		return true
+	var idx = _index_for(coord)
+	if idx < 0 or idx >= _revealed_tiles.size():
+		return false
+	return _revealed_tiles[idx] == 1
+
+
+func is_world_pos_revealed(world_pos: Vector2) -> bool:
+	var coord = world_to_tile(world_pos)
+	return is_tile_revealed(coord)
+
+
 func reset_to_baseline() -> void:
 	_residue_records.clear()
 	for y in range(rows):
@@ -348,6 +395,7 @@ func reset_to_baseline() -> void:
 				"flags": 0
 			}
 			_tiles[idx] = tile
+	_refresh_story_fog_map()
 	queue_redraw()
 	baseline_reset.emit()
 	_update_debug_label()
@@ -393,6 +441,7 @@ func _draw() -> void:
 		var hint_color = drag_hint_available_color if _drag_hint_available else drag_hint_blocked_color
 		draw_rect(hint_rect, Color(hint_color, 0.16), true)
 		draw_rect(hint_rect, hint_color, false, 3.0, true)
+	_draw_story_fog_overlay()
 	if debug_overlay_enabled:
 		draw_rect(Rect2(Vector2.ZERO, get_world_rect().size), Color(1, 1, 1, 0.9), false, 3.0, true)
 
@@ -471,6 +520,88 @@ func _start_soil_tick() -> void:
 	_soil_tick_timer.wait_time = maxf(soil_tick_seconds, 0.1)
 	_soil_tick_timer.timeout.connect(_on_soil_tick_timeout)
 	add_child(_soil_tick_timer)
+
+
+func _start_fog_tick() -> void:
+	if is_instance_valid(_fog_tick_timer):
+		_fog_tick_timer.stop()
+		_fog_tick_timer.queue_free()
+	_fog_tick_timer = Timer.new()
+	_fog_tick_timer.one_shot = false
+	_fog_tick_timer.autostart = true
+	_fog_tick_timer.wait_time = STORY_FOG_TICK_SECONDS
+	_fog_tick_timer.timeout.connect(_refresh_story_fog_map)
+	add_child(_fog_tick_timer)
+	_refresh_story_fog_map()
+
+
+func _uses_story_fog() -> bool:
+	return str(Global.mode) == "story"
+
+
+func _initialize_reveal_data() -> void:
+	var tile_count = maxi(columns * rows, 0)
+	_revealed_tiles.resize(tile_count)
+	for idx in range(tile_count):
+		_revealed_tiles[idx] = 0
+
+
+func _refresh_story_fog_map() -> void:
+	if _revealed_tiles.size() != columns * rows:
+		_initialize_reveal_data()
+	if not _uses_story_fog():
+		for idx in range(_revealed_tiles.size()):
+			_revealed_tiles[idx] = 1
+		queue_redraw()
+		return
+
+	for idx in range(_revealed_tiles.size()):
+		_revealed_tiles[idx] = 0
+	var agents_root = _get_agents_root()
+	if is_instance_valid(agents_root):
+		for agent in agents_root.get_children():
+			if not is_instance_valid(agent):
+				continue
+			if bool(agent.get("dead")):
+				continue
+			if str(agent.get("type")) != "myco":
+				continue
+			var occupied_tiles = _get_agent_occupied_tiles_for_soil(agent)
+			var buddy_radius = float(agent.get("buddy_radius"))
+			if buddy_radius <= 0.0:
+				buddy_radius = tile_size
+			var reveal_radius_tiles = int(ceil(maxf(buddy_radius, tile_size) / maxf(tile_size, 1.0))) + 4
+			reveal_radius_tiles = maxi(reveal_radius_tiles, SOIL_INFLUENCE_RADIUS + 1)
+			for coord in occupied_tiles:
+				_reveal_coord_radius(Vector2i(coord), reveal_radius_tiles)
+	queue_redraw()
+
+
+func _reveal_coord_radius(center: Vector2i, radius_tiles: int) -> void:
+	for dy in range(-radius_tiles, radius_tiles + 1):
+		for dx in range(-radius_tiles, radius_tiles + 1):
+			if maxi(abs(dx), abs(dy)) > radius_tiles:
+				continue
+			var coord = center + Vector2i(dx, dy)
+			if not in_bounds(coord):
+				continue
+			var idx = _index_for(coord)
+			if idx >= 0 and idx < _revealed_tiles.size():
+				_revealed_tiles[idx] = 1
+
+
+func _draw_story_fog_overlay() -> void:
+	if not _uses_story_fog():
+		return
+	for y in range(rows):
+		for x in range(columns):
+			var idx = _index_for(Vector2i(x, y))
+			if idx < 0 or idx >= _revealed_tiles.size():
+				continue
+			if _revealed_tiles[idx] == 1:
+				continue
+			var rect = Rect2(Vector2(x * tile_size, y * tile_size), Vector2(tile_size, tile_size))
+			draw_rect(rect, STORY_FOG_COLOR, true)
 
 
 func _on_soil_tick_timeout() -> void:
@@ -857,6 +988,8 @@ func _build_test_baseline_pattern() -> void:
 
 func _build_gameplay_baseline_pattern() -> void:
 	var center = Vector2((columns - 1) * 0.5, (rows - 1) * 0.5)
+	if str(Global.mode) == "story":
+		center = Vector2(6.0, (rows - 1) * 0.5)
 	for y in range(rows):
 		for x in range(columns):
 			var coord_vec = Vector2(float(x), float(y))
@@ -911,6 +1044,13 @@ func _setup_camera() -> void:
 	camera.position_smoothing_enabled = true
 	camera.position_smoothing_speed = 8.0
 	camera.global_position = get_world_center()
+	_clamp_camera()
+
+
+func set_camera_world_center(world_pos: Vector2) -> void:
+	if not is_instance_valid(camera):
+		return
+	camera.global_position = world_pos
 	_clamp_camera()
 
 

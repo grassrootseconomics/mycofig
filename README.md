@@ -1,8 +1,8 @@
-# Plants and People Gardening
+# Plants Gardening
 
-Godot 4 game prototype with two related simulations:
-- **Plants mode**: mycorrhizal nutrient exchange in a garden ecosystem.
-- **People mode**: social/economic exchange using basket-like connectors.
+Godot 4 game prototype focused on a soil-restoration story loop:
+- Farm ecosystem growth using crops + myco networks.
+- Story-driven village phase where people/baskets trade and farmer crop stock sustains the market.
 
 ## Requirements
 - `godot4` on your PATH (tested with Godot `4.5.1`).
@@ -19,7 +19,6 @@ Run a specific scene:
 
 ```bash
 godot4 --path . --scene res://scenes/level.tscn
-godot4 --path . --scene res://scenes/sociallevel.tscn
 godot4 --path . --scene res://scenes/world_foundation_test.tscn
 ```
 
@@ -37,12 +36,11 @@ godot4 --path . --headless --scene res://scenes/benchmark_runner.tscn -- --scena
 
 ## Game Modes
 Choose mode from title screen:
-- `Tutorial`
-- `Free Garden`
+- `Story`
 - `Challenge`
-- `COFI` (social economy-focused challenge)
 
-Also toggle between plant/social views with the title screen checkboxes.
+`Story` uses one continuous map flow (farm to village) with fog-of-war.  
+`Challenge` stays plants-only survival without story fog gating.
 
 ## Controls
 - `Left Click`: drag entities and place inventory items.
@@ -58,9 +56,13 @@ Also toggle between plant/social views with the title screen checkboxes.
 - `B`: toggle resource bars (bars start OFF by default).
 - `+` / `-`: change movement speed.
 - `Esc` or `Q`: end run / go to game-over screen.
-- `2/3/4/5` (social mode): set connector count tuning.
 - Inventory panel visibility: no hotkey yet (always shown).
 - `F8`: toggle runtime performance overlay.
+- Minimap (HUD): click or drag to move camera.
+
+Story-specific controls/behavior:
+- Farm and Village inventory tabs (Village unlocks on story reveal).
+- In village phase, ripe crop harvest can only be dropped on `Farmer` (not inventory/other villagers/baskets).
 
 Keybinding implementation:
 - All shared gameplay hotkeys are centralized in `scenes/level_helpers.gd` via `handle_gameplay_hotkeys(...)`.
@@ -146,22 +148,21 @@ World foundation debug (test scene):
 
 ## Project Structure
 - `global/global.gd`: global state, rank thresholds, spawn scaling, platform tuning.
-- `scenes/level.gd`: plants gameplay scene controller.
-- `scenes/sociallevel.gd`: social gameplay scene controller.
-- `scenes/world_foundation.gd`: shared tiled world, soil tile model, stage rendering, camera clamp/pan.
+- `scenes/level.gd`: primary Story/Challenge gameplay controller.
+- `scenes/world_foundation.gd`: shared tiled world, soil tile model, stage rendering, camera clamp/pan, story fog-of-war.
 - `scenes/perf_monitor.gd`: runtime perf sampler + adaptive quality controller + optional metric logging.
 - `scenes/benchmark_runner.gd`: deterministic headless benchmark harness.
 - `scenes/world_foundation_test.tscn`: static validation map for M1 grid foundation.
 - `scenes/agent.gd`, `scenes/socialagent.gd`, `scenes/basket.gd`: core actor logic.
 - `scenes/bird.gd`, `scenes/tuktuk.gd`: predator/raider logic.
-- `scenes/ui.gd`: in-game HUD, inventory placement, drag preview.
+- `scenes/ui.gd`, `scenes/minimap_panel.gd`: HUD, inventory tabs, minimap navigation, drag preview.
 - `scenes/level_helpers.gd`: shared scene helpers (signal wiring, myco line invalidation, audio stop).
 
 ## Runtime Ownership Map
 - Canonical runtime paths:
   - entity behavior: `scenes/agent.gd`, `scenes/myco.gd`, `scenes/socialagent.gd`, `scenes/basket.gd`
   - world/tile/soil/camera: `scenes/world_foundation.gd`
-  - scene orchestration: `scenes/level.gd`, `scenes/sociallevel.gd`
+  - scene orchestration: `scenes/level.gd`
   - shared placement/lines/occupancy helpers: `scenes/level_helpers.gd`
   - packet transport: `scenes/trade.gd`
 - Legacy assets/scripts such as `scenes/bean.gd`, `scenes/squash.gd`, `scenes/maize.gd`, `scenes/city.gd`, `scenes/meteor.gd` are retained for rollback safety but are not the primary runtime path.

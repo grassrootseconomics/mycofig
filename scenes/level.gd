@@ -130,6 +130,17 @@ func _refund_inventory_item(agent_name: String, amount: int = 1) -> void:
 	Global.inventory[agent_name] = int(Global.inventory.get(agent_name, 0)) + safe_amount
 
 
+func _connect_lifecycle_residue_signal(agent: Node) -> void:
+	if not is_instance_valid(agent):
+		return
+	if not agent.has_signal("lifecycle_residue"):
+		return
+	var target = Callable(self, "_on_agent_lifecycle_residue")
+	if agent.is_connected("lifecycle_residue", target):
+		return
+	agent.connect("lifecycle_residue", target)
+
+
 func _count_living_myco(ignore_agent: Variant = null) -> int:
 	var total := 0
 	for agent in $Agents.get_children():
@@ -337,9 +348,17 @@ func update_bars(path_dict)  -> void:
 		if Global.active_agent.name == path_dict["from_agent"].name or Global.active_agent.name == path_dict["to_agent"].name:
 			for label in $UI.resContainer.get_children():
 				#print("g. << inside asadas: ", label.name, " : ", label.text, path_dict["trade_asset"])
-				if label.name == path_dict["trade_asset"]:
-					#print("h. ><><< inside asadas, lable", label.name, " : ", label.text)
-					label.text = str(path_dict["trade_asset"]) + str(" ") + str(Global.active_agent.assets[path_dict["trade_asset"]])
+					if label.name == path_dict["trade_asset"]:
+						#print("h. ><><< inside asadas, lable", label.name, " : ", label.text)
+						label.text = str(path_dict["trade_asset"]) + str(" ") + str(Global.active_agent.assets[path_dict["trade_asset"]])
+
+
+func _on_agent_lifecycle_residue(coord: Vector2i, biomass: float, source_type: String) -> void:
+	var world = _get_world_foundation()
+	if not is_instance_valid(world):
+		return
+	if world.has_method("register_residue"):
+		world.register_residue(coord, biomass, 8, source_type)
 
 
 func _play_predator_alert() -> void:
@@ -460,6 +479,7 @@ func make_squash(pos):
 	squash.set_variables(squash_dict)
 	$Agents.add_child(squash)
 	LevelHelpersRef.connect_core_agent_signals(squash, _on_agent_trade, _on_new_agent, _on_update_score)
+	_connect_lifecycle_residue_signal(squash)
 	LevelHelpersRef.mark_myco_lines_dirty($Agents)
 	
 	return squash
@@ -484,6 +504,7 @@ func make_tree(pos):
 	$Agents.add_child(tree)
 	tree.position = LevelHelpersRef.resolve_snapped_position_for_agent(self, $Agents, tree, tree_position)
 	LevelHelpersRef.connect_core_agent_signals(tree, _on_agent_trade, _on_new_agent, _on_update_score)
+	_connect_lifecycle_residue_signal(tree)
 	LevelHelpersRef.mark_myco_lines_dirty($Agents)
 	return tree
 	
@@ -518,6 +539,7 @@ func make_maize(pos):
 	maize.set_variables(maize_dict)
 	$Agents.add_child(maize)
 	LevelHelpersRef.connect_core_agent_signals(maize, _on_agent_trade, _on_new_agent, _on_update_score)
+	_connect_lifecycle_residue_signal(maize)
 	LevelHelpersRef.mark_myco_lines_dirty($Agents)
 	
 	return maize
@@ -540,6 +562,7 @@ func make_bean(pos):
 	bean.set_variables(bean_dict)
 	$Agents.add_child(bean)
 	LevelHelpersRef.connect_core_agent_signals(bean, _on_agent_trade, _on_new_agent, _on_update_score)
+	_connect_lifecycle_residue_signal(bean)
 	LevelHelpersRef.mark_myco_lines_dirty($Agents)
 	
 	return bean
@@ -590,6 +613,7 @@ func make_myco(pos, already_snapped: bool = false):
 	
 	if myco.has_signal("trade"):
 		myco.connect("trade", _on_agent_trade)
+	_connect_lifecycle_residue_signal(myco)
 	LevelHelpersRef.mark_all_buddies_dirty($Agents)
 	
 	return myco

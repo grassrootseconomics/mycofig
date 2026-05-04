@@ -45,6 +45,7 @@ signal clicked
 signal clicked_agent(agent)
 signal new_agent(agent_dict)
 signal update_score
+signal lifecycle_residue(coord, biomass, source_type)
 
 var my_lines = []
 var buddy_radius = 250
@@ -171,6 +172,8 @@ var bean_harvest_ready := false
 var bean_pod_sparkle_played := false
 var bean_stage_textures := {}
 var bean_base_scale := Vector2.ONE
+var bean_residue_pending := false
+var bean_residue_emitted := false
 
 
 func _get_sprite_half_extents() -> Vector2:
@@ -660,6 +663,9 @@ func _set_bean_stage(new_stage: int, force: bool = false) -> void:
 
 	bean_stage = new_stage
 	bean_harvest_ready = bean_stage == BeanGrowthStage.POD_READY
+	if bean_stage != BeanGrowthStage.DEAD:
+		bean_residue_pending = false
+		bean_residue_emitted = false
 	draggable = bean_stage != BeanGrowthStage.DEAD
 	if bean_stage == BeanGrowthStage.DEAD:
 		_clear_active_selection_if_self()
@@ -706,6 +712,8 @@ func _reset_bean_lifecycle() -> void:
 	bean_post_harvest_ticks = 0
 	bean_harvest_ready = false
 	bean_pod_sparkle_played = false
+	bean_residue_pending = false
+	bean_residue_emitted = false
 	bean_stage = BeanGrowthStage.SPROUT
 	_set_bean_stage(BeanGrowthStage.SPROUT, true)
 
@@ -729,6 +737,18 @@ func _emit_death_cycle_regrowth_request() -> void:
 	emit_signal("new_agent", new_agent_dict)
 
 
+func _emit_lifecycle_residue_signal(biomass: float, source_type: String) -> void:
+	var world = _get_world_foundation_node()
+	if not is_instance_valid(world):
+		return
+	if not (world.has_method("world_to_tile") and world.has_method("in_bounds")):
+		return
+	var coord = Vector2i(world.world_to_tile(_clamp_position_to_world_rect(global_position)))
+	if not world.in_bounds(coord):
+		return
+	emit_signal("lifecycle_residue", coord, biomass, source_type)
+
+
 func _advance_bean_lifecycle(consumed_all_nutrients: bool) -> void:
 	if not _is_bean_lifecycle_enabled():
 		return
@@ -746,6 +766,9 @@ func _advance_bean_lifecycle(consumed_all_nutrients: bool) -> void:
 			bean_respawn_wait_ticks -= 1
 			return
 		if not bean_respawn_requested:
+			if bean_residue_pending and not bean_residue_emitted:
+				_emit_lifecycle_residue_signal(1.0, str(type))
+				bean_residue_emitted = true
 			bean_respawn_requested = true
 			dead = true
 			_emit_death_cycle_regrowth_request()
@@ -762,6 +785,8 @@ func _advance_bean_lifecycle(consumed_all_nutrients: bool) -> void:
 			bean_respawn_requested = false
 			bean_post_harvest_senescence = false
 			bean_post_harvest_ticks = 0
+			bean_residue_pending = true
+			bean_residue_emitted = false
 			_set_bean_stage(BeanGrowthStage.DEAD)
 		return
 
@@ -779,6 +804,8 @@ func _advance_bean_lifecycle(consumed_all_nutrients: bool) -> void:
 			bean_respawn_requested = false
 			bean_post_harvest_senescence = false
 			bean_post_harvest_ticks = 0
+			bean_residue_pending = true
+			bean_residue_emitted = false
 			_set_bean_stage(BeanGrowthStage.DEAD)
 		return
 
@@ -1511,6 +1538,8 @@ func _on_growth_timer_timeout() -> void:
 						bean_respawn_requested = false
 						bean_post_harvest_senescence = false
 						bean_post_harvest_ticks = 0
+						bean_residue_pending = false
+						bean_residue_emitted = false
 						_set_bean_stage(BeanGrowthStage.DEAD)
 					else:
 						kill_it()

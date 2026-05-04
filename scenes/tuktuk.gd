@@ -34,16 +34,27 @@ func reset():
 	
 	#position = START_POS
 	set_rotation(0)
+	var level_root = get_node_or_null("../..")
 	var children =  $"../../Agents".get_children()
 	children.shuffle()
 		
 	for child in children:
-		if(child.type == quarry_type and child.dead == false):
-			if(child.position.x > self.position.x+10):
-				quarry_found = true
-				the_quarry = child
-				#print("found quarry: ", the_quarry)
-				break
+		if not is_instance_valid(child):
+			continue
+		if child.dead == true:
+			continue
+		var valid_target := false
+		if is_instance_valid(level_root) and level_root.has_method("is_valid_predator_target"):
+			valid_target = bool(level_root.is_valid_predator_target(self, child))
+		else:
+			valid_target = child.type == quarry_type
+		if not valid_target:
+			continue
+		if child.position.x > self.position.x + 10:
+			quarry_found = true
+			the_quarry = child
+			quarry_type = str(child.type)
+			break
 
 	
 func _physics_process(delta: float) -> void:
@@ -88,11 +99,6 @@ func _physics_process(delta: float) -> void:
 		
 		var world_rect = Global.get_world_rect(self)
 		if(position.x > world_rect.end.x + 60 or position.y > world_rect.end.y + 60 or position.y < world_rect.position.y - 60):
-			if(the_quarry != null):
-				if(is_instance_valid(the_quarry)):
-					the_quarry.kill_it()
-					#the_quarry.call_deferred("queue_free")
-					await the_quarry.tree_exited
 			self.call_deferred("queue_free")
 			
 		#while (collision):

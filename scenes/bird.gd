@@ -33,16 +33,27 @@ func reset():
 	
 	#position = START_POS
 	set_rotation(0)
+	var level_root = get_node_or_null("../..")
 	var children =  $"../../Agents".get_children()
 	children.shuffle()
 		
 	for child in children:
-		if(child.type == quarry_type and child.dead == false):
-			if(child.position.x > self.position.x+10):
-				quarry_found = true
-				the_quarry = child
-				#print("found quarry: ", the_quarry)
-				break
+		if not is_instance_valid(child):
+			continue
+		if child.dead == true:
+			continue
+		var valid_target := false
+		if is_instance_valid(level_root) and level_root.has_method("is_valid_predator_target"):
+			valid_target = bool(level_root.is_valid_predator_target(self, child))
+		else:
+			valid_target = child.type == quarry_type
+		if not valid_target:
+			continue
+		if child.position.x > self.position.x + 10:
+			quarry_found = true
+			the_quarry = child
+			quarry_type = str(child.type)
+			break
 
 	
 func _physics_process(delta: float) -> void:

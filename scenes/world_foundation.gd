@@ -13,12 +13,28 @@ const CAM_LEFT_ACTION := "cam_left"
 const CAM_RIGHT_ACTION := "cam_right"
 const CAM_UP_ACTION := "cam_up"
 const CAM_DOWN_ACTION := "cam_down"
+const SOIL_BASE_MOISTURE_DELTA := -0.01
+const SOIL_BASE_ORGANIC_DELTA := -0.004
+const SOIL_BASE_COMPACTION_DELTA := 0.003
+const SOIL_MYCO_CORE_MOISTURE_DELTA := 0.045
+const SOIL_MYCO_CORE_COMPACTION_DELTA := -0.02
+const SOIL_MYCO_NEIGHBOR_MOISTURE_DELTA := 0.02
+const SOIL_MYCO_NEIGHBOR_COMPACTION_DELTA := -0.01
+const SOIL_LIVE_PLANT_MOISTURE_DELTA := -0.008
+const SOIL_LIVE_PLANT_ORGANIC_DELTA := 0.001
+const SOIL_RESIDUE_MOISTURE_DELTA := 0.015
+const SOIL_RESIDUE_ORGANIC_DELTA := 0.03
+const SOIL_SCORE_DRY_MAX := 0.30
+const SOIL_SCORE_RECOVERING_MAX := 0.48
+const SOIL_SCORE_SEMI_HEALTHY_MAX := 0.68
+const DEFAULT_RESIDUE_LIFETIME_TICKS := 8
 
 @export var columns: int = 48
 @export var rows: int = 27
 @export var tile_size: float = 64.0
 @export var mode_id: String = ""
 @export var scenario_id: String = ""
+@export var soil_tick_seconds: float = 1.0
 @export var camera_pan_speed: float = 900.0
 @export var follow_response_speed: float = 10.0
 @export var follow_deadzone_ratio: Vector2 = Vector2(0.28, 0.22)
@@ -45,12 +61,15 @@ var _touch_drag_last := Vector2.ZERO
 var _drag_hint_visible := false
 var _drag_hint_coord := Vector2i(-1, -1)
 var _drag_hint_available := true
+var _soil_tick_timer: Timer = null
+var _residue_records: Array = []
 
 
 func _ready() -> void:
 	_initialize_tile_data()
 	_build_baseline_pattern()
 	reset_to_baseline()
+	_start_soil_tick()
 	_ensure_camera_pan_actions()
 	_setup_camera()
 	if get_viewport().has_signal("size_changed"):
@@ -86,6 +105,39 @@ func get_tile(coord: Vector2i) -> Dictionary:
 	if not in_bounds(coord):
 		return {}
 	return _tiles[_index_for(coord)].duplicate(true)
+
+
+func can_place_myco_on_tile(coord: Vector2i) -> bool:
+	if not in_bounds(coord):
+		return false
+	var tile = get_tile(coord)
+	if tile.is_empty():
+		return false
+	return int(tile.get("stage", STAGE_DRY_COMPACTED)) >= STAGE_SEMI_HEALTHY
+
+
+func register_residue(coord: Vector2i, biomass: float, lifetime_ticks: int = DEFAULT_RESIDUE_LIFETIME_TICKS, source_type: String = "") -> void:
+	if not in_bounds(coord):
+		return
+	var safe_biomass = maxf(biomass, 0.0)
+	var safe_ticks = maxi(lifetime_ticks, 1)
+	if safe_biomass <= 0.0:
+		return
+	_residue_records.append({
+		"tile_coord": coord,
+		"biomass": safe_biomass,
+		"ticks_remaining": safe_ticks,
+		"source_type": source_type
+	})
+
+
+func get_tile_health_score(coord: Vector2i) -> float:
+	if not in_bounds(coord):
+		return 0.0
+	var tile = get_tile(coord)
+	if tile.is_empty():
+		return 0.0
+	return _compute_health_score(float(tile["moisture"]), float(tile["organic_matter"]), float(tile["compaction"]))
 
 
 func set_stage(coord: Vector2i, stage: int) -> void:
@@ -136,6 +188,7 @@ func in_bounds(coord: Vector2i) -> bool:
 
 
 func reset_to_baseline() -> void:
+	_residue_records.clear()
 	for y in range(rows):
 		for x in range(columns):
 			var coord = Vector2i(x, y)
@@ -263,6 +316,251 @@ func _process(delta: float) -> void:
 		_update_debug_label()
 
 
+func _start_soil_tick() -> void:
+	if is_instance_valid(_soil_tick_timer):
+		_soil_tick_timer.stop()
+		_soil_tick_timer.queue_free()
+	_soil_tick_timer = Timer.new()
+	_soil_tick_timer.one_shot = false
+	_soil_tick_timer.autostart = true
+	_soil_tick_timer.wait_time = maxf(soil_tick_seconds, 0.1)
+	_soil_tick_timer.timeout.connect(_on_soil_tick_timeout)
+	add_child(_soil_tick_timer)
+
+
+func _on_soil_tick_timeout() -> void:
+	var residue_by_tile = _consume_residue_tick()
+	var influences = _collect_soil_influences()
+	var myco_core: Dictionary = influences["myco_core"]
+	var myco_adjacent: Dictionary = influences["myco_adjacent"]
+	var live_plants: Dictionary = influences["live_plants"]
+	var stage_changes: Dictionary = {}
+
+	for y in range(rows):
+		for x in range(columns):
+			var coord = Vector2i(x, y)
+			var idx = _index_for(coord)
+			var tile: Dictionary = _tiles[idx]
+
+			var moisture = float(tile["moisture"]) + SOIL_BASE_MOISTURE_DELTA
+			var compaction = float(tile["compaction"]) + SOIL_BASE_COMPACTION_DELTA
+			var organic_matter = float(tile["organic_matter"]) + SOIL_BASE_ORGANIC_DELTA
+
+			if myco_core.has(coord):
+				moisture += SOIL_MYCO_CORE_MOISTURE_DELTA
+				compaction += SOIL_MYCO_CORE_COMPACTION_DELTA
+			elif myco_adjacent.has(coord):
+				moisture += SOIL_MYCO_NEIGHBOR_MOISTURE_DELTA
+				compaction += SOIL_MYCO_NEIGHBOR_COMPACTION_DELTA
+
+			if live_plants.has(coord):
+				moisture += SOIL_LIVE_PLANT_MOISTURE_DELTA
+				organic_matter += SOIL_LIVE_PLANT_ORGANIC_DELTA
+
+			var residue_biomass = float(residue_by_tile.get(coord, 0.0))
+			if residue_biomass > 0.0:
+				moisture += SOIL_RESIDUE_MOISTURE_DELTA * residue_biomass
+				organic_matter += SOIL_RESIDUE_ORGANIC_DELTA * residue_biomass
+
+			moisture = _clamp01(moisture)
+			compaction = _clamp01(compaction)
+			organic_matter = _clamp01(organic_matter)
+
+			tile["moisture"] = moisture
+			tile["compaction"] = compaction
+			tile["organic_matter"] = organic_matter
+			_tiles[idx] = tile
+
+			var old_stage = int(tile["stage"])
+			var new_stage = _stage_from_score(_compute_health_score(moisture, organic_matter, compaction))
+			if new_stage != old_stage:
+				if not stage_changes.has(new_stage):
+					stage_changes[new_stage] = []
+				stage_changes[new_stage].append(coord)
+
+	_apply_stage_changes(stage_changes)
+
+
+func _consume_residue_tick() -> Dictionary:
+	var per_tile: Dictionary = {}
+	if _residue_records.is_empty():
+		return per_tile
+
+	var survivors: Array = []
+	for record_variant in _residue_records:
+		if typeof(record_variant) != TYPE_DICTIONARY:
+			continue
+		var record: Dictionary = record_variant
+		var coord = Vector2i(record.get("tile_coord", Vector2i(-1, -1)))
+		var biomass = maxf(float(record.get("biomass", 0.0)), 0.0)
+		var ticks_remaining = int(record.get("ticks_remaining", 0))
+		if ticks_remaining <= 0 or biomass <= 0.0:
+			continue
+		if in_bounds(coord):
+			per_tile[coord] = float(per_tile.get(coord, 0.0)) + biomass
+
+		ticks_remaining -= 1
+		if ticks_remaining > 0:
+			record["ticks_remaining"] = ticks_remaining
+			survivors.append(record)
+
+	_residue_records = survivors
+	return per_tile
+
+
+func _collect_soil_influences() -> Dictionary:
+	var myco_core: Dictionary = {}
+	var myco_adjacent: Dictionary = {}
+	var live_plants: Dictionary = {}
+	var agents_root = _get_agents_root()
+	if not is_instance_valid(agents_root):
+		return {
+			"myco_core": myco_core,
+			"myco_adjacent": myco_adjacent,
+			"live_plants": live_plants
+		}
+
+	for agent in agents_root.get_children():
+		if not _is_live_agent_for_soil(agent):
+			continue
+		var agent_type = str(agent.get("type"))
+		var occupied_tiles = _get_agent_occupied_tiles_for_soil(agent)
+		if occupied_tiles.is_empty():
+			continue
+		if agent_type == "myco":
+			for coord in occupied_tiles:
+				myco_core[coord] = true
+				for dy in range(-1, 2):
+					for dx in range(-1, 2):
+						var near = coord + Vector2i(dx, dy)
+						if not in_bounds(near):
+							continue
+						myco_adjacent[near] = true
+		elif agent_type == "bean" or agent_type == "squash" or agent_type == "maize" or agent_type == "tree":
+			for coord in occupied_tiles:
+				live_plants[coord] = true
+
+	for coord in myco_core.keys():
+		if myco_adjacent.has(coord):
+			myco_adjacent.erase(coord)
+
+	return {
+		"myco_core": myco_core,
+		"myco_adjacent": myco_adjacent,
+		"live_plants": live_plants
+	}
+
+
+func _get_agents_root() -> Node:
+	return get_node_or_null("../Agents")
+
+
+func _is_live_agent_for_soil(agent: Node) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	if bool(agent.get("dead")):
+		return false
+	if str(agent.get("type")) == "cloud":
+		return false
+	return true
+
+
+func _get_agent_occupied_tiles_for_soil(agent: Node) -> Array:
+	var agent_type = str(agent.get("type"))
+	if agent_type == "tree":
+		return _get_tree_occupied_tiles_for_soil(agent)
+	var coord = world_to_tile(agent.global_position)
+	if not in_bounds(coord):
+		return []
+	return [coord]
+
+
+func _get_tree_occupied_tiles_for_soil(agent: Node) -> Array:
+	if not agent.has_node("Sprite2D"):
+		var fallback_coord = world_to_tile(agent.global_position)
+		if in_bounds(fallback_coord):
+			return [fallback_coord]
+		return []
+	var sprite = agent.get_node("Sprite2D")
+	if not (sprite is Node2D and sprite.has_method("get_rect")):
+		var fallback_coord = world_to_tile(agent.global_position)
+		if in_bounds(fallback_coord):
+			return [fallback_coord]
+		return []
+	var rect: Rect2 = sprite.get_rect()
+	var scale = sprite.scale
+	var scaled_pos = Vector2(rect.position.x * scale.x, rect.position.y * scale.y)
+	var scaled_size = Vector2(rect.size.x * scale.x, rect.size.y * scale.y)
+	var min_local = Vector2(
+		minf(scaled_pos.x, scaled_pos.x + scaled_size.x),
+		minf(scaled_pos.y, scaled_pos.y + scaled_size.y)
+	)
+	var max_local = Vector2(
+		maxf(scaled_pos.x, scaled_pos.x + scaled_size.x),
+		maxf(scaled_pos.y, scaled_pos.y + scaled_size.y)
+	)
+	var bounds = Rect2(agent.global_position + min_local, max_local - min_local)
+	if bounds.size.x <= 0.0 or bounds.size.y <= 0.0:
+		var center_coord = world_to_tile(agent.global_position)
+		if in_bounds(center_coord):
+			return [center_coord]
+		return []
+
+	var world_min = bounds.position
+	var world_max = bounds.position + bounds.size - Vector2(0.001, 0.001)
+	var min_coord = world_to_tile(world_min)
+	var max_coord = world_to_tile(world_max)
+	var covered: Array = []
+	for y in range(min_coord.y, max_coord.y + 1):
+		for x in range(min_coord.x, max_coord.x + 1):
+			var coord = Vector2i(x, y)
+			if in_bounds(coord):
+				covered.append(coord)
+	return covered
+
+
+func _compute_health_score(moisture: float, organic_matter: float, compaction: float) -> float:
+	return (0.45 * moisture) + (0.35 * organic_matter) + (0.20 * (1.0 - compaction))
+
+
+func _stage_from_score(score: float) -> int:
+	if score < SOIL_SCORE_DRY_MAX:
+		return STAGE_DRY_COMPACTED
+	if score < SOIL_SCORE_RECOVERING_MAX:
+		return STAGE_RECOVERING
+	if score < SOIL_SCORE_SEMI_HEALTHY_MAX:
+		return STAGE_SEMI_HEALTHY
+	return STAGE_HEALTHY
+
+
+func _apply_stage_changes(stage_changes: Dictionary) -> void:
+	if stage_changes.is_empty():
+		return
+	var changed = false
+	for stage_variant in stage_changes.keys():
+		var stage = int(stage_variant)
+		var coords: Array = stage_changes[stage_variant]
+		for coord_variant in coords:
+			var coord = Vector2i(coord_variant)
+			if not in_bounds(coord):
+				continue
+			var idx = _index_for(coord)
+			var tile: Dictionary = _tiles[idx]
+			if int(tile["stage"]) == stage:
+				continue
+			tile["stage"] = stage
+			_tiles[idx] = tile
+			tile_stage_changed.emit(coord, stage)
+			changed = true
+	if changed:
+		queue_redraw()
+		_update_debug_label()
+
+
+func _clamp01(value: float) -> float:
+	return clampf(value, 0.0, 1.0)
+
+
 func _initialize_tile_data() -> void:
 	var total = columns * rows
 	_tiles.resize(total)
@@ -279,6 +577,17 @@ func _initialize_tile_data() -> void:
 
 
 func _build_baseline_pattern() -> void:
+	if _is_test_baseline_context():
+		_build_test_baseline_pattern()
+	else:
+		_build_gameplay_baseline_pattern()
+
+
+func _is_test_baseline_context() -> bool:
+	return mode_id == "test" or scenario_id == "test"
+
+
+func _build_test_baseline_pattern() -> void:
 	var half_cols = columns / 2
 	var half_rows = rows / 2
 	for y in range(rows):
@@ -299,6 +608,20 @@ func _build_baseline_pattern() -> void:
 			if yy >= 0 and yy < rows:
 				var mixed_stage = int(posmod(x + yy, 4))
 				_baseline_stage[_index_for(Vector2i(x, yy))] = mixed_stage
+
+
+func _build_gameplay_baseline_pattern() -> void:
+	var center = Vector2((columns - 1) * 0.5, (rows - 1) * 0.5)
+	for y in range(rows):
+		for x in range(columns):
+			var coord_vec = Vector2(float(x), float(y))
+			var dist = center.distance_to(coord_vec)
+			var stage = STAGE_DRY_COMPACTED
+			if dist <= 2.0:
+				stage = STAGE_SEMI_HEALTHY
+			elif dist <= 4.0:
+				stage = STAGE_RECOVERING
+			_baseline_stage[_index_for(Vector2i(x, y))] = stage
 
 
 func _stage_defaults(stage: int) -> Dictionary:

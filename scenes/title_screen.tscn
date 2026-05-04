@@ -72,6 +72,7 @@ text = "Gardening"
 horizontal_alignment = 1
 
 [node name="HBoxContainer" type="HBoxContainer" parent="CenterContainer/VBoxContainer"]
+visible = false
 layout_mode = 2
 
 [node name="CheckButton" type="CheckButton" parent="CenterContainer/VBoxContainer/HBoxContainer"]
@@ -88,9 +89,10 @@ text = "People"
 [node name="Tutorial" type="Button" parent="CenterContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 43
-text = "Tutorial"
+text = "Story"
 
 [node name="FreeGarden" type="Button" parent="CenterContainer/VBoxContainer"]
+visible = false
 layout_mode = 2
 theme_override_font_sizes/font_size = 43
 text = "Free Garden"

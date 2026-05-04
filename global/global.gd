@@ -22,6 +22,11 @@ var world_bounds_enabled = false
 var world_rect = Rect2(Vector2.ZERO, Vector2.ZERO)
 var active_mode_id = ""
 var active_scenario_id = ""
+var story_chapter_id := 1
+var village_revealed := false
+var village_objective_flags := {}
+var farmer_crop_stock_total := 0
+var farmer_crop_stock_max := 0
 var prevent_auto_select = false
 var perf_adaptive_enabled = true
 var perf_quality_override = -1
@@ -58,7 +63,11 @@ var inventory = { #how many of each plant do we have to use
 	"squash": 12,				
 	"maize": 12,
 	"tree": 12,
-	"myco": 12
+	"myco": 12,
+	"farmer": 0,
+	"vendor": 0,
+	"cook": 0,
+	"basket": 0
 	}
 
 var social_inventory = { #how many of each plant do we have to use
@@ -81,11 +90,19 @@ var values = { #list of assets -
 var assets_social = { #list of assets - 
 	#for each asset there is a balance, and stready state amount needed for growth
 	"N": "Farming",
-	"P": "Vegetables",				
+	"P": "Teaching",				
 	"K": "Cooking",
 	"R": "Money"
 	
 	}
+
+var story_stage_text = {
+	1: "Story 1: Place crops and myco from inventory to start restoring soil.",
+	2: "Story 2: Harvest ripe crops to increase your farm inventory.",
+	3: "Story 3: Expand toward the village marked with ? on the minimap.",
+	4: "Story 4: The village is visible. Place village items and keep farmer crop stock alive.",
+	5: "Story 5: Support village trade by delivering ripe crop harvests to farmers."
+}
 	
 var assets_plant = { #list of assets - 
 	#for each asset there is a balance, and stready state amount needed for growth

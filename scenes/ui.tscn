@@ -4,7 +4,7 @@
 [ext_resource type="Texture2D" uid="uid://6hcegny21br4" path="res://graphics/squash_32.png" id="4_7oh4h"]
 [ext_resource type="Texture2D" uid="uid://c42hrmwwmrju8" path="res://graphics/maize_32.png" id="5_kmrjq"]
 [ext_resource type="Texture2D" uid="uid://0hgum67f21as" path="res://graphics/bean.png" id="5_s1f7h"]
-[ext_resource type="Texture2D" uid="uid://cwhoowumv28qn" path="res://graphics/baobab_sm.png" id="6_41l0c"]
+[ext_resource type="Texture2D" path="res://graphics/acorn_32.png" id="6_41l0c"]
 [ext_resource type="Script" path="res://scenes/pause_node.gd" id="7_65oah"]
 [ext_resource type="Texture2D" uid="uid://cqcp3xd8ymlh5" path="res://graphics/mushroom_32.png" id="7_w5alb"]
 

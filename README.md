@@ -29,6 +29,12 @@ Headless smoke test:
 godot4 --path . --headless --quit-after 1200 --log-file /tmp/mycofig.log
 ```
 
+Headless benchmark runner (deterministic seed + scenario):
+
+```bash
+godot4 --path . --headless --scene res://scenes/benchmark_runner.tscn -- --scenario=s2 --seed=1337 --duration=120 --target=700
+```
+
 ## Game Modes
 Choose mode from title screen:
 - `Tutorial`
@@ -40,6 +46,7 @@ Also toggle between plant/social views with the title screen checkboxes.
 
 ## Controls
 - `Left Click`: drag entities and place inventory items.
+- `Mouse Hover Cell`: hovering any occupied tile cell shows outline + resource bars for that tile's plant/fungi/person/basket (when global bars are off).
 - `Left Click + Drag` (empty world) or `Right Click + Drag`: pan camera across the larger tiled map.
 - `WASD`: pan camera.
 - `Two-finger trackpad drag`: pan camera.
@@ -48,15 +55,52 @@ Also toggle between plant/social views with the title screen checkboxes.
 - `Tab`: cycle active agent.
 - `M`: toggle baby/spawn behavior.
 - `G`: toggle repositioning of already-placed plants/fungi (default `OFF`).
-- `B`: toggle resource bars (bars start ON by default).
+- `B`: toggle resource bars (bars start OFF by default).
 - `+` / `-`: change movement speed.
 - `Esc` or `Q`: end run / go to game-over screen.
 - `2/3/4/5` (social mode): set connector count tuning.
 - Inventory panel visibility: no hotkey yet (always shown).
+- `F8`: toggle runtime performance overlay.
 
 Keybinding implementation:
 - All shared gameplay hotkeys are centralized in `scenes/level_helpers.gd` via `handle_gameplay_hotkeys(...)`.
 - `scenes/level.gd` and `scenes/sociallevel.gd` call that shared handler.
+
+## Performance + Benchmarking
+- Runtime instrumentation samples every `0.5s` and tracks:
+  - frame avg/p95
+  - active/moving agents
+  - trade packet count
+  - line count
+  - visible resource bars
+  - soil tiles touched per tick
+  - soil tick time (ms)
+  - tile occupancy query count
+- Adaptive quality tiers:
+  - `Tier 0`: full visuals
+  - `Tier 1`: reduced bar/line update rates
+  - `Tier 2`: reduced line quality (trade packets remain visible)
+- Android-tuned adaptive policy:
+  - Uses weighted pressure scores from `frame p95/avg`, `active agents`, `trade packets`, `line count`, `visible bars`, and `tile occupancy queries`.
+  - Promotion/degradation uses hysteresis windows:
+    - promote after `2` consecutive over-threshold samples
+    - degrade after `5` consecutive below-threshold samples
+  - Tuned from dense-map benchmark traces (`target=120/240/420/700`) so Tier 1 engages around sustained high density and Tier 2 engages only under severe pressure.
+- Global perf toggles live in `global/global.gd`:
+  - `perf_adaptive_enabled`
+  - `perf_quality_override` (`-1` auto, `0..2` forced)
+  - `perf_metrics_enabled` (enables benchmark sample file output)
+- Benchmark logs are written to `user://perf_metrics.json` and `user://perf_metrics.csv` when metrics logging is enabled.
+- Benchmark scenario profiles:
+  - `s2`: density ramp baseline.
+  - `s3`: interaction stress (spawn/kill churn bursts).
+  - `s4`: endurance soak (sustained high density + periodic churn).
+  - Sample traces now include scenario metadata (`scenario_id`, `run_profile`, `seed`, `target`) for easier comparison.
+- Soil optimization decision gate (M2.1 deferred):
+  - Keep current full-map `1s` soil tick for `48x27`.
+  - Enable dirty-tile soil updates when either:
+    - map exceeds ~`2000` tiles, or
+    - observed `soil_tick_ms` p95 exceeds ~`2.0ms`.
 
 Placement rules:
 - With reposition toggle `G` enabled, plants/fungi move via drag/arrow keys and then snap smoothly to the nearest unoccupied tile center.
@@ -105,11 +149,22 @@ World foundation debug (test scene):
 - `scenes/level.gd`: plants gameplay scene controller.
 - `scenes/sociallevel.gd`: social gameplay scene controller.
 - `scenes/world_foundation.gd`: shared tiled world, soil tile model, stage rendering, camera clamp/pan.
+- `scenes/perf_monitor.gd`: runtime perf sampler + adaptive quality controller + optional metric logging.
+- `scenes/benchmark_runner.gd`: deterministic headless benchmark harness.
 - `scenes/world_foundation_test.tscn`: static validation map for M1 grid foundation.
 - `scenes/agent.gd`, `scenes/socialagent.gd`, `scenes/basket.gd`: core actor logic.
 - `scenes/bird.gd`, `scenes/tuktuk.gd`: predator/raider logic.
 - `scenes/ui.gd`: in-game HUD, inventory placement, drag preview.
 - `scenes/level_helpers.gd`: shared scene helpers (signal wiring, myco line invalidation, audio stop).
+
+## Runtime Ownership Map
+- Canonical runtime paths:
+  - entity behavior: `scenes/agent.gd`, `scenes/myco.gd`, `scenes/socialagent.gd`, `scenes/basket.gd`
+  - world/tile/soil/camera: `scenes/world_foundation.gd`
+  - scene orchestration: `scenes/level.gd`, `scenes/sociallevel.gd`
+  - shared placement/lines/occupancy helpers: `scenes/level_helpers.gd`
+  - packet transport: `scenes/trade.gd`
+- Legacy assets/scripts such as `scenes/bean.gd`, `scenes/squash.gd`, `scenes/maize.gd`, `scenes/city.gd`, `scenes/meteor.gd` are retained for rollback safety but are not the primary runtime path.
 
 ## Recent Cleanup Notes
 - Deferred spawning for predators/trades to avoid physics-flush state errors.

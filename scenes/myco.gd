@@ -9,19 +9,20 @@ enum MycoGrowthStage {
 	DEAD
 }
 
-const MYCO_OVERRIPE_TICKS := 14
 const MYCO_DEAD_RECOVERY_TICKS := 42
 const MYCO_POD_BABY_TICK_INTERVAL := 4
 const MYCO_STAGE_CONSUMPTIONS_PER_ADVANCE := 3
 const MYCO_STAGE_ADVANCE_WAIT_TICKS := 1
 const MYCO_POD_BABY_MIN := 0
-const MYCO_POD_BABY_MAX := 3
+const MYCO_POD_BABY_MAX := 0
 const MYCO_HARVEST_YIELD := 3
+const MYCO_HARVEST_BIRTH_MAX := 0
+const MYCO_PARENT_BOUND_TILES := 4
+const MYCO_HARVEST_BIRTH_ATTEMPTS := 32
 const MYCO_INITIAL_RADIUS_TILES := 1.5
 const MYCO_MATURE_RADIUS_TILES := 3.0
 const MYCO_RHIZO_ALPHA_LIVE := 0.32
 const MYCO_STARVATION_REVERT_TICKS := 26
-const MYCO_POST_HARVEST_TO_DEAD_TICKS := 3
 const MYCO_STARVATION_SHRINK_LERP := 0.06
 const MYCO_DEAD_MUSHROOM_SHRINK_LERP := 0.08
 const MYCO_DEAD_RHIZO_SHRINK_LERP := 0.07
@@ -34,8 +35,6 @@ var myco_stage_wait_ticks := 0
 var myco_pod_ticks := 0
 var myco_dead_ticks := 0
 var myco_starvation_ticks := 0
-var myco_post_harvest_senescence := false
-var myco_post_harvest_ticks := 0
 var myco_harvest_ready := false
 var myco_pod_sparkle_played := false
 
@@ -91,15 +90,15 @@ func _refresh_buddy_radius_from_rhizo() -> void:
 
 
 func _mark_network_dirty() -> void:
-	self.new_buddies = true
-	self.draw_lines = true
+	_queue_dirty_update(true, true, false)
 	var agents_root = get_node_or_null("../../Agents")
+	var level_root = _get_level_root()
 	if not is_instance_valid(agents_root):
 		return
-	var children = agents_root.get_children()
-	for child in children:
-		child.new_buddies = true
-		child.draw_lines = true
+	if is_instance_valid(level_root):
+		LevelHelpersRef.mark_agents_dirty_for_movement(level_root, agents_root, self, global_position, global_position)
+	else:
+		LevelHelpersRef.mark_all_buddies_dirty(agents_root)
 
 
 func _set_rhizo_scale(new_scale: Vector2) -> void:
@@ -194,11 +193,53 @@ func _revert_to_spore() -> void:
 	myco_pod_ticks = 0
 	myco_dead_ticks = 0
 	myco_starvation_ticks = 0
-	myco_post_harvest_senescence = false
-	myco_post_harvest_ticks = 0
 	myco_harvest_ready = false
 	myco_pod_sparkle_played = false
 	_set_myco_stage(MycoGrowthStage.SPORE, true)
+
+
+func _supports_tile_world(world: Node) -> bool:
+	if not is_instance_valid(world):
+		return false
+	return world.has_method("world_to_tile") and world.has_method("tile_to_world_center") and world.has_method("in_bounds")
+
+
+func _sample_parent_bounded_birth_position(max_parent_tiles: int = MYCO_PARENT_BOUND_TILES) -> Vector2:
+	var world = get_node_or_null("../../WorldFoundation")
+	if not _supports_tile_world(world):
+		return global_position
+	var safe_tiles = maxi(max_parent_tiles, 1)
+	var parent_coord = Vector2i(world.world_to_tile(global_position))
+	for _attempt in range(MYCO_HARVEST_BIRTH_ATTEMPTS):
+		var dx = random.randi_range(-safe_tiles, safe_tiles)
+		var dy = random.randi_range(-safe_tiles, safe_tiles)
+		if maxi(abs(dx), abs(dy)) > safe_tiles:
+			continue
+		if dx == 0 and dy == 0:
+			continue
+		var coord = parent_coord + Vector2i(dx, dy)
+		if not world.in_bounds(coord):
+			continue
+		return world.tile_to_world_center(coord)
+	return world.tile_to_world_center(parent_coord)
+
+
+func _emit_harvest_spore_births() -> void:
+	var birth_count = random.randi_range(MYCO_POD_BABY_MIN, MYCO_HARVEST_BIRTH_MAX)
+	_emit_parent_bounded_spore_births(birth_count, "harvest_birth")
+
+
+func _emit_parent_bounded_spore_births(birth_count: int, spawn_reason: String) -> void:
+	var safe_births = maxi(birth_count, 0)
+	for _i in range(safe_births):
+		var new_agent_dict = {
+			"name": "myco",
+			"pos": _sample_parent_bounded_birth_position(MYCO_PARENT_BOUND_TILES),
+			"parent_anchor": self,
+			"max_parent_tiles": MYCO_PARENT_BOUND_TILES,
+			"spawn_reason": spawn_reason
+		}
+		emit_signal("new_agent", new_agent_dict)
 
 
 func supports_inventory_harvest() -> bool:
@@ -207,6 +248,46 @@ func supports_inventory_harvest() -> bool:
 
 func can_drag_for_inventory_harvest() -> bool:
 	return supports_inventory_harvest() and myco_harvest_ready and myco_stage == MycoGrowthStage.POD_READY
+
+
+func _get_harvest_drag_display_scale() -> Vector2:
+	if mushroom_base_scale != Vector2.ZERO:
+		return mushroom_base_scale
+	if is_instance_valid(sprite):
+		return sprite.scale
+	return Vector2.ONE
+
+
+func _begin_harvest_visual_detach() -> void:
+	if not supports_inventory_harvest():
+		return
+	if _harvest_visual_detached:
+		return
+	if not myco_harvest_ready or myco_stage != MycoGrowthStage.POD_READY:
+		return
+	_harvest_visual_detached = true
+	if is_instance_valid(sprite):
+		if is_instance_valid(myco_spore_texture):
+			sprite.texture = myco_spore_texture
+			var small_spore_scale = mushroom_base_scale * _get_mushroom_texture_scale_adjust(myco_spore_texture) * 0.58
+			sprite.scale = small_spore_scale
+		sprite.modulate = Color(1.0, 1.0, 1.0, 0.58)
+
+
+func _cancel_harvest_visual_detach() -> void:
+	if not _harvest_visual_detached:
+		return
+	_harvest_visual_detached = false
+	if not myco_harvest_ready or myco_stage != MycoGrowthStage.POD_READY:
+		return
+	if is_instance_valid(sprite):
+		sprite.texture = mushroom_base_texture
+		sprite.scale = mushroom_base_scale
+		sprite.modulate = Color.WHITE
+
+
+func _commit_harvest_visual_detach() -> void:
+	_harvest_visual_detached = false
 
 
 func try_harvest_to_inventory() -> bool:
@@ -227,9 +308,10 @@ func try_harvest_to_inventory() -> bool:
 	myco_pod_ticks = 0
 	myco_stage_consumptions = 0
 	myco_stage_wait_ticks = 0
-	myco_post_harvest_senescence = true
-	myco_post_harvest_ticks = 0
+	# Harvesting removes only the mushroom; the myco body remains and regrows.
 	_set_myco_stage(MycoGrowthStage.RHIZO_GROW, true)
+	_commit_harvest_visual_detach()
+	_emit_harvest_spore_births()
 	return true
 
 
@@ -290,8 +372,6 @@ func set_variables(a_dict) -> void:
 	myco_pod_ticks = 0
 	myco_dead_ticks = 0
 	myco_starvation_ticks = 0
-	myco_post_harvest_senescence = false
-	myco_post_harvest_ticks = 0
 	myco_harvest_ready = false
 	myco_pod_sparkle_played = false
 	_set_myco_stage(MycoGrowthStage.SPORE, true)
@@ -321,11 +401,15 @@ func generate_buddies() -> void:
 	var children =  $"../../Agents".get_children()
 	trade_buddies = []
 	for child in children:
-		if child.type == 'myco' and child.name != self.name:
-			var dist = global_position.distance_to(child.global_position)
-			if dist <= buddy_radius:
-				if len(trade_buddies) < num_buddies:
-					trade_buddies.append(child)
+		if not is_instance_valid(child):
+			continue
+		if bool(child.get("dead")):
+			continue
+		if child.type != "myco" or child.name == self.name:
+			continue
+		var dist = global_position.distance_to(child.global_position)
+		if dist <= buddy_radius and len(trade_buddies) < num_buddies:
+			trade_buddies.append(child)
 
 
 func logistics():
@@ -504,7 +588,7 @@ func _on_growth_timer_timeout() -> void:
 				sprite.modulate = Color(old_supported, supported_alpha)
 			if is_instance_valid(sprite_myco) and myco_stage != MycoGrowthStage.SPORE:
 				_set_rhizo_scale(sprite_myco.scale.lerp(rhizo_native_scale, 0.03))
-		elif not myco_post_harvest_senescence:
+		else:
 			myco_starvation_ticks += 1
 			if is_instance_valid(sprite):
 				var old_down = sprite.modulate
@@ -516,26 +600,12 @@ func _on_growth_timer_timeout() -> void:
 				_revert_to_spore()
 				return
 
-	if myco_post_harvest_senescence:
-		myco_post_harvest_ticks += 1
-		if myco_post_harvest_ticks >= MYCO_POST_HARVEST_TO_DEAD_TICKS:
-			myco_post_harvest_senescence = false
-			myco_post_harvest_ticks = 0
-			myco_dead_ticks = 0
-			_set_myco_stage(MycoGrowthStage.DEAD)
-		return
-
 	if myco_stage == MycoGrowthStage.POD_READY:
 		myco_pod_ticks += 1
 		var pod_baby_tick = myco_pod_ticks > 0 and (myco_pod_ticks % MYCO_POD_BABY_TICK_INTERVAL) == 0
 		if pod_baby_tick and myco_harvest_ready and Global.baby_mode:
 			var pod_baby_roll := random.randi_range(MYCO_POD_BABY_MIN, MYCO_POD_BABY_MAX)
-			for _i in range(pod_baby_roll):
-				have_babies(true)
-		if myco_pod_ticks >= MYCO_OVERRIPE_TICKS:
-			myco_harvest_ready = false
-			myco_dead_ticks = 0
-			_set_myco_stage(MycoGrowthStage.DEAD)
+			_emit_parent_bounded_spore_births(pod_baby_roll, "pod_birth")
 		return
 
 	if myco_stage_wait_ticks > 0:

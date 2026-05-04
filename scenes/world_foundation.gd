@@ -5,6 +5,8 @@ signal world_initialized(world_rect: Rect2)
 signal tile_stage_changed(coord: Vector2i, stage: int)
 signal baseline_reset
 
+const LevelHelpersRef = preload("res://scenes/level_helpers.gd")
+
 const STAGE_DRY_COMPACTED := 0
 const STAGE_RECOVERING := 1
 const STAGE_SEMI_HEALTHY := 2
@@ -16,6 +18,7 @@ const CAM_DOWN_ACTION := "cam_down"
 const SOIL_BASE_MOISTURE_DELTA := -0.01
 const SOIL_BASE_ORGANIC_DELTA := -0.004
 const SOIL_BASE_COMPACTION_DELTA := 0.003
+const SOIL_UNSUPPORTED_DECAY_MULTIPLIER := 2.0
 const SOIL_MYCO_CORE_MOISTURE_DELTA := 0.045
 const SOIL_MYCO_CORE_COMPACTION_DELTA := -0.02
 const SOIL_MYCO_NEIGHBOR_MOISTURE_DELTA := 0.02
@@ -28,7 +31,7 @@ const SOIL_SCORE_DRY_MAX := 0.30
 const SOIL_SCORE_RECOVERING_MAX := 0.48
 const SOIL_SCORE_SEMI_HEALTHY_MAX := 0.68
 const DEFAULT_RESIDUE_LIFETIME_TICKS := 8
-const SOIL_INFLUENCE_RADIUS := 2
+const SOIL_INFLUENCE_RADIUS := 4
 
 @export var columns: int = 48
 @export var rows: int = 27
@@ -64,10 +67,14 @@ var _drag_hint_coord := Vector2i(-1, -1)
 var _drag_hint_available := true
 var _soil_tick_timer: Timer = null
 var _residue_records: Array = []
+var _occupancy_by_tile: Dictionary = {}
+var _footprint_by_agent: Dictionary = {}
+var _influence_kernel: Array = []
 
 
 func _ready() -> void:
 	_initialize_tile_data()
+	_build_influence_kernel(SOIL_INFLUENCE_RADIUS)
 	_build_baseline_pattern()
 	reset_to_baseline()
 	_start_soil_tick()
@@ -106,6 +113,143 @@ func get_tile(coord: Vector2i) -> Dictionary:
 	if not in_bounds(coord):
 		return {}
 	return _tiles[_index_for(coord)].duplicate(true)
+
+
+func is_tile_occupied_cached(coord: Vector2i, ignore_agent: Variant = null) -> bool:
+	Global.perf_count_tile_occupancy_query()
+	if not in_bounds(coord):
+		return false
+	var occupants_variant = _occupancy_by_tile.get(coord, [])
+	if typeof(occupants_variant) != TYPE_ARRAY:
+		return false
+	var occupants: Array = occupants_variant
+	if occupants.is_empty():
+		return false
+	var cleaned: Array = []
+	for agent in occupants:
+		if not is_instance_valid(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if is_instance_valid(ignore_agent) and agent == ignore_agent:
+			cleaned.append(agent)
+			continue
+		cleaned.append(agent)
+		_occupancy_by_tile[coord] = cleaned
+		return true
+	_occupancy_by_tile[coord] = cleaned
+	return false
+
+
+func get_tile_occupants_cached(coord: Vector2i, ignore_agent: Variant = null) -> Array:
+	Global.perf_count_tile_occupancy_query()
+	if not in_bounds(coord):
+		return []
+	var occupants_variant = _occupancy_by_tile.get(coord, [])
+	if typeof(occupants_variant) != TYPE_ARRAY:
+		return []
+	var occupants: Array = occupants_variant
+	if occupants.is_empty():
+		return []
+	var cleaned: Array = []
+	for agent in occupants:
+		if not is_instance_valid(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if str(agent.get("type")) == "cloud":
+			continue
+		if is_instance_valid(ignore_agent) and agent == ignore_agent:
+			continue
+		cleaned.append(agent)
+	_occupancy_by_tile[coord] = cleaned
+	return cleaned
+
+
+func register_agent_footprint(agent: Variant, coords: Array) -> void:
+	if not is_instance_valid(agent):
+		return
+	unregister_agent_footprint(agent)
+	var key = int(agent.get_instance_id())
+	var normalized: Array = []
+	for coord_variant in coords:
+		var coord = Vector2i(coord_variant)
+		if not in_bounds(coord):
+			continue
+		normalized.append(coord)
+		_insert_tile_occupant(coord, agent)
+	_footprint_by_agent[key] = normalized
+
+
+func update_agent_footprint(agent: Variant, old_coords: Array, new_coords: Array) -> void:
+	if not is_instance_valid(agent):
+		return
+	var old_map: Dictionary = {}
+	var new_map: Dictionary = {}
+	for coord_variant in old_coords:
+		var coord = Vector2i(coord_variant)
+		if in_bounds(coord):
+			old_map[coord] = true
+	for coord_variant in new_coords:
+		var coord = Vector2i(coord_variant)
+		if in_bounds(coord):
+			new_map[coord] = true
+	for coord_variant in old_map.keys():
+		var coord = Vector2i(coord_variant)
+		if new_map.has(coord):
+			continue
+		_remove_tile_occupant(coord, agent)
+	for coord_variant in new_map.keys():
+		var coord = Vector2i(coord_variant)
+		if old_map.has(coord):
+			continue
+		_insert_tile_occupant(coord, agent)
+	var key = int(agent.get_instance_id())
+	_footprint_by_agent[key] = new_map.keys()
+
+
+func unregister_agent_footprint(agent: Variant) -> void:
+	if not is_instance_valid(agent):
+		return
+	var key = int(agent.get_instance_id())
+	if not _footprint_by_agent.has(key):
+		return
+	var coords_variant = _footprint_by_agent[key]
+	if typeof(coords_variant) == TYPE_ARRAY:
+		for coord_variant in coords_variant:
+			var coord = Vector2i(coord_variant)
+			if in_bounds(coord):
+				_remove_tile_occupant(coord, agent)
+	_footprint_by_agent.erase(key)
+
+
+func sync_agent_footprint(level_root: Node, agent: Variant) -> void:
+	if not is_instance_valid(agent):
+		return
+	var new_coords = LevelHelpersRef.get_agent_occupied_tiles(level_root, agent)
+	var key = int(agent.get_instance_id())
+	var old_coords: Array = []
+	if _footprint_by_agent.has(key):
+		var old_variant = _footprint_by_agent[key]
+		if typeof(old_variant) == TYPE_ARRAY:
+			old_coords = old_variant
+	update_agent_footprint(agent, old_coords, new_coords)
+
+
+func rebuild_occupancy_cache(level_root: Node, agents_root: Node) -> void:
+	_occupancy_by_tile.clear()
+	_footprint_by_agent.clear()
+	if not is_instance_valid(agents_root):
+		return
+	for agent in agents_root.get_children():
+		if not is_instance_valid(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if str(agent.get("type")) == "cloud":
+			continue
+		var coords = LevelHelpersRef.get_agent_occupied_tiles(level_root, agent)
+		register_agent_footprint(agent, coords)
 
 
 func can_place_myco_on_tile(coord: Vector2i) -> bool:
@@ -330,6 +474,7 @@ func _start_soil_tick() -> void:
 
 
 func _on_soil_tick_timeout() -> void:
+	var tick_start_us = Time.get_ticks_usec()
 	var residue_by_tile = _consume_residue_tick()
 	var residue_influence: Dictionary = {}
 	for coord_variant in residue_by_tile.keys():
@@ -340,9 +485,12 @@ func _on_soil_tick_timeout() -> void:
 	var myco_influence: Dictionary = influences["myco_influence"]
 	var live_plants: Dictionary = influences["live_plants"]
 	var stage_changes: Dictionary = {}
+	var touched_tiles := 0
+	var unsupported_decay_factor = maxf(SOIL_UNSUPPORTED_DECAY_MULTIPLIER - 1.0, 0.0)
 
 	for y in range(rows):
 		for x in range(columns):
+			touched_tiles += 1
 			var coord = Vector2i(x, y)
 			var idx = _index_for(coord)
 			var tile: Dictionary = _tiles[idx]
@@ -365,6 +513,12 @@ func _on_soil_tick_timeout() -> void:
 				moisture += SOIL_RESIDUE_MOISTURE_DELTA * residue_strength
 				organic_matter += SOIL_RESIDUE_ORGANIC_DELTA * residue_strength
 
+			var unsupported = myco_strength <= 0.0 and residue_strength <= 0.0
+			if unsupported and unsupported_decay_factor > 0.0:
+				moisture += SOIL_BASE_MOISTURE_DELTA * unsupported_decay_factor
+				compaction += SOIL_BASE_COMPACTION_DELTA * unsupported_decay_factor
+				organic_matter += SOIL_BASE_ORGANIC_DELTA * unsupported_decay_factor
+
 			moisture = _clamp01(moisture)
 			compaction = _clamp01(compaction)
 			organic_matter = _clamp01(organic_matter)
@@ -382,6 +536,9 @@ func _on_soil_tick_timeout() -> void:
 				stage_changes[new_stage].append(coord)
 
 	_apply_stage_changes(stage_changes)
+	Global.perf_set_soil_tiles_touched(touched_tiles)
+	var tick_elapsed_ms = float(Time.get_ticks_usec() - tick_start_us) / 1000.0
+	Global.perf_set_soil_tick_ms(tick_elapsed_ms)
 
 
 func _consume_residue_tick() -> Dictionary:
@@ -466,6 +623,16 @@ func _get_agent_occupied_tiles_for_soil(agent: Node) -> Array:
 
 
 func _get_tree_occupied_tiles_for_soil(agent: Node) -> Array:
+	if not bool(Global.social_mode):
+		var base_coord = world_to_tile(agent.global_position)
+		if not in_bounds(base_coord):
+			return []
+		var covered: Array = [base_coord]
+		var above_coord = base_coord + Vector2i(0, -1)
+		if in_bounds(above_coord):
+			covered.append(above_coord)
+		return covered
+
 	if not agent.has_node("Sprite2D"):
 		var fallback_coord = world_to_tile(agent.global_position)
 		if in_bounds(fallback_coord):
@@ -551,19 +718,47 @@ func _clamp01(value: float) -> float:
 	return clampf(value, 0.0, 1.0)
 
 
+func _insert_tile_occupant(coord: Vector2i, agent: Node) -> void:
+	var occupants_variant = _occupancy_by_tile.get(coord, [])
+	var occupants: Array = occupants_variant if typeof(occupants_variant) == TYPE_ARRAY else []
+	if occupants.has(agent):
+		_occupancy_by_tile[coord] = occupants
+		return
+	occupants.append(agent)
+	_occupancy_by_tile[coord] = occupants
+
+
+func _remove_tile_occupant(coord: Vector2i, agent: Node) -> void:
+	if not _occupancy_by_tile.has(coord):
+		return
+	var occupants_variant = _occupancy_by_tile.get(coord, [])
+	if typeof(occupants_variant) != TYPE_ARRAY:
+		_occupancy_by_tile.erase(coord)
+		return
+	var occupants: Array = occupants_variant
+	occupants.erase(agent)
+	if occupants.is_empty():
+		_occupancy_by_tile.erase(coord)
+	else:
+		_occupancy_by_tile[coord] = occupants
+
+
 func _falloff_weight(distance: int) -> float:
 	if distance <= 0:
 		return 1.0
 	if distance == 1:
-		return 0.75
+		return 0.8
 	if distance == 2:
-		return 0.5
+		return 0.6
+	if distance == 3:
+		return 0.4
+	if distance == 4:
+		return 0.25
 	return 0.0
 
 
-func _add_radial_influence(influence_map: Dictionary, origin: Vector2i, magnitude: float, radius: int = SOIL_INFLUENCE_RADIUS) -> void:
-	if magnitude <= 0.0:
-		return
+func _build_influence_kernel(radius: int) -> void:
+	_influence_kernel.clear()
 	var capped_radius = maxi(radius, 0)
 	for dy in range(-capped_radius, capped_radius + 1):
 		for dx in range(-capped_radius, capped_radius + 1):
@@ -573,10 +768,42 @@ func _add_radial_influence(influence_map: Dictionary, origin: Vector2i, magnitud
 			var weight = _falloff_weight(distance)
 			if weight <= 0.0:
 				continue
-			var coord = origin + Vector2i(dx, dy)
-			if not in_bounds(coord):
-				continue
-			influence_map[coord] = float(influence_map.get(coord, 0.0)) + (magnitude * weight)
+			_influence_kernel.append({
+				"offset": Vector2i(dx, dy),
+				"weight": weight
+			})
+
+
+func _add_radial_influence(influence_map: Dictionary, origin: Vector2i, magnitude: float, radius: int = SOIL_INFLUENCE_RADIUS) -> void:
+	if magnitude <= 0.0:
+		return
+	if radius != SOIL_INFLUENCE_RADIUS or _influence_kernel.is_empty():
+		var capped_radius = maxi(radius, 0)
+		for dy in range(-capped_radius, capped_radius + 1):
+			for dx in range(-capped_radius, capped_radius + 1):
+				var distance = maxi(abs(dx), abs(dy))
+				if distance > capped_radius:
+					continue
+				var weight = _falloff_weight(distance)
+				if weight <= 0.0:
+					continue
+				var coord = origin + Vector2i(dx, dy)
+				if not in_bounds(coord):
+					continue
+				influence_map[coord] = float(influence_map.get(coord, 0.0)) + (magnitude * weight)
+		return
+	for entry_variant in _influence_kernel:
+		if typeof(entry_variant) != TYPE_DICTIONARY:
+			continue
+		var entry: Dictionary = entry_variant
+		var offset = Vector2i(entry.get("offset", Vector2i.ZERO))
+		var weight = float(entry.get("weight", 0.0))
+		if weight <= 0.0:
+			continue
+		var coord = origin + offset
+		if not in_bounds(coord):
+			continue
+		influence_map[coord] = float(influence_map.get(coord, 0.0)) + (magnitude * weight)
 
 
 func _initialize_tile_data() -> void:

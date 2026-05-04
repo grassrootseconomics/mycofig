@@ -10,7 +10,7 @@ var active_agent = null
 var is_mobile_platform = false
 
 var is_dragging = false
-var bars_on = true
+var bars_on = false
 var stage_inc = 0
 var max_stage_inc = 5
 var baby_mode = true
@@ -23,6 +23,15 @@ var world_rect = Rect2(Vector2.ZERO, Vector2.ZERO)
 var active_mode_id = ""
 var active_scenario_id = ""
 var prevent_auto_select = false
+var perf_adaptive_enabled = true
+var perf_quality_override = -1
+var perf_metrics_enabled = false
+var perf_tier = 0
+var perf_soil_tiles_touched_last_tick = 0
+var perf_soil_tick_ms_last = 0.0
+var perf_tile_occupancy_queries = 0
+var perf_last_sample = {}
+var perf_run_metadata = {}
 
 
 
@@ -253,7 +262,16 @@ var stage_colors = {
 
 
 func _ready() -> void:
-	randomize()
+	var seeded = false
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--seed="):
+			var seed_text = arg.trim_prefix("--seed=")
+			var seed_val = int(seed_text)
+			seed(seed_val)
+			seeded = true
+			break
+	if not seeded:
+		randomize()
 	is_mobile_platform = OS.has_feature("mobile") or OS.get_name() == "Android" or OS.get_name() == "iOS"
 	if is_mobile_platform:
 		# Smaller radius reduces partner scans and line churn on phones.
@@ -323,3 +341,81 @@ func get_predator_spawn_count(score_level: int) -> int:
 	if is_mobile_platform:
 		spawn_count = min(spawn_count, max_predators_per_wave_mobile)
 	return max(spawn_count, 0)
+
+
+func get_effective_perf_tier() -> int:
+	if perf_quality_override >= 0:
+		return clampi(perf_quality_override, 0, 2)
+	return clampi(perf_tier, 0, 2)
+
+
+func set_perf_tier(new_tier: int) -> void:
+	perf_tier = clampi(new_tier, 0, 2)
+
+
+func get_line_visual_refresh_interval() -> float:
+	match get_effective_perf_tier():
+		1:
+			return 0.25
+		2:
+			return 0.40
+		_:
+			return 0.10
+
+
+func get_dirty_refresh_interval() -> float:
+	match get_effective_perf_tier():
+		1:
+			return 0.12
+		2:
+			return 0.18
+		_:
+			return 0.10
+
+
+func get_bar_update_interval() -> float:
+	match get_effective_perf_tier():
+		1:
+			return 0.10
+		2:
+			return 0.20
+		_:
+			return 0.033
+
+
+func perf_count_tile_occupancy_query() -> void:
+	perf_tile_occupancy_queries += 1
+
+
+func perf_consume_tile_occupancy_queries() -> int:
+	var consumed = perf_tile_occupancy_queries
+	perf_tile_occupancy_queries = 0
+	return consumed
+
+
+func perf_set_soil_tiles_touched(count: int) -> void:
+	perf_soil_tiles_touched_last_tick = maxi(count, 0)
+
+
+func perf_consume_soil_tiles_touched() -> int:
+	var consumed = perf_soil_tiles_touched_last_tick
+	perf_soil_tiles_touched_last_tick = 0
+	return consumed
+
+
+func perf_set_soil_tick_ms(ms: float) -> void:
+	perf_soil_tick_ms_last = maxf(ms, 0.0)
+
+
+func perf_consume_soil_tick_ms() -> float:
+	var consumed = perf_soil_tick_ms_last
+	perf_soil_tick_ms_last = 0.0
+	return consumed
+
+
+func perf_set_last_sample(sample: Dictionary) -> void:
+	perf_last_sample = sample.duplicate(true)
+
+
+func perf_set_run_metadata(metadata: Dictionary) -> void:
+	perf_run_metadata = metadata.duplicate(true)

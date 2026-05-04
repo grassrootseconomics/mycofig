@@ -15,6 +15,14 @@ var drag_preview_sprite: Sprite2D = null
 var inventory_spawn_rng := RandomNumberGenerator.new()
 const AUTO_SPAWN_ATTEMPTS := 96
 const AUTO_SPAWN_SWEEP_STEPS := 48
+const PARENT_BOUNDED_AUTO_ATTEMPTS := 96
+const PARENT_BOUNDED_MAX_TILES := 4
+const PARENT_BOUNDED_TYPES := {
+	"myco": true,
+	"bean": true,
+	"squash": true,
+	"maize": true
+}
 
 func _ready() -> void:
 	#$PalletContainer2/HBoxContainer/ActiveTexture.texture = Global.active_agent.sprite_texture
@@ -149,6 +157,15 @@ func refresh_inventory_counts() -> void:
 				inventory_sprites[inv].modulate.a = 1.0
 
 
+func get_inventory_icon_center(agent_name: String) -> Vector2:
+	var icon = inventory_sprites.get(agent_name)
+	if is_instance_valid(icon):
+		var icon_rect = icon.get_global_rect()
+		return icon_rect.position + icon_rect.size * 0.5
+	var panel_rect = $MarginContainer.get_global_rect()
+	return panel_rect.position + panel_rect.size * 0.5
+
+
 func refund_inventory_item(agent_name: String, amount: int = 1) -> void:
 	if agent_name == "":
 		return
@@ -251,6 +268,24 @@ func _get_world_rect() -> Rect2:
 	return Global.get_world_rect(self)
 
 
+func _get_world_foundation() -> Node:
+	return get_node_or_null("../WorldFoundation")
+
+
+func _supports_tile_world(world: Node) -> bool:
+	if not is_instance_valid(world):
+		return false
+	return world.has_method("world_to_tile") and world.has_method("tile_to_world_center") and world.has_method("in_bounds")
+
+
+func _is_parent_bounded_inventory_type(agent_name: String) -> bool:
+	return PARENT_BOUNDED_TYPES.has(agent_name)
+
+
+func _chebyshev_tile_distance(a: Vector2i, b: Vector2i) -> int:
+	return maxi(abs(a.x - b.x), abs(a.y - b.y))
+
+
 func _emit_inventory_drag_preview(agent_name: String, screen_pos: Vector2, active: bool) -> void:
 	if not active:
 		emit_signal("inventory_drag_preview", agent_name, Vector2.ZERO, false)
@@ -312,6 +347,50 @@ func _get_reach_anchors(agents_root: Node) -> Array:
 	return anchors
 
 
+func _get_random_living_myco_anchor(agents_root: Node) -> Node:
+	var anchors = _get_reach_anchors(agents_root)
+	if anchors.is_empty():
+		return null
+	return anchors[inventory_spawn_rng.randi_range(0, anchors.size() - 1)]
+
+
+func _get_nearest_living_myco_anchor(world_pos: Vector2, agents_root: Node) -> Node:
+	if not is_instance_valid(agents_root):
+		return null
+	var world = _get_world_foundation()
+	var best_anchor: Node = null
+	var best_dist := INF
+	if _supports_tile_world(world):
+		var target_coord = Vector2i(world.world_to_tile(world_pos))
+		for agent in agents_root.get_children():
+			if not is_instance_valid(agent):
+				continue
+			if agent.get("dead") == true:
+				continue
+			if agent.get("type") != "myco":
+				continue
+			var coord = Vector2i(world.world_to_tile(agent.global_position))
+			if not world.in_bounds(coord):
+				continue
+			var dist = float(_chebyshev_tile_distance(coord, target_coord))
+			if dist < best_dist:
+				best_dist = dist
+				best_anchor = agent
+		return best_anchor
+	for agent in agents_root.get_children():
+		if not is_instance_valid(agent):
+			continue
+		if agent.get("dead") == true:
+			continue
+		if agent.get("type") != "myco":
+			continue
+		var dist = agent.global_position.distance_to(world_pos)
+		if dist < best_dist:
+			best_dist = dist
+			best_anchor = agent
+	return best_anchor
+
+
 func _is_valid_auto_spawn_position(pos: Vector2, agents_root: Node, anchor: Node = null) -> bool:
 	var world_rect = _get_world_rect()
 	if not world_rect.has_point(pos):
@@ -337,12 +416,60 @@ func _is_valid_auto_spawn_position(pos: Vector2, agents_root: Node, anchor: Node
 	return true
 
 
-func _get_auto_spawn_target() -> Dictionary:
+func _sample_parent_bounded_auto_target(parent_anchor: Node, agents_root: Node, max_parent_tiles: int) -> Vector2:
+	if not is_instance_valid(parent_anchor):
+		return Vector2.ZERO
+	var world = _get_world_foundation()
+	var safe_tiles = maxi(max_parent_tiles, 0)
+	if _supports_tile_world(world):
+		var parent_coord = Vector2i(world.world_to_tile(parent_anchor.global_position))
+		if safe_tiles <= 0:
+			return world.tile_to_world_center(parent_coord)
+		for _attempt in range(PARENT_BOUNDED_AUTO_ATTEMPTS):
+			var dx = inventory_spawn_rng.randi_range(-safe_tiles, safe_tiles)
+			var dy = inventory_spawn_rng.randi_range(-safe_tiles, safe_tiles)
+			if maxi(abs(dx), abs(dy)) > safe_tiles:
+				continue
+			var coord = parent_coord + Vector2i(dx, dy)
+			if not world.in_bounds(coord):
+				continue
+			var candidate = world.tile_to_world_center(coord)
+			if _is_valid_auto_spawn_position(candidate, agents_root):
+				return candidate
+		for radius in range(0, safe_tiles + 1):
+			for dy in range(-radius, radius + 1):
+				for dx in range(-radius, radius + 1):
+					if radius > 0 and abs(dx) != radius and abs(dy) != radius:
+						continue
+					var coord = parent_coord + Vector2i(dx, dy)
+					if not world.in_bounds(coord):
+						continue
+					if _chebyshev_tile_distance(parent_coord, coord) > safe_tiles:
+						continue
+					var candidate = world.tile_to_world_center(coord)
+					if _is_valid_auto_spawn_position(candidate, agents_root):
+						return candidate
+		return world.tile_to_world_center(parent_coord)
+	return parent_anchor.global_position
+
+
+func _get_auto_spawn_target(agent_name: String) -> Dictionary:
 	var target = {
+		"ok": true,
 		"pos": Vector2.ZERO,
-		"anchor": null
+		"anchor": null,
+		"max_parent_tiles": PARENT_BOUNDED_MAX_TILES
 	}
 	var agents_root = _get_agents_root()
+	if _is_parent_bounded_inventory_type(agent_name):
+		var parent_anchor = _get_random_living_myco_anchor(agents_root)
+		if not is_instance_valid(parent_anchor):
+			target["ok"] = false
+			return target
+		target["anchor"] = parent_anchor
+		target["pos"] = _sample_parent_bounded_auto_target(parent_anchor, agents_root, PARENT_BOUNDED_MAX_TILES)
+		return target
+
 	var anchors = _get_reach_anchors(agents_root)
 	var world_rect = _get_world_rect()
 	if anchors.is_empty():
@@ -383,27 +510,38 @@ func _get_auto_spawn_target() -> Dictionary:
 func _drop_inventory_agent(drop_pos: Vector2) -> void:
 	if next_agent == null:
 		return
-	if Global.inventory[next_agent] <= 0:
+	var spawn_name = str(next_agent)
+	if int(Global.inventory.get(spawn_name, 0)) <= 0:
 		return
+	var constrained_type = _is_parent_bounded_inventory_type(spawn_name)
 	var target_pos = _screen_to_world(drop_pos)
 	var spawn_anchor = null
 	var allow_replace = true
 	var view = get_viewport().get_visible_rect()
 	if $MarginContainer.get_global_rect().has_point(drop_pos) or not view.has_point(drop_pos):
-		var auto_target = _get_auto_spawn_target()
+		var auto_target = _get_auto_spawn_target(spawn_name)
+		if not bool(auto_target.get("ok", true)):
+			return
 		target_pos = auto_target["pos"]
 		spawn_anchor = auto_target["anchor"]
 		allow_replace = false
+	elif constrained_type:
+		spawn_anchor = _get_nearest_living_myco_anchor(target_pos, _get_agents_root())
+		if not is_instance_valid(spawn_anchor):
+			return
 	var new_agent_dict = {
-		"name" : next_agent,
+		"name" : spawn_name,
 		"pos": target_pos,
 		"allow_replace": allow_replace,
 		"from_inventory": true
 	}
 	if is_instance_valid(spawn_anchor):
 		new_agent_dict["spawn_anchor"] = spawn_anchor
+		if constrained_type:
+			new_agent_dict["parent_anchor"] = spawn_anchor
+			new_agent_dict["max_parent_tiles"] = PARENT_BOUNDED_MAX_TILES
 	emit_signal("new_agent", new_agent_dict)
-	Global.inventory[next_agent] -=1
+	Global.inventory[spawn_name] = int(Global.inventory.get(spawn_name, 0)) - 1
 	refresh_inventory_counts()
 
 

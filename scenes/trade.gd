@@ -19,6 +19,7 @@ var height = 0
 var width = 0
 var _dropping := false
 var _drop_elapsed := 0.0
+var _pool_owner: Node = null
 
 const DROP_FADE_SECONDS := 0.12
 
@@ -36,6 +37,31 @@ func set_variables(path_dict) -> void:
 	return_amt = path_dict.get("return_amt")
 	position = start_agent.global_position
 	#print("Created trade: ", start_agent, end_agent, trade_path)
+
+
+func set_pool_owner(owner: Node) -> void:
+	_pool_owner = owner
+
+
+func activate_trade(path_dict: Dictionary) -> void:
+	set_process(true)
+	visible = true
+	_dropping = false
+	_drop_elapsed = 0.0
+	modulate = Color.WHITE
+	var shape = get_node_or_null("CollisionShape2D")
+	if is_instance_valid(shape):
+		shape.set_deferred("disabled", false)
+	set_deferred("monitorable", true)
+	set_deferred("monitoring", true)
+	set_variables(path_dict)
+
+
+func _despawn() -> void:
+	if is_instance_valid(_pool_owner) and _pool_owner.has_method("_recycle_trade"):
+		_pool_owner._recycle_trade(self)
+	else:
+		call_deferred("queue_free")
 
 
 func _is_endpoint_locked(agent: Variant) -> bool:
@@ -61,24 +87,27 @@ func _begin_drop() -> void:
 
 
 func _advance_drop(delta: float) -> void:
+	if Global.get_effective_perf_tier() >= 2:
+		_despawn()
+		return
 	_drop_elapsed += max(delta, 0.0)
 	var t = clampf(_drop_elapsed / DROP_FADE_SECONDS, 0.0, 1.0)
 	var faded = modulate
 	faded.a = 1.0 - t
 	modulate = faded
 	if t >= 1.0:
-		call_deferred("queue_free")
+		_despawn()
 
 
 func _process(delta: float) -> void:
 	if not is_instance_valid(end_agent):
-		call_deferred("queue_free")
+		_despawn()
 		return
 	if not is_instance_valid(start_agent):
-		call_deferred("queue_free")
+		_despawn()
 		return
 	if bool(end_agent.get("dead")) or bool(start_agent.get("dead")):
-		call_deferred("queue_free")
+		_despawn()
 		return
 
 	if _is_endpoint_locked(start_agent) or _is_endpoint_locked(end_agent):
@@ -86,6 +115,8 @@ func _process(delta: float) -> void:
 	if _dropping:
 		_advance_drop(delta)
 		return
+	# Keep packet flow visible in every quality tier.
+	visible = true
 
 	#print("moving trade")
 	#move in x then y
@@ -131,4 +162,4 @@ func _process(delta: float) -> void:
 
 	var world_rect = Global.get_world_rect(self)
 	if not world_rect.has_point(position):
-		call_deferred("queue_free")
+		_despawn()

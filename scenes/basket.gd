@@ -239,7 +239,8 @@ func _physics_process(delta):
 		var t = min(1.0, delay * delta)
 		var dragged_target = position.lerp(get_global_mouse_position(), t)
 		position = _clamp_position_to_world(dragged_target)
-		_update_bar_positions()
+		if is_instance_valid(bar_canvas) and bar_canvas.visible:
+			_update_bar_positions()
 
 
 func _input(event):
@@ -255,11 +256,13 @@ func _input(event):
 						Global.is_dragging = true
 						Global.active_agent = self
 						Global.prevent_auto_select = false
+						_refresh_all_agent_bar_visibility()
 						_cancel_tile_snap()
 					else:
 						_press_started_here = true
 						Global.active_agent = self
 						Global.prevent_auto_select = false
+						_refresh_all_agent_bar_visibility()
 				else:
 					_press_started_here = false
 			else:
@@ -275,6 +278,7 @@ func _input(event):
 					#emit_signal("clicked_agent",self)
 					Global.active_agent = self
 					Global.prevent_auto_select = false
+					_refresh_all_agent_bar_visibility()
 				
 
 
@@ -336,15 +340,15 @@ func _on_area_entered(trade: Area2D) -> void:
 func kill_it():
 	#new_alpha = low_alpha
 	#self.queue_free()
+	LevelHelpersRef.unregister_agent_occupancy(get_node_or_null("../.."), self)
 	self.call_deferred("queue_free")
 	self.dead = true
 	if Global.active_agent != null:
 		if is_instance_valid(Global.active_agent) and Global.active_agent.name == self.name:
-			for box in $"../../Boxes".get_children():
-				box.clear_points()
-				box.queue_free()
+			LevelHelpersRef.clear_focus_outline_if_owner(get_node_or_null("../.."), self)
 			Global.active_agent = null
 			Global.prevent_auto_select = true
+			_refresh_all_agent_bar_visibility()
 	
 	trade_buddies = []
 	new_buddies = true
@@ -367,10 +371,14 @@ func kill_it():
 	
 	
 	var children =  $"../../Agents".get_children()
+	var level_root = get_node_or_null("../..")
 	var living = false
 	for child in children:
-		child.draw_lines = true
-		child.new_buddies = true
+		if is_instance_valid(level_root) and level_root.has_method("request_agent_dirty"):
+			level_root.request_agent_dirty(child, true, true, false)
+		else:
+			child.draw_lines = true
+			child.new_buddies = true
 		
 		
 		if(child.dead == false and child.type != "cloud"):

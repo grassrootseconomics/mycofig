@@ -17,6 +17,10 @@ const TEX_MAIZE_SPROUT_STAGE_PATH := "res://graphics/maize_sprout_stage.png"
 const TEX_MAIZE_VINE_STAGE_PATH := "res://graphics/maize_vine_stage.png"
 const TEX_MAIZE_POD_STAGE_PATH := "res://graphics/maize_pod_stage.png"
 const TEX_MAIZE_DEAD_STAGE_PATH := "res://graphics/maize_dead_stage.png"
+const TEX_ACORN_TREE_SPROUT_STAGE_PATH := "res://graphics/acorn_tree_sprout_stage.png"
+const TEX_ACORN_TREE_VINE_STAGE_PATH := "res://graphics/acorn_tree_vine_stage.png"
+const TEX_ACORN_TREE_POD_STAGE_PATH := "res://graphics/acorn_tree_pod_stage.png"
+const TEX_ACORN_TREE_DEAD_STAGE_PATH := "res://graphics/acorn_tree_dead_stage.png"
 
 enum BeanGrowthStage {
 	SEED,
@@ -36,6 +40,7 @@ const BEAN_STAGE_ADVANCE_WAIT_TICKS := 1
 const BEAN_HARVEST_YIELD := 3
 const LIFECYCLE_POD_BABY_MIN := 0
 const LIFECYCLE_POD_BABY_MAX := 3
+const TREE_STARVATION_DURATION_MULTIPLIER := 3.0
 const BASE_MOVE_RATE_FOR_STARVATION := 6.0
 const BASE_MOVEMENT_SPEED_FOR_STARVATION := 200.0
 const MIN_STARVATION_SPEED_SCALE := 0.2
@@ -174,6 +179,13 @@ var bean_stage_textures := {}
 var bean_base_scale := Vector2.ONE
 var bean_residue_pending := false
 var bean_residue_emitted := false
+var _bar_update_accum := 0.0
+var _last_occupancy_scale := Vector2(-99999.0, -99999.0)
+var _last_bar_camera_center := Vector2(INF, INF)
+var _hover_visual_focus := false
+var _harvest_visual_detached := false
+var _harvest_inventory_animating := false
+var _harvest_drag_proxy_in_ui := false
 
 
 func _get_sprite_half_extents() -> Vector2:
@@ -224,14 +236,122 @@ func _update_bar_positions() -> void:
 		if viewport != null:
 			var camera = viewport.get_camera_2d()
 			if camera != null:
+				_last_bar_camera_center = camera.get_screen_center_position()
 				anchor = Global.world_to_screen(self, position)
 	for bar in bars:
 		if is_instance_valid(bars[bar]):
 			bars[bar].position = anchor + bars_offset[bar]
 
 
+func _is_selected_agent() -> bool:
+	if not is_instance_valid(Global.active_agent):
+		return false
+	return Global.active_agent == self or Global.active_agent.name == self.name
+
+
+func _should_show_resource_bars() -> bool:
+	if not is_instance_valid(bar_canvas):
+		return false
+	if dead or caught_by != null:
+		return false
+	if Global.bars_on:
+		return true
+	if not _is_reposition_subject():
+		return false
+	return _hover_visual_focus
+
+
+func refresh_bar_visibility() -> void:
+	if not is_instance_valid(bar_canvas):
+		return
+	var should_show = _should_show_resource_bars()
+	if bar_canvas.visible == should_show:
+		return
+	bar_canvas.visible = should_show
+	_bar_update_accum = 0.0
+	if should_show:
+		_update_bar_positions()
+
+
+func set_hover_focus(is_hovered: bool) -> void:
+	if _hover_visual_focus == is_hovered:
+		return
+	_hover_visual_focus = is_hovered
+	refresh_bar_visibility()
+
+
+func _get_adaptive_bar_update_interval() -> float:
+	var interval = Global.get_bar_update_interval()
+	if Global.bars_on:
+		var sample_variant = Global.perf_last_sample
+		if typeof(sample_variant) == TYPE_DICTIONARY:
+			var sample: Dictionary = sample_variant
+			var visible_count = int(sample.get("visible_bars", 0))
+			if visible_count >= 500:
+				interval = maxf(interval, 0.32)
+			elif visible_count >= 320:
+				interval = maxf(interval, 0.24)
+			elif visible_count >= 180:
+				interval = maxf(interval, 0.16)
+		if not _is_selected_agent():
+			interval = maxf(interval, 0.12)
+	return interval
+
+
+func _did_camera_move_since_last_bar_update() -> bool:
+	if not is_instance_valid(bar_canvas) or not (bar_canvas is CanvasLayer):
+		return true
+	var viewport = get_viewport()
+	if viewport == null:
+		return true
+	var camera = viewport.get_camera_2d()
+	if camera == null:
+		return true
+	var center = camera.get_screen_center_position()
+	var moved = center.distance_squared_to(_last_bar_camera_center) > 0.01
+	_last_bar_camera_center = center
+	return moved
+
+
 func _get_world_foundation_node() -> Node:
 	return get_node_or_null("../../WorldFoundation")
+
+
+func _is_tree_harvest_hotspot_hit(world_pos: Vector2) -> bool:
+	if not _is_tree_lifecycle_type():
+		return false
+	if not can_drag_for_inventory_harvest():
+		return false
+	if not is_instance_valid(sprite) or not sprite.has_method("get_rect"):
+		return false
+
+	# Acorn-only harvest hotspot: left/lower pocket of the mature tree sprite,
+	# with a small extension rightward for ease of clicking.
+	var rect: Rect2 = sprite.get_rect()
+	var hotspot = Rect2(
+		Vector2(rect.position.x + rect.size.x * 0.06, rect.position.y + rect.size.y * 0.44),
+		Vector2(rect.size.x * 0.40, rect.size.y * 0.34)
+	)
+	var sprite_local_click = sprite.to_local(world_pos)
+	if not hotspot.has_point(sprite_local_click):
+		return false
+
+	# Explicitly block overlap into the top-left neighboring tile.
+	var world = _get_world_foundation_node()
+	if is_instance_valid(world) and world.has_method("world_to_tile"):
+		var click_coord = Vector2i(world.world_to_tile(_clamp_position_to_world_rect(world_pos)))
+		var base_coord = Vector2i(world.world_to_tile(_clamp_position_to_world_rect(global_position)))
+		if click_coord.x < base_coord.x and click_coord.y < base_coord.y:
+			return false
+	return true
+
+
+func _is_press_hit(world_pos: Vector2) -> bool:
+	if _is_tree_harvest_hotspot_hit(world_pos):
+		return true
+	if not is_instance_valid(sprite) or not sprite.has_method("get_rect"):
+		return false
+	return sprite.get_rect().has_point(to_local(world_pos))
 
 
 func _get_level_root() -> Node:
@@ -240,6 +360,31 @@ func _get_level_root() -> Node:
 
 func _get_agents_root() -> Node:
 	return get_node_or_null("../../Agents")
+
+
+func _refresh_all_agent_bar_visibility() -> void:
+	var agents_root = _get_agents_root()
+	if is_instance_valid(agents_root):
+		LevelHelpersRef.refresh_agent_bar_visibility(agents_root)
+
+
+func _queue_dirty_update(buddies: bool = true, lines: bool = true, tile_hint: bool = false) -> void:
+	var level_root = _get_level_root()
+	if is_instance_valid(level_root) and level_root.has_method("request_agent_dirty"):
+		level_root.request_agent_dirty(self, buddies, lines, tile_hint)
+		return
+	new_buddies = buddies or new_buddies
+	if lines and str(type) == "myco":
+		draw_lines = true
+
+
+func _sync_occupancy_cache() -> void:
+	if str(type) == "cloud":
+		return
+	var level_root = _get_level_root()
+	if not is_instance_valid(level_root):
+		return
+	LevelHelpersRef.sync_agent_occupancy(level_root, self)
 
 
 func _uses_tile_snap() -> bool:
@@ -407,34 +552,103 @@ func _get_harvest_drag_texture() -> Texture2D:
 	return null
 
 
+func _get_harvest_drag_display_scale() -> Vector2:
+	if _is_bean_lifecycle_enabled():
+		return bean_base_scale
+	if is_instance_valid(sprite):
+		return sprite.scale
+	return Vector2.ONE
+
+
+func _get_harvest_inventory_key() -> String:
+	return str(type)
+
+
+func _get_harvest_drag_host() -> Node:
+	var level_root = _get_level_root()
+	if not is_instance_valid(level_root):
+		return null
+	var ui_node = level_root.get_node_or_null("UI")
+	if is_instance_valid(ui_node):
+		return ui_node
+	return level_root
+
+
+func _get_harvest_inventory_target_screen_pos() -> Vector2:
+	var level_root = _get_level_root()
+	if not is_instance_valid(level_root):
+		return get_viewport().get_mouse_position()
+	var ui_node = level_root.get_node_or_null("UI")
+	if is_instance_valid(ui_node) and ui_node.has_method("get_inventory_icon_center"):
+		var key = _get_harvest_inventory_key()
+		return ui_node.call("get_inventory_icon_center", key)
+	return get_viewport().get_mouse_position()
+
+
+func _get_harvest_inventory_target_proxy_pos() -> Vector2:
+	var screen_pos = _get_harvest_inventory_target_screen_pos()
+	if _harvest_drag_proxy_in_ui:
+		return screen_pos
+	return Global.screen_to_world(self, screen_pos)
+
+
+func _start_harvest_inventory_fly_in() -> bool:
+	if _harvest_inventory_animating:
+		return true
+	if not _harvest_drag_only:
+		return false
+	if not is_instance_valid(_harvest_drag_sprite):
+		return false
+	_harvest_inventory_animating = true
+	is_dragging = false
+	Global.is_dragging = false
+	_clear_drag_tile_hint()
+	var target_pos = _get_harvest_inventory_target_proxy_pos()
+	var tween = get_tree().create_tween()
+	tween.tween_property(_harvest_drag_sprite, "global_position", target_pos, 0.14)
+	tween.finished.connect(_on_harvest_inventory_fly_in_finished)
+	return true
+
+
+func _on_harvest_inventory_fly_in_finished() -> void:
+	if not _harvest_inventory_animating:
+		return
+	_harvest_inventory_animating = false
+	var harvested := false
+	if supports_inventory_harvest():
+		harvested = try_harvest_to_inventory()
+	_end_harvest_drag_proxy()
+	_harvest_drag_only = false
+	if not harvested:
+		_begin_snap_to_nearest_tile(position)
+
+
 func _start_harvest_drag_proxy() -> void:
 	if not _harvest_drag_only:
 		_end_harvest_drag_proxy()
 		return
+	_begin_harvest_visual_detach()
 	if is_instance_valid(_harvest_drag_sprite):
 		_update_harvest_drag_proxy_position()
 		return
 	var harvest_texture := _get_harvest_drag_texture()
 	if not is_instance_valid(harvest_texture):
 		return
-	var level_root = _get_level_root()
-	if not is_instance_valid(level_root):
+	var host = _get_harvest_drag_host()
+	if not is_instance_valid(host):
 		return
 	var drag_sprite := Sprite2D.new()
 	drag_sprite.texture = harvest_texture
-	drag_sprite.top_level = true
+	_harvest_drag_proxy_in_ui = host is CanvasLayer
+	drag_sprite.top_level = not _harvest_drag_proxy_in_ui
 	drag_sprite.z_index = 2000
 	drag_sprite.z_as_relative = false
 	drag_sprite.modulate = Color(1.0, 1.0, 1.0, 0.96)
-	var drag_scale := Vector2.ONE
-	if _is_bean_lifecycle_enabled():
-		drag_scale = bean_base_scale
-	elif is_instance_valid(sprite):
-		drag_scale = sprite.scale
+	var drag_scale := _get_harvest_drag_display_scale()
 	if drag_scale == Vector2.ZERO:
 		drag_scale = Vector2.ONE
 	drag_sprite.scale = drag_scale
-	level_root.add_child(drag_sprite)
+	host.add_child(drag_sprite)
 	_harvest_drag_sprite = drag_sprite
 	_update_harvest_drag_proxy_position()
 
@@ -442,13 +656,20 @@ func _start_harvest_drag_proxy() -> void:
 func _update_harvest_drag_proxy_position() -> void:
 	if not is_instance_valid(_harvest_drag_sprite):
 		return
-	_harvest_drag_sprite.global_position = get_global_mouse_position()
+	if _harvest_drag_proxy_in_ui:
+		_harvest_drag_sprite.global_position = get_viewport().get_mouse_position()
+	else:
+		_harvest_drag_sprite.global_position = get_global_mouse_position()
 
 
 func _end_harvest_drag_proxy() -> void:
+	_harvest_inventory_animating = false
+	_harvest_drag_proxy_in_ui = false
 	if is_instance_valid(_harvest_drag_sprite):
 		_harvest_drag_sprite.queue_free()
 	_harvest_drag_sprite = null
+	if _harvest_visual_detached:
+		_cancel_harvest_visual_detach()
 
 
 func is_trade_locked_by_user_move() -> bool:
@@ -468,12 +689,12 @@ func _clear_active_selection_if_self() -> void:
 		active_matches_self = Global.active_agent == self or Global.active_agent.name == self.name
 	if not active_matches_self:
 		return
-	for box in $"../../Boxes".get_children():
-		if box.has_method("clear_points"):
-			box.clear_points()
-		box.queue_free()
+	var level_root = _get_level_root()
+	if is_instance_valid(level_root):
+		LevelHelpersRef.clear_focus_outline_if_owner(level_root, self)
 	Global.active_agent = null
 	Global.prevent_auto_select = true
+	_refresh_all_agent_bar_visibility()
 
 
 func _is_reposition_subject() -> bool:
@@ -501,11 +722,13 @@ func _is_bean_lifecycle_enabled() -> bool:
 	if Global.social_mode:
 		return false
 	var crop_type = str(type)
-	return crop_type == "bean" or crop_type == "squash" or crop_type == "maize"
+	return crop_type == "bean" or crop_type == "squash" or crop_type == "maize" or crop_type == "tree"
 
 
 func _get_lifecycle_crop_type() -> String:
 	var crop_type = str(type)
+	if crop_type == "tree":
+		return "tree"
 	if crop_type == "maize":
 		return "maize"
 	if crop_type == "squash":
@@ -535,6 +758,19 @@ func _spawn_growth_sparkle() -> void:
 
 func _get_bean_stage_scale_multiplier(stage_value: int) -> float:
 	var crop_type = _get_lifecycle_crop_type()
+	if crop_type == "tree":
+		match stage_value:
+			BeanGrowthStage.SPROUT:
+				return 1.9
+			BeanGrowthStage.VINE:
+				return 5.8
+			BeanGrowthStage.POD_READY:
+				return 6.0
+			BeanGrowthStage.DEAD:
+				return 5.2
+			_:
+				return 1.9
+
 	if crop_type == "maize":
 		match stage_value:
 			BeanGrowthStage.SPROUT:
@@ -578,6 +814,19 @@ func _get_bean_stage_target_scale(stage_value: int) -> Vector2:
 	return bean_base_scale * _get_bean_stage_scale_multiplier(stage_value)
 
 
+func _get_lifecycle_stage_sprite_offset(stage_value: int) -> Vector2:
+	var crop_type = _get_lifecycle_crop_type()
+	if crop_type != "tree":
+		return Vector2.ZERO
+	# Shift mature tree visuals upward so base sits lower in the origin tile
+	# while canopy extends into the tile above.
+	match stage_value:
+		BeanGrowthStage.VINE, BeanGrowthStage.POD_READY, BeanGrowthStage.DEAD:
+			return Vector2(0.0, -56.0)
+		_:
+			return Vector2.ZERO
+
+
 func _get_lifecycle_texture_scale_adjust(texture: Texture2D) -> Vector2:
 	if not is_instance_valid(texture):
 		return Vector2.ONE
@@ -597,6 +846,20 @@ func _get_lifecycle_texture_scale_adjust(texture: Texture2D) -> Vector2:
 
 func _get_lifecycle_stage_texture_path(stage_value: int) -> String:
 	var crop_type = _get_lifecycle_crop_type()
+	if crop_type == "tree":
+		match stage_value:
+			BeanGrowthStage.SEED:
+				return TEX_ACORN_TREE_SPROUT_STAGE_PATH
+			BeanGrowthStage.SPROUT:
+				return TEX_ACORN_TREE_SPROUT_STAGE_PATH
+			BeanGrowthStage.VINE:
+				return TEX_ACORN_TREE_VINE_STAGE_PATH
+			BeanGrowthStage.POD_READY:
+				return TEX_ACORN_TREE_POD_STAGE_PATH
+			BeanGrowthStage.DEAD:
+				return TEX_ACORN_TREE_DEAD_STAGE_PATH
+		return TEX_ACORN_TREE_SPROUT_STAGE_PATH
+
 	if crop_type == "maize":
 		match stage_value:
 			BeanGrowthStage.SEED:
@@ -682,6 +945,7 @@ func _set_bean_stage(new_stage: int, force: bool = false) -> void:
 	if is_instance_valid(sprite):
 		sprite.texture = next_texture
 		sprite.modulate = Color.WHITE
+		sprite.offset = _get_lifecycle_stage_sprite_offset(bean_stage)
 		var stage_scale = _get_bean_stage_target_scale(bean_stage)
 		stage_scale *= _get_lifecycle_texture_scale_adjust(next_texture)
 		if bean_stage == BeanGrowthStage.DEAD:
@@ -749,6 +1013,32 @@ func _emit_lifecycle_residue_signal(biomass: float, source_type: String) -> void
 	emit_signal("lifecycle_residue", coord, biomass, source_type)
 
 
+func _is_tree_lifecycle_type() -> bool:
+	return _is_bean_lifecycle_enabled() and str(type) == "tree"
+
+
+func _can_tree_lifecycle_stage_fit(stage_value: int) -> bool:
+	if not _is_tree_lifecycle_type():
+		return true
+	if not _uses_tile_snap():
+		return true
+	var stage_path = _get_lifecycle_stage_texture_path(stage_value)
+	var stage_texture: Texture2D = _load_bean_stage_texture(stage_path)
+	if not is_instance_valid(stage_texture):
+		stage_texture = sprite_texture
+	if not is_instance_valid(stage_texture):
+		return true
+	var stage_scale = _get_bean_stage_target_scale(stage_value) * _get_lifecycle_texture_scale_adjust(stage_texture)
+	return _can_expand_to_scale(stage_scale)
+
+
+func _get_lifecycle_stage_consumptions_required() -> int:
+	# Trees intentionally mature more slowly than annual crops.
+	if _is_tree_lifecycle_type():
+		return BEAN_STAGE_CONSUMPTIONS_PER_ADVANCE * 2
+	return BEAN_STAGE_CONSUMPTIONS_PER_ADVANCE
+
+
 func _advance_bean_lifecycle(consumed_all_nutrients: bool) -> void:
 	if not _is_bean_lifecycle_enabled():
 		return
@@ -777,6 +1067,10 @@ func _advance_bean_lifecycle(consumed_all_nutrients: bool) -> void:
 		return
 
 	if bean_post_harvest_senescence:
+		if _is_tree_lifecycle_type():
+			bean_post_harvest_senescence = false
+			bean_post_harvest_ticks = 0
+			return
 		bean_post_harvest_ticks += 1
 		if bean_post_harvest_ticks >= BEAN_POST_HARVEST_TO_DEAD_TICKS:
 			bean_harvest_ready = false
@@ -798,15 +1092,23 @@ func _advance_bean_lifecycle(consumed_all_nutrients: bool) -> void:
 			for _i in range(pod_baby_roll):
 				have_babies(true)
 		if bean_pod_ticks >= BEAN_OVERRIPE_TICKS:
-			bean_harvest_ready = false
-			bean_dead_ticks = 0
-			bean_respawn_wait_ticks = BEAN_DEAD_RESPAWN_DELAY_TICKS
-			bean_respawn_requested = false
-			bean_post_harvest_senescence = false
-			bean_post_harvest_ticks = 0
-			bean_residue_pending = true
-			bean_residue_emitted = false
-			_set_bean_stage(BeanGrowthStage.DEAD)
+			if _is_tree_lifecycle_type():
+				# Tree does not die from overripe acorn; it resets to full tree and can fruit again.
+				bean_harvest_ready = false
+				bean_pod_ticks = 0
+				bean_stage_consumptions = 0
+				bean_stage_wait_ticks = 0
+				_set_bean_stage(BeanGrowthStage.VINE)
+			else:
+				bean_harvest_ready = false
+				bean_dead_ticks = 0
+				bean_respawn_wait_ticks = BEAN_DEAD_RESPAWN_DELAY_TICKS
+				bean_respawn_requested = false
+				bean_post_harvest_senescence = false
+				bean_post_harvest_ticks = 0
+				bean_residue_pending = true
+				bean_residue_emitted = false
+				_set_bean_stage(BeanGrowthStage.DEAD)
 		return
 
 	if bean_stage_wait_ticks > 0:
@@ -819,17 +1121,63 @@ func _advance_bean_lifecycle(consumed_all_nutrients: bool) -> void:
 		return
 
 	bean_stage_consumptions += 1
-	if bean_stage_consumptions < BEAN_STAGE_CONSUMPTIONS_PER_ADVANCE:
+	var required_consumptions = max(1, _get_lifecycle_stage_consumptions_required())
+	if bean_stage_consumptions < required_consumptions:
 		return
 
 	bean_stage_consumptions = 0
 	bean_stage_wait_ticks = BEAN_STAGE_ADVANCE_WAIT_TICKS
 
 	if bean_stage == BeanGrowthStage.SPROUT:
+		if _is_tree_lifecycle_type() and not _can_tree_lifecycle_stage_fit(BeanGrowthStage.VINE):
+			return
 		_set_bean_stage(BeanGrowthStage.VINE)
 	elif bean_stage == BeanGrowthStage.VINE:
+		if _is_tree_lifecycle_type() and not _can_tree_lifecycle_stage_fit(BeanGrowthStage.POD_READY):
+			return
 		bean_pod_ticks = 0
 		_set_bean_stage(BeanGrowthStage.POD_READY)
+
+
+func _apply_preview_bean_visual(stage_value: int) -> void:
+	if not _is_bean_lifecycle_enabled():
+		return
+	if not is_instance_valid(sprite):
+		return
+	var stage_path = _get_lifecycle_stage_texture_path(stage_value)
+	var stage_texture: Texture2D = _load_bean_stage_texture(stage_path)
+	if not is_instance_valid(stage_texture):
+		stage_texture = sprite_texture
+	sprite.texture = stage_texture
+	sprite.modulate = Color.WHITE
+	sprite.offset = _get_lifecycle_stage_sprite_offset(stage_value)
+	var stage_scale = _get_bean_stage_target_scale(stage_value) * _get_lifecycle_texture_scale_adjust(stage_texture)
+	if stage_value == BeanGrowthStage.DEAD:
+		sprite.modulate = Color(0.92, 0.86, 0.78, 1.0)
+	sprite.scale = stage_scale
+
+
+func _begin_harvest_visual_detach() -> void:
+	if not _is_bean_lifecycle_enabled():
+		return
+	if _harvest_visual_detached:
+		return
+	if bean_stage != BeanGrowthStage.POD_READY or not bean_harvest_ready:
+		return
+	_harvest_visual_detached = true
+	_apply_preview_bean_visual(BeanGrowthStage.VINE)
+
+
+func _cancel_harvest_visual_detach() -> void:
+	if not _harvest_visual_detached:
+		return
+	_harvest_visual_detached = false
+	if _is_bean_lifecycle_enabled() and bean_stage == BeanGrowthStage.POD_READY and bean_harvest_ready:
+		_apply_preview_bean_visual(BeanGrowthStage.POD_READY)
+
+
+func _commit_harvest_visual_detach() -> void:
+	_harvest_visual_detached = false
 
 
 func _try_harvest_to_inventory() -> bool:
@@ -847,9 +1195,14 @@ func _try_harvest_to_inventory() -> bool:
 	bean_stage_consumptions = 0
 	bean_stage_wait_ticks = 0
 	bean_respawn_requested = false
-	bean_post_harvest_senescence = true
-	bean_post_harvest_ticks = 0
+	if _is_tree_lifecycle_type():
+		bean_post_harvest_senescence = false
+		bean_post_harvest_ticks = 0
+	else:
+		bean_post_harvest_senescence = true
+		bean_post_harvest_ticks = 0
 	_set_bean_stage(BeanGrowthStage.VINE, true)
+	_commit_harvest_visual_detach()
 	if is_dragging:
 		is_dragging = false
 		Global.is_dragging = false
@@ -946,9 +1299,12 @@ func set_variables(a_dict) -> void:
 		bars[bar].tint_progress = Global.asset_colors[bar]
 	
 	bar_canvas = $CanvasLayer
-	if(Global.bars_on == false):
-		bar_canvas.visible = false
+	bar_canvas.visible = false
+	refresh_bar_visibility()
 	_update_bar_positions()
+	if is_instance_valid(sprite):
+		_last_occupancy_scale = sprite.scale
+	_sync_occupancy_cache()
 		
 
 
@@ -1143,22 +1499,24 @@ func kill_it():
 	if is_dragging:
 		is_dragging = false
 		Global.is_dragging = false
+	LevelHelpersRef.unregister_agent_occupancy(_get_level_root(), self)
 	self.call_deferred("queue_free")
 	self.dead = true
+	set_hover_focus(false)
+	var level_root = _get_level_root()
+	if is_instance_valid(level_root):
+		LevelHelpersRef.clear_focus_outline_if_owner(level_root, self)
 	_clear_active_selection_if_self()
 	
 	
-	new_buddies = true
-	#var children =  $"../../Agents".get_children()
-	#for child in children:
-		#if child.type == 'myco': 
-		
-	
-	
-	
-	for child in trade_buddies:#children:
-		child.draw_lines = true
-		child.new_buddies = true
+	_queue_dirty_update(true, true, false)
+	for child in trade_buddies:
+		if is_instance_valid(child):
+			if is_instance_valid(level_root) and level_root.has_method("request_agent_dirty"):
+				level_root.request_agent_dirty(child, true, true, false)
+			else:
+				child.draw_lines = true
+				child.new_buddies = true
 		
 	var children =  $"../../Agents".get_children()
 	var living = false
@@ -1175,6 +1533,7 @@ func kill_it():
 func _exit_tree() -> void:
 	_clear_drag_tile_hint()
 	_end_harvest_drag_proxy()
+	LevelHelpersRef.unregister_agent_occupancy(_get_level_root(), self)
 
 
 func evaporate():
@@ -1210,10 +1569,11 @@ func _input(event):
 		if event is InputEventMouseButton:
 			if event.button_index == MOUSE_BUTTON_LEFT:
 				var world_click_pos = Global.screen_to_world(self, event.position)
+				var clicked_self = _is_press_hit(world_click_pos)
 				
 				if event.pressed:
 					
-					if $Sprite2D.get_rect().has_point(to_local(world_click_pos)):
+					if clicked_self:
 						_press_started_here = true
 						if(Global.is_dragging == false and _can_start_user_drag()):
 							_harvest_drag_only = can_drag_for_inventory_harvest()
@@ -1221,6 +1581,7 @@ func _input(event):
 							Global.is_dragging = true
 							Global.active_agent = self
 							Global.prevent_auto_select = false
+							_refresh_all_agent_bar_visibility()
 							_cancel_tile_snap()
 							if _harvest_drag_only:
 								_start_harvest_drag_proxy()
@@ -1229,6 +1590,7 @@ func _input(event):
 						else:
 							Global.active_agent = self
 							Global.prevent_auto_select = false
+							_refresh_all_agent_bar_visibility()
 					else:
 						_press_started_here = false
 						#is_dragging = true
@@ -1248,15 +1610,18 @@ func _input(event):
 							_begin_snap_to_nearest_tile(position)
 						_harvest_drag_only = false
 						_clear_drag_tile_hint()
-					if pressed_here and $Sprite2D.get_rect().has_point(to_local(world_click_pos)):
+					if pressed_here and clicked_self:
 						#emit_signal("clicked_agent",self)
 						Global.active_agent = self
 						Global.prevent_auto_select = false
+						_refresh_all_agent_bar_visibility()
 						#print(" clicked: ", name)
 					
 
 func _physics_process(delta):
 	#_draw()
+	if _harvest_inventory_animating:
+		return
 	if is_dragging:
 		
 		var hit = false
@@ -1267,9 +1632,7 @@ func _physics_process(delta):
 		
 		if hit==true:
 			if supports_inventory_harvest():
-				if try_harvest_to_inventory():
-					_end_harvest_drag_proxy()
-					_harvest_drag_only = false
+				if _start_harvest_inventory_fly_in():
 					return
 				is_dragging = false
 				Global.is_dragging = false
@@ -1289,7 +1652,6 @@ func _physics_process(delta):
 			var t = min(1.0, delay * delta)
 			var dragged_target = position.lerp(get_global_mouse_position(), t)
 			position = _clamp_position_to_world(dragged_target)
-			_update_bar_positions()
 	
 	if(caught_by != null):
 		if(caught_by is Tuktuk):
@@ -1311,19 +1673,23 @@ func _process(delta: float) -> void:
 		_harvest_drag_only = false
 		_clear_drag_tile_hint()
 
-	if new_buddies:
-		generate_buddies()
-		new_buddies = false
-	if draw_lines and Global.draw_lines and self.type == "myco":
-		new_draw_line()
-		draw_lines = false
+	var level_root_for_dirty = _get_level_root()
+	var has_dirty_scheduler = is_instance_valid(level_root_for_dirty) and level_root_for_dirty.has_method("request_agent_dirty")
+	if not has_dirty_scheduler:
+		if new_buddies:
+			generate_buddies()
+			new_buddies = false
+		if draw_lines and Global.draw_lines and self.type == "myco":
+			new_draw_line()
+			draw_lines = false
+
 	if not Global.get_world_rect(self).has_point(position):
 		self.kill_it()
 	var is_active = is_instance_valid(self) and is_instance_valid(Global.active_agent) and Global.active_agent.name == self.name
+	var level_root = _get_level_root()
+	if is_instance_valid(level_root):
+		LevelHelpersRef.clear_focus_outline_if_owner(level_root, self)
 	if(is_active):
-		if draw_box == true:
-			draw_selected_box()
-			draw_box=false
 		var direction = Input.get_vector("left","right","up","down")
 		if direction != Vector2.ZERO and _can_user_reposition():
 			_keyboard_moving = true
@@ -1358,25 +1724,31 @@ func _process(delta: float) -> void:
 	else:
 		_clear_drag_tile_hint()
 
+	refresh_bar_visibility()
 	if is_instance_valid(bar_canvas) and bar_canvas.visible:
-		_update_bar_positions()
+		_bar_update_accum += delta
+		if _bar_update_accum >= _get_adaptive_bar_update_interval():
+			_bar_update_accum = 0.0
+			if _did_camera_move_since_last_bar_update():
+				_update_bar_positions()
 			
 	if(position != last_position):
-			#move_and_slide()
+		var old_pos = last_position
 		last_position = position
-		#move_and_slide()
-		#print("setting ")
-		new_buddies = true
-		var children =  $"../../Agents".get_children()
-		for child in children:
-			#if child.type == 'myco': 
-			child.draw_lines = true
-			child.new_buddies = true
-			
-	
-		#if draw_box == true:
-		#	draw_selected_box()
+		if is_instance_valid(level_root) and level_root.has_method("mark_agent_moved"):
+			level_root.mark_agent_moved(self, old_pos, position)
+		else:
+			_queue_dirty_update(true, true, false)
+			_sync_occupancy_cache()
 		draw_box = true
+		if is_instance_valid(bar_canvas) and bar_canvas.visible:
+			_bar_update_accum = 0.0
+			_update_bar_positions()
+
+	if str(type) == "tree" and is_instance_valid(sprite):
+		if sprite.scale.distance_to(_last_occupancy_scale) > 0.001:
+			_last_occupancy_scale = sprite.scale
+			_sync_occupancy_cache()
 
 
 
@@ -1384,94 +1756,25 @@ func _process(delta: float) -> void:
 func generate_buddies() -> void:
 	var children =  $"../../Agents".get_children()
 	trade_buddies = []
-	#print(self.name, " new buddies children: ", children)
 	
 	for child in children:
-		if child.type == 'myco':
-			var over_full = false
-			child.num_connectors = 0
-			
-			
-			var dist = global_position.distance_to(child.global_position)
-			if dist <= child.buddy_radius:
-				#print("child in dist,", dist, " len: ", len(trade_buddies) , " max: ", num_buddies)
-				if len(trade_buddies) < num_buddies:
-					trade_buddies.append(child)
+		if not is_instance_valid(child):
+			continue
+		if bool(child.get("dead")):
+			continue
+		if child.type != "myco":
+			continue
+		var dist = global_position.distance_to(child.global_position)
+		if dist <= child.buddy_radius and len(trade_buddies) < num_buddies:
+			trade_buddies.append(child)
 		
 func new_draw_line():
-	for line in $"../../Lines".get_children():
-		for my_line in my_lines:
-			if(my_line == line):
-				line.clear_points()	
-				line.queue_free()
-		
-	my_lines = []
-	#var g = Gradient.new()
-	var start_color = Color(Color.ANTIQUE_WHITE,0.3)
-	if(Global.social_mode):
-		start_color = Color(Color.SADDLE_BROWN,0.3)
-		
-	#var end_color = Color(Color.ANTIQUE_WHITE,0.3)
-	
-	#g.set_color( 0,  start_color)
-	#g.set_color( 1,  end_color )
-	#g.interpolation_mode = Gradient.GRADIENT_INTERPOLATE_LINEAR		# 0
-	#g.interpolation_mode = Gradient.GRADIENT_INTERPOLATE_CONSTANT	# 1
-	#g.interpolation_mode = Gradient.GRADIENT_INTERPOLATE_CUBIC		# 2
-
-	#var from = to_local(position)
-	var from = position
-	#print("from: ", from, " x: ", from.x, " y: ", from.y)
-	#from = from.normalized() *100
-	if($"../../Agents" != null):
-		#print("<><><>>< ", position, " ", global_position)
-		for agent in $"../../Agents".get_children():
-			if(is_instance_valid(agent)):
-				if agent.type != "cloud" and agent.dead != true and agent.name != self.name:
-					for buddy in agent.trade_buddies:
-						if is_instance_valid(buddy):
-							if buddy.name == self.name:
-								
-								var myco_line1 = Line2D.new()
-								myco_line1.width = 2
-								myco_line1.z_as_relative = false
-								myco_line1.antialiased = true
-								myco_line1.global_rotation = 0
-								#myco_line1.modulate = start_color
-								myco_line1.modulate = start_color#set_gradient( g )
-								myco_line1.set_meta("endpoint_a", self)
-								myco_line1.set_meta("endpoint_b", agent)
-								myco_line1.set_meta("base_color", start_color)
-								#var to = to_local(agent.position)#+agent.global_position		
-								var to = agent.position#+agent.global_position							
-								var new_pos1 = Vector2(to.x,from.y)
-								var new_pos2 = Vector2(from.x,to.y)
-								
-								
-								myco_line1.add_point( from )
-								myco_line1.add_point( new_pos1 )
-								myco_line1.add_point( to )
-								
-								var myco_line2 = Line2D.new()
-								myco_line2.width = 2
-								myco_line2.z_as_relative = false
-								myco_line2.antialiased = true
-								#myco_line2.global_rotation = 0
-								myco_line2.modulate = start_color
-								myco_line2.set_meta("endpoint_a", self)
-								myco_line2.set_meta("endpoint_b", agent)
-								myco_line2.set_meta("base_color", start_color)
-								#var to = to_local(agent.position)#+agent.global_position		
-								
-								myco_line2.add_point( from )
-								myco_line2.add_point( new_pos2 )
-								myco_line2.add_point( to )
-								
-								#myco_line.z_index = -1
-								$"../../Lines".add_child(myco_line1)
-								my_lines.append(myco_line1)
-								$"../../Lines".add_child(myco_line2)
-								my_lines.append(myco_line2)
+	var level_root = _get_level_root()
+	var lines_root = get_node_or_null("../../Lines")
+	var agents_root = _get_agents_root()
+	if not is_instance_valid(level_root) or not is_instance_valid(lines_root) or not is_instance_valid(agents_root):
+		return
+	LevelHelpersRef.sync_myco_trade_lines(lines_root, agents_root, Global.social_mode)
 
 
 
@@ -1509,6 +1812,8 @@ func _on_growth_timer_timeout() -> void:
 		if assets[res] <= 0:
 			all_in = false
 	var starvation_alpha_step := _get_starvation_alpha_step()
+	if _is_tree_lifecycle_type():
+		starvation_alpha_step /= TREE_STARVATION_DURATION_MULTIPLIER
 
 	if _is_bean_lifecycle_enabled():
 		var consumed_all_nutrients := false
@@ -1531,7 +1836,17 @@ func _on_growth_timer_timeout() -> void:
 			if new_alpha_down < low_alpha:
 				new_alpha_down = low_alpha
 				if Global.is_killing and killable:
-					if bean_stage == BeanGrowthStage.POD_READY or bean_post_harvest_senescence:
+					if _is_tree_lifecycle_type():
+						bean_harvest_ready = false
+						bean_dead_ticks = 0
+						bean_respawn_wait_ticks = BEAN_DEAD_RESPAWN_DELAY_TICKS
+						bean_respawn_requested = false
+						bean_post_harvest_senescence = false
+						bean_post_harvest_ticks = 0
+						bean_residue_pending = false
+						bean_residue_emitted = false
+						_set_bean_stage(BeanGrowthStage.DEAD)
+					elif bean_stage == BeanGrowthStage.POD_READY or bean_post_harvest_senescence:
 						bean_harvest_ready = false
 						bean_dead_ticks = 0
 						bean_respawn_wait_ticks = BEAN_DEAD_RESPAWN_DELAY_TICKS
@@ -1595,6 +1910,9 @@ func _on_growth_timer_timeout() -> void:
 	if newScale != $Sprite2D.scale:
 		var tween = get_tree().create_tween()
 		tween.tween_property($Sprite2D, "scale", newScale, 0.05)
+		if str(type) == "tree":
+			_last_occupancy_scale = newScale
+			_sync_occupancy_cache()
 		#tween.set_parallel(true)	
 		
 	if newScale.x >= max_scale and newScale.y >= max_scale and modulate.a >= 1:
@@ -1624,6 +1942,7 @@ func have_babies(force_spawn: bool = false)  -> void:
 	
 	var size_x = sprite.get_rect().size[0]
 	var size_y = sprite.get_rect().size[1]
+	var rng = random
 	
 	while(baby_made == false and current_round < max_rounds):
 		if(Global.is_max_babies):
@@ -1633,7 +1952,6 @@ func have_babies(force_spawn: bool = false)  -> void:
 		new_x = global_position.x
 		new_y = global_position.y
 		current_round+=1
-		var rng :=  RandomNumberGenerator.new()
 		#print(" sizes: x: ", sprite.get_rect().size[0], " y: ", sprite.get_rect().size[1])
 		var random_x = rng.randi_range(-1*size_x*4,size_x*4)
 		var random_y = rng.randi_range(-1*size_y*4,size_y*4)
@@ -1713,9 +2031,15 @@ func _on_body_entered(body: Node2D) -> void:
 			
 			
 			body.going = Vector2(1,randi_range(-1,1))
-			#var children =  $"../../Agents".get_children()
-			for child in trade_buddies:# children:
-				child.draw_lines = true
-				child.new_buddies = true
+			LevelHelpersRef.unregister_agent_occupancy(_get_level_root(), self)
+			var level_root = _get_level_root()
+			for child in trade_buddies:
+				if not is_instance_valid(child):
+					continue
+				if is_instance_valid(level_root) and level_root.has_method("request_agent_dirty"):
+					level_root.request_agent_dirty(child, true, true, false)
+				else:
+					child.draw_lines = true
+					child.new_buddies = true
 
 			#sprite.z_index = 10

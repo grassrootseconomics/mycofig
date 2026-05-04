@@ -11,7 +11,7 @@ func _reset_run_state() -> void:
 	Global.active_agent = null
 	Global.is_dragging = false
 	Global.stage_inc = 0
-	Global.bars_on = true
+	Global.bars_on = false
 	Global.allow_agent_reposition = false
 
 
@@ -47,7 +47,7 @@ func _on_tutorial_pressed() -> void:
 	Global.is_killing = false
 	Global.is_max_babies = false
 	Global.draw_lines = true
-	Global.bars_on = true
+	Global.bars_on = false
 	Global.stage = 1
 	Global.inventory = { #how many of each plant do we have to use
 	"bean": 5,
@@ -69,7 +69,7 @@ func _on_free_garden_pressed() -> void:
 	Global.is_birding = false
 	Global.is_killing = true
 	Global.is_max_babies = true
-	Global.bars_on = true
+	Global.bars_on = false
 	Global.draw_lines = false
 	Global.inventory = { #how many of each plant do we have to use
 	"bean": 60,
@@ -92,7 +92,7 @@ func _on_challenge_button_pressed() -> void:
 	Global.is_birding = true
 	Global.is_killing = true
 	Global.is_max_babies = true
-	Global.bars_on = true
+	Global.bars_on = false
 	Global.draw_lines = true
 	Global.inventory = { #how many of each plant do we have to use
 	"bean": 12,
@@ -115,7 +115,7 @@ func _on_cofi_button_pressed() -> void:
 	Global.is_birding = false
 	Global.is_killing = false
 	Global.is_max_babies = false
-	Global.bars_on = true
+	Global.bars_on = false
 	Global.draw_lines = true
 	Global.baby_mode = false
 	

@@ -3,12 +3,21 @@ extends Node2D
 #to run: python3 -m http.server  .. browse to localhost:8000
 
 const LevelHelpersRef = preload("res://scenes/level_helpers.gd")
+const PerfMonitorRef = preload("res://scenes/perf_monitor.gd")
 const TEX_SQUASH = preload("res://graphics/squash.png")
-const TEX_TREE = preload("res://graphics/baobab.png")
+const TEX_TREE = preload("res://graphics/acorn_32.png")
 const TEX_MAIZE = preload("res://graphics/maize.png")
 const TEX_BEAN = preload("res://graphics/bean.png")
 const TEX_CLOUD = preload("res://graphics/cloud.png")
 const TEX_MYCO = preload("res://graphics/mushroom_32.png")
+const DEFAULT_PARENT_BOUND_RADIUS_TILES := 4
+const MYCO_HEALTHY_ANCHOR_RADIUS_TILES := 4
+const PARENT_BOUNDED_TYPES := {
+	"myco": true,
+	"bean": true,
+	"squash": true,
+	"maize": true
+}
 
 var plant_scene: PackedScene = load("res://scenes/plant.tscn")
 var trade_scene: PackedScene = load("res://scenes/trade.tscn")
@@ -33,6 +42,31 @@ var num_squash = 1
 var is_dragging = false
 var delay = 10
 var inventory_preview_lines: Array = []
+var perf_monitor: Node = null
+var _line_visual_refresh_accum := 0.0
+var _dirty_refresh_accum := 0.0
+var _dirty_buddies_agents: Dictionary = {}
+var _dirty_lines_agents: Dictionary = {}
+var _dirty_tile_hints_agents: Dictionary = {}
+var _trade_pool: Array = []
+var _shutdown_cleanup_done := false
+
+
+func _is_headless_runtime() -> bool:
+	return DisplayServer.get_name() == "headless" or OS.has_feature("dedicated_server")
+
+
+func _mute_runtime_audio_if_headless() -> void:
+	if not _is_headless_runtime():
+		return
+	LevelHelpersRef.stop_audio_players([
+		$BirdSound,
+		$BirdLong,
+		$CarSound,
+		$SquelchSound,
+		$TwinkleSound,
+		$BushSound
+	])
 
 
 func _get_world_foundation() -> Node:
@@ -117,6 +151,115 @@ func _tile_pos_from_center(world: Node, center: Vector2i, delta: Vector2i) -> Ve
 	return world.tile_to_world_center(coord)
 
 
+func _is_parent_bounded_spawn_type(spawn_name: String) -> bool:
+	return PARENT_BOUNDED_TYPES.has(spawn_name)
+
+
+func _tile_chebyshev_distance(a: Vector2i, b: Vector2i) -> int:
+	return maxi(abs(a.x - b.x), abs(a.y - b.y))
+
+
+func _is_valid_parent_anchor(anchor: Variant, ignore_agent: Variant = null) -> bool:
+	if not is_instance_valid(anchor):
+		return false
+	if is_instance_valid(ignore_agent) and anchor == ignore_agent:
+		return false
+	if bool(anchor.get("dead")):
+		return false
+	return str(anchor.get("type")) == "myco"
+
+
+func _find_nearest_living_myco_anchor(spawn_pos: Vector2, ignore_agent: Variant = null) -> Node:
+	var world = _get_world_foundation()
+	var best_anchor: Node = null
+	var best_dist := INF
+	if _supports_world_tiles(world):
+		var target_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(spawn_pos)))
+		for agent in $Agents.get_children():
+			if not _is_valid_parent_anchor(agent, ignore_agent):
+				continue
+			var coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(agent.global_position)))
+			var dist = float(_tile_chebyshev_distance(coord, target_coord))
+			if dist < best_dist:
+				best_dist = dist
+				best_anchor = agent
+		return best_anchor
+	for agent in $Agents.get_children():
+		if not _is_valid_parent_anchor(agent, ignore_agent):
+			continue
+		var dist = agent.global_position.distance_to(spawn_pos)
+		if dist < best_dist:
+			best_dist = dist
+			best_anchor = agent
+	return best_anchor
+
+
+func _find_parent_bounded_open_tile(world: Node, start_coord: Vector2i, parent_coord: Vector2i, max_parent_tiles: int, ignore_agent: Variant = null) -> Vector2i:
+	var safe_max = maxi(max_parent_tiles, 0)
+	if safe_max <= 0:
+		return Vector2i(-1, -1)
+	var columns = max(int(world.get("columns")), 1)
+	var rows = max(int(world.get("rows")), 1)
+	var max_search = maxi(columns, rows)
+	for radius in range(0, max_search + 1):
+		for dy in range(-radius, radius + 1):
+			for dx in range(-radius, radius + 1):
+				if radius > 0 and abs(dx) != radius and abs(dy) != radius:
+					continue
+				var coord = start_coord + Vector2i(dx, dy)
+				if not world.in_bounds(coord):
+					continue
+				if _tile_chebyshev_distance(coord, parent_coord) > safe_max:
+					continue
+				if LevelHelpersRef.is_tile_occupied(self, $Agents, coord, ignore_agent):
+					continue
+				return coord
+	return Vector2i(-1, -1)
+
+
+func _resolve_parent_bounded_spawn_pos(spawn_pos: Vector2, parent_anchor: Variant, max_parent_tiles: int, ignore_agent: Variant = null, require_exact_tile: bool = false) -> Dictionary:
+	var result := {
+		"ok": false,
+		"pos": spawn_pos,
+		"coord": Vector2i(-1, -1),
+		"parent_coord": Vector2i(-1, -1)
+	}
+	var world = _get_world_foundation()
+	if not _supports_world_tiles(world):
+		result["ok"] = _is_valid_parent_anchor(parent_anchor, ignore_agent)
+		return result
+	if not _is_valid_parent_anchor(parent_anchor, ignore_agent):
+		return result
+	var safe_max = maxi(max_parent_tiles, 0)
+	if safe_max <= 0:
+		return result
+
+	var desired_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(spawn_pos)))
+	var parent_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(parent_anchor.global_position)))
+	result["parent_coord"] = parent_coord
+	var desired_in_range = _tile_chebyshev_distance(desired_coord, parent_coord) <= safe_max
+	var resolved_coord = Vector2i(-1, -1)
+
+	if desired_in_range:
+		if require_exact_tile:
+			if not LevelHelpersRef.is_tile_occupied(self, $Agents, desired_coord, ignore_agent):
+				resolved_coord = desired_coord
+		else:
+			if not LevelHelpersRef.is_tile_occupied(self, $Agents, desired_coord, ignore_agent):
+				resolved_coord = desired_coord
+			else:
+				resolved_coord = _find_parent_bounded_open_tile(world, desired_coord, parent_coord, safe_max, ignore_agent)
+	else:
+		resolved_coord = _find_parent_bounded_open_tile(world, desired_coord, parent_coord, safe_max, ignore_agent)
+
+	if resolved_coord.x < 0 or resolved_coord.y < 0:
+		return result
+	result["ok"] = true
+	result["coord"] = resolved_coord
+	result["pos"] = world.tile_to_world_center(resolved_coord)
+	return result
+
+
 func _refund_inventory_item(agent_name: String, amount: int = 1) -> void:
 	if agent_name == "":
 		return
@@ -156,7 +299,10 @@ func _count_living_myco(ignore_agent: Variant = null) -> int:
 	return total
 
 
-func _find_adjacent_healthy_myco_anchor(world: Node, coord: Vector2i, ignore_agent: Variant = null) -> Node:
+func _find_healthy_myco_anchor_in_radius(world: Node, coord: Vector2i, max_radius_tiles: int, ignore_agent: Variant = null) -> Node:
+	var safe_radius = maxi(max_radius_tiles, 0)
+	var best_anchor: Node = null
+	var best_dist := INF
 	for agent in $Agents.get_children():
 		if not is_instance_valid(agent):
 			continue
@@ -169,14 +315,18 @@ func _find_adjacent_healthy_myco_anchor(world: Node, coord: Vector2i, ignore_age
 		var myco_coord = Vector2i(world.world_to_tile(agent.global_position))
 		if not world.in_bounds(myco_coord):
 			continue
-		if maxi(abs(myco_coord.x - coord.x), abs(myco_coord.y - coord.y)) > 1:
+		var dist = maxi(abs(myco_coord.x - coord.x), abs(myco_coord.y - coord.y))
+		if dist > safe_radius:
 			continue
 		var myco_tile = world.get_tile(myco_coord)
 		if myco_tile.is_empty():
 			continue
-		if int(myco_tile.get("stage", 0)) >= 3:
-			return agent
-	return null
+		if int(myco_tile.get("stage", 0)) < 3:
+			continue
+		if float(dist) < best_dist:
+			best_dist = float(dist)
+			best_anchor = agent
+	return best_anchor
 
 
 func _validate_myco_spawn(spawn_pos: Vector2, ignore_agent: Variant = null) -> Dictionary:
@@ -211,12 +361,98 @@ func _validate_myco_spawn(spawn_pos: Vector2, ignore_agent: Variant = null) -> D
 		result["ok"] = true
 		return result
 
-	var anchor = _find_adjacent_healthy_myco_anchor(world, coord, ignore_agent)
+	var anchor = _find_healthy_myco_anchor_in_radius(world, coord, MYCO_HEALTHY_ANCHOR_RADIUS_TILES, ignore_agent)
 	if not is_instance_valid(anchor):
 		return result
 	result["ok"] = true
 	result["anchor"] = anchor
 	return result
+
+
+func _agent_key(agent: Variant) -> int:
+	if not is_instance_valid(agent):
+		return -1
+	return int(agent.get_instance_id())
+
+
+func request_agent_dirty(agent: Variant, buddies: bool = true, lines: bool = true, tile_hint: bool = false) -> void:
+	var key = _agent_key(agent)
+	if key < 0:
+		return
+	if buddies:
+		_dirty_buddies_agents[key] = agent
+	if lines and str(agent.get("type")) != "cloud":
+		_dirty_lines_agents[key] = agent
+	if tile_hint:
+		_dirty_tile_hints_agents[key] = agent
+
+
+func request_all_agents_dirty() -> void:
+	for agent in $Agents.get_children():
+		request_agent_dirty(agent, true, true, false)
+
+
+func mark_agent_moved(agent: Variant, old_pos: Vector2, new_pos: Vector2) -> void:
+	LevelHelpersRef.mark_agents_dirty_for_movement(self, $Agents, agent, old_pos, new_pos)
+	LevelHelpersRef.sync_agent_occupancy(self, agent)
+
+
+func _process_dirty_queues() -> void:
+	if _dirty_buddies_agents.is_empty() and _dirty_lines_agents.is_empty() and _dirty_tile_hints_agents.is_empty():
+		return
+	for key in _dirty_buddies_agents.keys():
+		var agent = _dirty_buddies_agents[key]
+		if not is_instance_valid(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if agent.has_method("generate_buddies"):
+			agent.generate_buddies()
+	for key in _dirty_tile_hints_agents.keys():
+		var agent = _dirty_tile_hints_agents[key]
+		if not is_instance_valid(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if agent.has_method("_update_drag_tile_hint"):
+			var pos = agent.get("position")
+			if typeof(pos) == TYPE_VECTOR2:
+				agent._update_drag_tile_hint(pos)
+
+	if Global.draw_lines and not _dirty_lines_agents.is_empty():
+		LevelHelpersRef.sync_myco_trade_lines($Lines, $Agents, false, _dirty_lines_agents.values())
+
+	_dirty_buddies_agents.clear()
+	_dirty_lines_agents.clear()
+	_dirty_tile_hints_agents.clear()
+
+
+func _setup_perf_monitor() -> void:
+	if is_instance_valid(perf_monitor):
+		return
+	perf_monitor = PerfMonitorRef.new()
+	perf_monitor.name = "PerfMonitor"
+	perf_monitor.overlay_enabled = false
+	perf_monitor.adaptive_quality_enabled = true
+	perf_monitor.log_to_files = Global.perf_metrics_enabled
+	add_child(perf_monitor)
+	perf_monitor.configure(self, $Agents, $Trades, $Lines, _get_world_foundation())
+
+
+func _recycle_trade(trade: Node) -> void:
+	if not is_instance_valid(trade):
+		return
+	if trade.get_parent() != null:
+		trade.get_parent().remove_child(trade)
+	trade.visible = false
+	trade.set_process(false)
+	if trade.has_method("set_deferred"):
+		trade.set_deferred("monitoring", false)
+		trade.set_deferred("monitorable", false)
+	var shape = trade.get_node_or_null("CollisionShape2D")
+	if is_instance_valid(shape):
+		shape.set_deferred("disabled", true)
+	_trade_pool.append(trade)
 
 
 func _ready():
@@ -228,9 +464,12 @@ func _ready():
 	$UI.connect('new_agent',_on_new_agent)
 	$UI.connect("inventory_drag_preview", _on_inventory_drag_preview)
 	$UI.setup()
+	_mute_runtime_audio_if_headless()
+	_setup_perf_monitor()
 	Global.prevent_auto_select = false
 	DisplayServer.window_set_title("Plants Gardening")
-	$BirdLong.play()
+	if not _is_headless_runtime():
+		$BirdLong.play()
 	var world = _get_world_foundation()
 	if is_instance_valid(world) and world.has_method("set_context"):
 		world.set_context(Global.mode, "plants")
@@ -253,8 +492,8 @@ func _ready():
 		var myco_position = _tile_pos_from_center(world, center_coord, Vector2i(0, 0))
 		var bean_position = _tile_pos_from_center(world, center_coord, Vector2i(-1, 0))
 		var squash_position = _tile_pos_from_center(world, center_coord, Vector2i(0, -1))
-		var maize_position = _tile_pos_from_center(world, center_coord, Vector2i(1, 0))
-		var tree_position = _tile_pos_from_center(world, center_coord, Vector2i(0, 1))
+		var maize_position = _tile_pos_from_center(world, center_coord, Vector2i(0, 1))
+		var tree_position = _tile_pos_from_center(world, center_coord, Vector2i(1, 0))
 
 		myco = make_myco(myco_position)
 		make_bean(bean_position)
@@ -288,6 +527,7 @@ func _ready():
 		myco = make_myco(myco_position)
 
 	Global.active_agent = myco
+	LevelHelpersRef.refresh_agent_bar_visibility($Agents)
 	
 	if(Global.is_raining == true):
 		var cloud_width = mid_width + 250
@@ -295,6 +535,10 @@ func _ready():
 		var cloud_position = Vector2(cloud_width,cloud_height)
 
 		make_cloud(cloud_position)
+
+	LevelHelpersRef.rebuild_world_occupancy_cache(self, $Agents)
+	request_all_agents_dirty()
+	_process_dirty_queues()
 
 	
 	#var bird = bird_scene.instantiate()
@@ -314,7 +558,15 @@ func _input(event):
 
 
 func _process(_delta: float) -> void:
-	LevelHelpersRef.refresh_trade_line_visuals($Lines)
+	LevelHelpersRef.update_agent_hover_focus(self, $Agents)
+	_dirty_refresh_accum += _delta
+	if _dirty_refresh_accum >= Global.get_dirty_refresh_interval():
+		_dirty_refresh_accum = 0.0
+		_process_dirty_queues()
+	_line_visual_refresh_accum += _delta
+	if _line_visual_refresh_accum >= Global.get_line_visual_refresh_interval():
+		_line_visual_refresh_accum = 0.0
+		LevelHelpersRef.refresh_trade_line_visuals($Lines)
 
 
 func _on_inventory_drag_preview(agent_name: String, world_pos: Vector2, active: bool) -> void:
@@ -338,9 +590,17 @@ func _on_agent_trade(path_dict) -> void:
 
 
 func _spawn_trade(path_dict) -> void:
-	#print("Found Trade signal dict: ", path_dict)
-	var trade = trade_scene.instantiate()
-	trade.set_variables(path_dict)
+	var trade = null
+	if not _trade_pool.is_empty():
+		trade = _trade_pool.pop_back()
+	else:
+		trade = trade_scene.instantiate()
+	if trade.has_method("set_pool_owner"):
+		trade.set_pool_owner(self)
+	if trade.has_method("activate_trade"):
+		trade.activate_trade(path_dict)
+	else:
+		trade.set_variables(path_dict)
 	$Trades.add_child(trade)
 	
 func update_bars(path_dict)  -> void:
@@ -348,9 +608,9 @@ func update_bars(path_dict)  -> void:
 		if Global.active_agent.name == path_dict["from_agent"].name or Global.active_agent.name == path_dict["to_agent"].name:
 			for label in $UI.resContainer.get_children():
 				#print("g. << inside asadas: ", label.name, " : ", label.text, path_dict["trade_asset"])
-					if label.name == path_dict["trade_asset"]:
-						#print("h. ><><< inside asadas, lable", label.name, " : ", label.text)
-						label.text = str(path_dict["trade_asset"]) + str(" ") + str(Global.active_agent.assets[path_dict["trade_asset"]])
+				if label.name == path_dict["trade_asset"]:
+					#print("h. ><><< inside asadas, lable", label.name, " : ", label.text)
+					label.text = str(path_dict["trade_asset"]) + str(" ") + str(Global.active_agent.assets[path_dict["trade_asset"]])
 
 
 func _on_agent_lifecycle_residue(coord: Vector2i, biomass: float, source_type: String) -> void:
@@ -400,26 +660,78 @@ func _on_new_agent(agent_dict) -> void:
 	var spawn_pos = agent_dict["pos"]
 	var ignore_agent = agent_dict.get("ignore_agent", null)
 	var require_exact_tile = bool(agent_dict.get("require_exact_tile", false))
+	var allow_replace = bool(agent_dict.get("allow_replace", false))
 	var from_inventory = bool(agent_dict.get("from_inventory", false))
 	var myco_gate_result: Dictionary = {}
-	if bool(agent_dict.get("allow_replace", false)):
-		var replace_target = _find_replaceable_agent_at_world_pos(spawn_pos, ignore_agent)
-		if is_instance_valid(replace_target):
-			ignore_agent = replace_target
-			if replace_target.has_method("kill_it"):
-				replace_target.kill_it()
+	var spawn_already_snapped := false
+
+	var is_parent_bounded = _is_parent_bounded_spawn_type(spawn_name) and (from_inventory or agent_dict.has("parent_anchor") or agent_dict.has("max_parent_tiles"))
+	var parent_anchor = agent_dict.get("parent_anchor", null)
+	var max_parent_tiles = int(agent_dict.get("max_parent_tiles", DEFAULT_PARENT_BOUND_RADIUS_TILES))
+	if is_parent_bounded:
+		if max_parent_tiles <= 0:
+			max_parent_tiles = DEFAULT_PARENT_BOUND_RADIUS_TILES
+		if not _is_valid_parent_anchor(parent_anchor, ignore_agent):
+			parent_anchor = _find_nearest_living_myco_anchor(spawn_pos, ignore_agent)
+		if not _is_valid_parent_anchor(parent_anchor, ignore_agent):
+			if from_inventory:
+				_refund_inventory_item(spawn_name, 1)
+			return
+		agent_dict["parent_anchor"] = parent_anchor
+		agent_dict["max_parent_tiles"] = max_parent_tiles
+		if not agent_dict.has("spawn_anchor"):
+			agent_dict["spawn_anchor"] = parent_anchor
+
+	if allow_replace:
+		var replace_pos = spawn_pos
+		if is_parent_bounded:
+			var world_for_replace = _get_world_foundation()
+			if _supports_world_tiles(world_for_replace):
+				var desired_coord = _clamp_tile_coord(world_for_replace, Vector2i(world_for_replace.world_to_tile(spawn_pos)))
+				var parent_coord = _clamp_tile_coord(world_for_replace, Vector2i(world_for_replace.world_to_tile(parent_anchor.global_position)))
+				if _tile_chebyshev_distance(desired_coord, parent_coord) <= max_parent_tiles:
+					replace_pos = world_for_replace.tile_to_world_center(desired_coord)
+				else:
+					allow_replace = false
 			else:
-				replace_target.call_deferred("queue_free")
-			require_exact_tile = true
-	if require_exact_tile:
+				allow_replace = false
+		if allow_replace:
+			var replace_target = _find_replaceable_agent_at_world_pos(replace_pos, ignore_agent)
+			if is_instance_valid(replace_target):
+				var replace_type = str(replace_target.get("type"))
+				if replace_type == "tree" or replace_type == "myco":
+					# Inventory drops should never destroy/replace existing trees or fungi.
+					allow_replace = false
+				else:
+					ignore_agent = replace_target
+					if replace_target.has_method("kill_it"):
+						replace_target.kill_it()
+					else:
+						replace_target.call_deferred("queue_free")
+					require_exact_tile = true
+					spawn_pos = replace_pos
+
+	if is_parent_bounded:
+		var parent_spawn = _resolve_parent_bounded_spawn_pos(spawn_pos, parent_anchor, max_parent_tiles, ignore_agent, require_exact_tile)
+		if not bool(parent_spawn["ok"]):
+			if from_inventory:
+				_refund_inventory_item(spawn_name, 1)
+			return
+		spawn_pos = parent_spawn["pos"]
+		require_exact_tile = true
+		spawn_already_snapped = true
+	elif require_exact_tile:
 		var exact_spawn = _resolve_exact_tile_spawn_pos(spawn_pos, ignore_agent)
 		if not bool(exact_spawn["ok"]):
 			if from_inventory:
 				_refund_inventory_item(spawn_name, 1)
 			return
 		spawn_pos = exact_spawn["pos"]
+		spawn_already_snapped = true
+
 	if spawn_name == "myco" and not require_exact_tile:
 		spawn_pos = _resolve_tile_spawn_pos(spawn_pos)
+		spawn_already_snapped = true
 		myco_gate_result = _validate_myco_spawn(spawn_pos, ignore_agent)
 		if not bool(myco_gate_result["ok"]):
 			if from_inventory:
@@ -429,13 +741,13 @@ func _on_new_agent(agent_dict) -> void:
 			agent_dict["spawn_anchor"] = myco_gate_result["anchor"]
 	if spawn_name == "squash":
 		$TwinkleSound.play()
-		new_agent = make_squash(spawn_pos)
+		new_agent = make_squash(spawn_pos, spawn_already_snapped)
 	elif spawn_name == "bean":
 		$TwinkleSound.play()
-		new_agent = make_bean(spawn_pos)
+		new_agent = make_bean(spawn_pos, spawn_already_snapped)
 	elif spawn_name == "maize":
 		$TwinkleSound.play()
-		new_agent = make_maize(spawn_pos)
+		new_agent = make_maize(spawn_pos, spawn_already_snapped)
 	elif spawn_name == "myco":
 		if myco_gate_result.is_empty():
 			myco_gate_result = _validate_myco_spawn(spawn_pos, ignore_agent)
@@ -446,23 +758,26 @@ func _on_new_agent(agent_dict) -> void:
 		if is_instance_valid(myco_gate_result["anchor"]):
 			agent_dict["spawn_anchor"] = myco_gate_result["anchor"]
 		$SquelchSound.play()
-		new_agent = make_myco(spawn_pos, true)
+		new_agent = make_myco(spawn_pos, spawn_already_snapped)
 	elif spawn_name == "tree":
 		$BushSound.play()
-		new_agent = make_tree(spawn_pos)
+		new_agent = make_tree(spawn_pos, spawn_already_snapped)
 	
 	if is_instance_valid(new_agent):
 		if agent_dict.has("spawn_anchor"):
 			LevelHelpersRef.ensure_spawn_buddy_link(new_agent, agent_dict["spawn_anchor"])
-		LevelHelpersRef.mark_all_buddies_dirty($Agents)
-		LevelHelpersRef.mark_myco_lines_dirty($Agents)
+		LevelHelpersRef.sync_agent_occupancy(self, new_agent)
+		request_all_agents_dirty()
 	if(Global.active_agent == null and not Global.prevent_auto_select):
 		Global.active_agent = new_agent
+		LevelHelpersRef.refresh_agent_bar_visibility($Agents)
 			
-func make_squash(pos):
+func make_squash(pos, already_snapped: bool = false):
 	#print("Clicked On Squash. making")
 	
-	var squash_position = _resolve_tile_spawn_pos(pos)
+	var squash_position = pos
+	if not already_snapped:
+		squash_position = _resolve_tile_spawn_pos(pos)
 	
 	var named = "Squash_" + str($Agents.get_child_count()+1)
 	
@@ -480,14 +795,17 @@ func make_squash(pos):
 	$Agents.add_child(squash)
 	LevelHelpersRef.connect_core_agent_signals(squash, _on_agent_trade, _on_new_agent, _on_update_score)
 	_connect_lifecycle_residue_signal(squash)
-	LevelHelpersRef.mark_myco_lines_dirty($Agents)
+	LevelHelpersRef.sync_agent_occupancy(self, squash)
+	request_all_agents_dirty()
 	
 	return squash
 
-func make_tree(pos):
+func make_tree(pos, already_snapped: bool = false):
 	#print("Clicked On Squash. making")
 	
-	var tree_position = _resolve_tile_spawn_pos(pos)
+	var tree_position = pos
+	if not already_snapped:
+		tree_position = _resolve_tile_spawn_pos(pos)
 	
 	var named = "Tree_" + str($Agents.get_child_count()+1)
 	
@@ -505,7 +823,8 @@ func make_tree(pos):
 	tree.position = LevelHelpersRef.resolve_snapped_position_for_agent(self, $Agents, tree, tree_position)
 	LevelHelpersRef.connect_core_agent_signals(tree, _on_agent_trade, _on_new_agent, _on_update_score)
 	_connect_lifecycle_residue_signal(tree)
-	LevelHelpersRef.mark_myco_lines_dirty($Agents)
+	LevelHelpersRef.sync_agent_occupancy(self, tree)
+	request_all_agents_dirty()
 	return tree
 	
 	
@@ -522,8 +841,10 @@ func _spawn_bird():
 	$Animals.add_child(bird)
 
 	
-func make_maize(pos):
-	var maize_position = _resolve_tile_spawn_pos(pos)
+func make_maize(pos, already_snapped: bool = false):
+	var maize_position = pos
+	if not already_snapped:
+		maize_position = _resolve_tile_spawn_pos(pos)
 	
 	var named = "Maize_" + str($Agents.get_child_count()+1)
 	
@@ -540,13 +861,16 @@ func make_maize(pos):
 	$Agents.add_child(maize)
 	LevelHelpersRef.connect_core_agent_signals(maize, _on_agent_trade, _on_new_agent, _on_update_score)
 	_connect_lifecycle_residue_signal(maize)
-	LevelHelpersRef.mark_myco_lines_dirty($Agents)
+	LevelHelpersRef.sync_agent_occupancy(self, maize)
+	request_all_agents_dirty()
 	
 	return maize
 		
-func make_bean(pos):
+func make_bean(pos, already_snapped: bool = false):
 	
-	var bean_position = _resolve_tile_spawn_pos(pos)
+	var bean_position = pos
+	if not already_snapped:
+		bean_position = _resolve_tile_spawn_pos(pos)
 	
 	var named = "Bean_" + str($Agents.get_child_count()+1)
 	
@@ -563,7 +887,8 @@ func make_bean(pos):
 	$Agents.add_child(bean)
 	LevelHelpersRef.connect_core_agent_signals(bean, _on_agent_trade, _on_new_agent, _on_update_score)
 	_connect_lifecycle_residue_signal(bean)
-	LevelHelpersRef.mark_myco_lines_dirty($Agents)
+	LevelHelpersRef.sync_agent_occupancy(self, bean)
+	request_all_agents_dirty()
 	
 	return bean
 
@@ -613,8 +938,11 @@ func make_myco(pos, already_snapped: bool = false):
 	
 	if myco.has_signal("trade"):
 		myco.connect("trade", _on_agent_trade)
+	if myco.has_signal("new_agent"):
+		myco.connect("new_agent", _on_new_agent)
 	_connect_lifecycle_residue_signal(myco)
-	LevelHelpersRef.mark_all_buddies_dirty($Agents)
+	LevelHelpersRef.sync_agent_occupancy(self, myco)
+	request_all_agents_dirty()
 	
 	return myco
 	
@@ -758,7 +1086,11 @@ func _notification(what: int) -> void:
 
 
 func _release_audio() -> void:
-	LevelHelpersRef.clear_inventory_connection_preview_lines(inventory_preview_lines)
+	if _shutdown_cleanup_done:
+		return
+	_shutdown_cleanup_done = true
+	LevelHelpersRef.clear_trade_line_cache($Lines, true)
+	LevelHelpersRef.clear_inventory_connection_preview_lines(inventory_preview_lines, true)
 	LevelHelpersRef.stop_audio_players([
 		$BirdSound,
 		$BirdLong,
@@ -766,7 +1098,18 @@ func _release_audio() -> void:
 		$SquelchSound,
 		$TwinkleSound,
 		$BushSound
-	])
+	], true)
+	for active_trade in $Trades.get_children():
+		if is_instance_valid(active_trade):
+			if active_trade.get_parent() != null:
+				active_trade.get_parent().remove_child(active_trade)
+			active_trade.free()
+	for pooled_trade in _trade_pool:
+		if is_instance_valid(pooled_trade):
+			if pooled_trade.get_parent() != null:
+				pooled_trade.get_parent().remove_child(pooled_trade)
+			pooled_trade.free()
+	_trade_pool.clear()
 		
 						
 			

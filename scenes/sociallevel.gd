@@ -3,6 +3,7 @@ extends Node2D
 #to run: python3 -m http.server  .. browse to localhost:8000
 
 const LevelHelpersRef = preload("res://scenes/level_helpers.gd")
+const PerfMonitorRef = preload("res://scenes/perf_monitor.gd")
 const TEX_SQUASH = preload("res://graphics/mama.png")
 const TEX_TREE = preload("res://graphics/bank.png")
 const TEX_MAIZE = preload("res://graphics/cook.png")
@@ -33,6 +34,31 @@ var num_squash = 1
 var is_dragging = false
 var delay = 10
 var inventory_preview_lines: Array = []
+var perf_monitor: Node = null
+var _line_visual_refresh_accum := 0.0
+var _dirty_refresh_accum := 0.0
+var _dirty_buddies_agents: Dictionary = {}
+var _dirty_lines_agents: Dictionary = {}
+var _dirty_tile_hints_agents: Dictionary = {}
+var _trade_pool: Array = []
+var _shutdown_cleanup_done := false
+
+
+func _is_headless_runtime() -> bool:
+	return DisplayServer.get_name() == "headless" or OS.has_feature("dedicated_server")
+
+
+func _mute_runtime_audio_if_headless() -> void:
+	if not _is_headless_runtime():
+		return
+	LevelHelpersRef.stop_audio_players([
+		$BirdSound,
+		$BirdLong,
+		$CarSound,
+		$SquelchSound,
+		$TwinkleSound,
+		$BushSound
+	])
 
 
 func _get_world_foundation() -> Node:
@@ -97,6 +123,90 @@ func _find_replaceable_agent_at_world_pos(pos: Vector2, ignore_agent: Variant = 
 	return null
 
 
+func _agent_key(agent: Variant) -> int:
+	if not is_instance_valid(agent):
+		return -1
+	return int(agent.get_instance_id())
+
+
+func request_agent_dirty(agent: Variant, buddies: bool = true, lines: bool = true, tile_hint: bool = false) -> void:
+	var key = _agent_key(agent)
+	if key < 0:
+		return
+	if buddies:
+		_dirty_buddies_agents[key] = agent
+	if lines and str(agent.get("type")) != "cloud":
+		_dirty_lines_agents[key] = agent
+	if tile_hint:
+		_dirty_tile_hints_agents[key] = agent
+
+
+func request_all_agents_dirty() -> void:
+	for agent in $Agents.get_children():
+		request_agent_dirty(agent, true, true, false)
+
+
+func mark_agent_moved(agent: Variant, old_pos: Vector2, new_pos: Vector2) -> void:
+	LevelHelpersRef.mark_agents_dirty_for_movement(self, $Agents, agent, old_pos, new_pos)
+	LevelHelpersRef.sync_agent_occupancy(self, agent)
+
+
+func _process_dirty_queues() -> void:
+	if _dirty_buddies_agents.is_empty() and _dirty_lines_agents.is_empty() and _dirty_tile_hints_agents.is_empty():
+		return
+	for key in _dirty_buddies_agents.keys():
+		var agent = _dirty_buddies_agents[key]
+		if not is_instance_valid(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if agent.has_method("generate_buddies"):
+			agent.generate_buddies()
+	for key in _dirty_tile_hints_agents.keys():
+		var agent = _dirty_tile_hints_agents[key]
+		if not is_instance_valid(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if agent.has_method("_update_drag_tile_hint"):
+			var pos = agent.get("position")
+			if typeof(pos) == TYPE_VECTOR2:
+				agent._update_drag_tile_hint(pos)
+	if Global.draw_lines and not _dirty_lines_agents.is_empty():
+		LevelHelpersRef.sync_myco_trade_lines($Lines, $Agents, true, _dirty_lines_agents.values())
+	_dirty_buddies_agents.clear()
+	_dirty_lines_agents.clear()
+	_dirty_tile_hints_agents.clear()
+
+
+func _setup_perf_monitor() -> void:
+	if is_instance_valid(perf_monitor):
+		return
+	perf_monitor = PerfMonitorRef.new()
+	perf_monitor.name = "PerfMonitor"
+	perf_monitor.overlay_enabled = false
+	perf_monitor.adaptive_quality_enabled = true
+	perf_monitor.log_to_files = Global.perf_metrics_enabled
+	add_child(perf_monitor)
+	perf_monitor.configure(self, $Agents, $Trades, $Lines, _get_world_foundation())
+
+
+func _recycle_trade(trade: Node) -> void:
+	if not is_instance_valid(trade):
+		return
+	if trade.get_parent() != null:
+		trade.get_parent().remove_child(trade)
+	trade.visible = false
+	trade.set_process(false)
+	if trade.has_method("set_deferred"):
+		trade.set_deferred("monitoring", false)
+		trade.set_deferred("monitorable", false)
+	var shape = trade.get_node_or_null("CollisionShape2D")
+	if is_instance_valid(shape):
+		shape.set_deferred("disabled", true)
+	_trade_pool.append(trade)
+
+
 func _ready():
 	#get_tree().call_group('ui','set_health',health)
 	#var num_maize = $Agents.get_children().size()
@@ -106,9 +216,12 @@ func _ready():
 	$UI.connect('new_agent',_on_new_agent)
 	$UI.connect("inventory_drag_preview", _on_inventory_drag_preview)
 	$UI.setup()
+	_mute_runtime_audio_if_headless()
+	_setup_perf_monitor()
 	Global.prevent_auto_select = false
 	DisplayServer.window_set_title("People Gardening")
-	$BirdLong.play()
+	if not _is_headless_runtime():
+		$BirdLong.play()
 	var world = _get_world_foundation()
 	if is_instance_valid(world) and world.has_method("set_context"):
 		world.set_context(Global.mode, "people")
@@ -181,6 +294,10 @@ func _ready():
 	var bi_myco_k_position = Vector2(bi_myco_k_width,bi_myco_k_height)
 
 	var bi_k_myco = make_bi_k_myco(bi_myco_k_position)
+
+	LevelHelpersRef.rebuild_world_occupancy_cache(self, $Agents)
+	request_all_agents_dirty()
+	_process_dirty_queues()
 	
 			
 func _input(event):
@@ -189,7 +306,15 @@ func _input(event):
 
 
 func _process(_delta: float) -> void:
-	LevelHelpersRef.refresh_trade_line_visuals($Lines)
+	LevelHelpersRef.update_agent_hover_focus(self, $Agents)
+	_dirty_refresh_accum += _delta
+	if _dirty_refresh_accum >= Global.get_dirty_refresh_interval():
+		_dirty_refresh_accum = 0.0
+		_process_dirty_queues()
+	_line_visual_refresh_accum += _delta
+	if _line_visual_refresh_accum >= Global.get_line_visual_refresh_interval():
+		_line_visual_refresh_accum = 0.0
+		LevelHelpersRef.refresh_trade_line_visuals($Lines)
 
 
 func _on_inventory_drag_preview(agent_name: String, world_pos: Vector2, active: bool) -> void:
@@ -213,9 +338,17 @@ func _on_agent_trade(path_dict) -> void:
 
 
 func _spawn_trade(path_dict) -> void:
-	#print("Found Trade signal dict: ", path_dict)
-	var trade = trade_scene.instantiate()
-	trade.set_variables(path_dict)
+	var trade = null
+	if not _trade_pool.is_empty():
+		trade = _trade_pool.pop_back()
+	else:
+		trade = trade_scene.instantiate()
+	if trade.has_method("set_pool_owner"):
+		trade.set_pool_owner(self)
+	if trade.has_method("activate_trade"):
+		trade.activate_trade(path_dict)
+	else:
+		trade.set_variables(path_dict)
 	$Trades.add_child(trade)
 	
 func update_bars(path_dict)  -> void:
@@ -298,11 +431,12 @@ func _on_new_agent(agent_dict) -> void:
 	if is_instance_valid(new_agent):
 		if agent_dict.has("spawn_anchor"):
 			LevelHelpersRef.ensure_spawn_buddy_link(new_agent, agent_dict["spawn_anchor"])
-		LevelHelpersRef.mark_all_buddies_dirty($Agents)
-		LevelHelpersRef.mark_myco_lines_dirty($Agents)
+		LevelHelpersRef.sync_agent_occupancy(self, new_agent)
+		request_all_agents_dirty()
 		new_agent.peak_maturity = 4
 	if(Global.active_agent == null and not Global.prevent_auto_select):
 		Global.active_agent = new_agent
+		LevelHelpersRef.refresh_agent_bar_visibility($Agents)
 func make_squash(pos):
 	#print("Clicked On Squash. making")
 	
@@ -326,7 +460,8 @@ func make_squash(pos):
 	$Agents.add_child(squash)
 	squash.buddy_radius = Global.social_buddy_radius
 	LevelHelpersRef.connect_core_agent_signals(squash, _on_agent_trade, _on_new_agent, _on_update_score)
-	LevelHelpersRef.mark_myco_lines_dirty($Agents)
+	LevelHelpersRef.sync_agent_occupancy(self, squash)
+	request_all_agents_dirty()
 	
 	return squash
 
@@ -355,7 +490,8 @@ func make_tree(pos):
 	tree.draggable = false
 	tree.killable = false
 	LevelHelpersRef.connect_core_agent_signals(tree, _on_agent_trade, _on_new_agent, _on_update_score)
-	LevelHelpersRef.mark_myco_lines_dirty($Agents)
+	LevelHelpersRef.sync_agent_occupancy(self, tree)
+	request_all_agents_dirty()
 	return tree
 	
 	
@@ -391,7 +527,8 @@ func make_maize(pos):
 	$Agents.add_child(maize)
 	maize.buddy_radius = Global.social_buddy_radius
 	LevelHelpersRef.connect_core_agent_signals(maize, _on_agent_trade, _on_new_agent, _on_update_score)
-	LevelHelpersRef.mark_myco_lines_dirty($Agents)
+	LevelHelpersRef.sync_agent_occupancy(self, maize)
+	request_all_agents_dirty()
 	
 	return maize
 		
@@ -416,7 +553,8 @@ func make_bean(pos):
 	$Agents.add_child(bean)
 	bean.buddy_radius = Global.social_buddy_radius
 	LevelHelpersRef.connect_core_agent_signals(bean, _on_agent_trade, _on_new_agent, _on_update_score)
-	LevelHelpersRef.mark_myco_lines_dirty($Agents)
+	LevelHelpersRef.sync_agent_occupancy(self, bean)
+	request_all_agents_dirty()
 	
 	return bean
 
@@ -444,7 +582,8 @@ func make_myco(pos):
 	
 	if basket.has_signal("trade"):
 		basket.connect("trade", _on_agent_trade)
-	LevelHelpersRef.mark_all_buddies_dirty($Agents)
+	LevelHelpersRef.sync_agent_occupancy(self, basket)
+	request_all_agents_dirty()
 	
 	return basket
 	
@@ -494,7 +633,8 @@ func _make_bi_myco(pos: Vector2, asset_key: String):
 	
 	if basket.has_signal("trade"):
 		basket.connect("trade", _on_agent_trade)
-	LevelHelpersRef.mark_all_buddies_dirty($Agents)
+	LevelHelpersRef.sync_agent_occupancy(self, basket)
+	request_all_agents_dirty()
 	
 	return basket
 
@@ -637,7 +777,11 @@ func _notification(what: int) -> void:
 
 
 func _release_audio() -> void:
-	LevelHelpersRef.clear_inventory_connection_preview_lines(inventory_preview_lines)
+	if _shutdown_cleanup_done:
+		return
+	_shutdown_cleanup_done = true
+	LevelHelpersRef.clear_trade_line_cache($Lines, true)
+	LevelHelpersRef.clear_inventory_connection_preview_lines(inventory_preview_lines, true)
 	LevelHelpersRef.stop_audio_players([
 		$BirdSound,
 		$BirdLong,
@@ -645,7 +789,18 @@ func _release_audio() -> void:
 		$SquelchSound,
 		$TwinkleSound,
 		$BushSound
-	])
+	], true)
+	for active_trade in $Trades.get_children():
+		if is_instance_valid(active_trade):
+			if active_trade.get_parent() != null:
+				active_trade.get_parent().remove_child(active_trade)
+			active_trade.free()
+	for pooled_trade in _trade_pool:
+		if is_instance_valid(pooled_trade):
+			if pooled_trade.get_parent() != null:
+				pooled_trade.get_parent().remove_child(pooled_trade)
+			pooled_trade.free()
+	_trade_pool.clear()
 		
 						
 			

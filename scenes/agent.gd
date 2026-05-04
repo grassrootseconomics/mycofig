@@ -44,6 +44,7 @@ const TREE_STARVATION_DURATION_MULTIPLIER := 3.0
 const BASE_MOVE_RATE_FOR_STARVATION := 6.0
 const BASE_MOVEMENT_SPEED_FOR_STARVATION := 200.0
 const MIN_STARVATION_SPEED_SCALE := 0.2
+const STORY_PREDATOR_DISRUPT_SECONDS := 4.0
 
 signal trade(pos)
 signal clicked
@@ -71,6 +72,7 @@ var last_position = null
 var draw_box = true
 var draw_lines = false
 var dead = false
+var story_predator_disrupt_timer := 0.0
 
 var low_alpha = 0.75
 var high_alpha = 1.0
@@ -1180,16 +1182,7 @@ func _commit_harvest_visual_detach() -> void:
 	_harvest_visual_detached = false
 
 
-func _try_harvest_to_inventory() -> bool:
-	if not _is_bean_lifecycle_enabled():
-		return false
-	if not bean_harvest_ready or bean_stage != BeanGrowthStage.POD_READY:
-		return false
-	var harvest_key = str(type)
-	Global.inventory[harvest_key] = int(Global.inventory.get(harvest_key, 0)) + BEAN_HARVEST_YIELD
-	var ui_node = get_node_or_null("../../UI")
-	if is_instance_valid(ui_node) and ui_node.has_method("refresh_inventory_counts"):
-		ui_node.refresh_inventory_counts()
+func _apply_crop_harvest_commit_state() -> void:
 	bean_harvest_ready = false
 	bean_pod_ticks = 0
 	bean_stage_consumptions = 0
@@ -1208,6 +1201,28 @@ func _try_harvest_to_inventory() -> bool:
 		Global.is_dragging = false
 	_clear_drag_tile_hint()
 	_begin_snap_to_nearest_tile(position)
+
+
+func _try_harvest_to_inventory() -> bool:
+	if not _is_bean_lifecycle_enabled():
+		return false
+	if not bean_harvest_ready or bean_stage != BeanGrowthStage.POD_READY:
+		return false
+	var harvest_key = str(type)
+	Global.inventory[harvest_key] = int(Global.inventory.get(harvest_key, 0)) + BEAN_HARVEST_YIELD
+	var ui_node = get_node_or_null("../../UI")
+	if is_instance_valid(ui_node) and ui_node.has_method("refresh_inventory_counts"):
+		ui_node.refresh_inventory_counts()
+	_apply_crop_harvest_commit_state()
+	return true
+
+
+func _try_harvest_to_farmer(_target_farmer: Node = null) -> bool:
+	if not _is_bean_lifecycle_enabled():
+		return false
+	if not bean_harvest_ready or bean_stage != BeanGrowthStage.POD_READY:
+		return false
+	_apply_crop_harvest_commit_state()
 	return true
 
 
@@ -1219,6 +1234,12 @@ func try_harvest_to_inventory() -> bool:
 	if not supports_inventory_harvest():
 		return false
 	return _try_harvest_to_inventory()
+
+
+func try_harvest_to_farmer(target_farmer: Node = null) -> bool:
+	if not _is_bean_lifecycle_enabled():
+		return false
+	return _try_harvest_to_farmer(target_farmer)
 
 
 func set_variables(a_dict) -> void:
@@ -1605,7 +1626,13 @@ func _input(event):
 						is_dragging = false
 						Global.is_dragging = false
 						if _harvest_drag_only:
+							var dropped_to_story_target := false
+							var level_root = _get_level_root()
+							if is_instance_valid(level_root) and level_root.has_method("try_story_harvest_drop"):
+								dropped_to_story_target = bool(level_root.try_story_harvest_drop(self, get_global_mouse_position()))
 							_end_harvest_drag_proxy()
+							if not dropped_to_story_target:
+								_begin_snap_to_nearest_tile(position)
 						else:
 							_begin_snap_to_nearest_tile(position)
 						_harvest_drag_only = false
@@ -1632,7 +1659,20 @@ func _physics_process(delta):
 		
 		if hit==true:
 			if supports_inventory_harvest():
-				if _start_harvest_inventory_fly_in():
+				var allow_inventory_harvest := true
+				var level_root = _get_level_root()
+				if is_instance_valid(level_root) and level_root.has_method("can_agent_harvest_to_inventory"):
+					allow_inventory_harvest = bool(level_root.can_agent_harvest_to_inventory(self))
+				if allow_inventory_harvest:
+					if _start_harvest_inventory_fly_in():
+						return
+				else:
+					is_dragging = false
+					Global.is_dragging = false
+					_end_harvest_drag_proxy()
+					_begin_snap_to_nearest_tile(position)
+					_harvest_drag_only = false
+					_clear_drag_tile_hint()
 					return
 				is_dragging = false
 				Global.is_dragging = false
@@ -1686,6 +1726,8 @@ func _process(delta: float) -> void:
 	if not Global.get_world_rect(self).has_point(position):
 		self.kill_it()
 	var is_active = is_instance_valid(self) and is_instance_valid(Global.active_agent) and Global.active_agent.name == self.name
+	if story_predator_disrupt_timer > 0.0:
+		story_predator_disrupt_timer = maxf(story_predator_disrupt_timer - delta, 0.0)
 	var level_root = _get_level_root()
 	if is_instance_valid(level_root):
 		LevelHelpersRef.clear_focus_outline_if_owner(level_root, self)
@@ -1709,7 +1751,7 @@ func _process(delta: float) -> void:
 			_begin_snap_to_nearest_tile(position)
 
 	var bean_dead_phase = _is_bean_lifecycle_enabled() and bean_stage == BeanGrowthStage.DEAD
-	if(dead == false and not bean_dead_phase and is_instance_valid(self) and not is_trade_locked_by_user_move()):
+	if(dead == false and not bean_dead_phase and is_instance_valid(self) and not is_trade_locked_by_user_move() and story_predator_disrupt_timer <= 0.0):
 		logistics()
 	
 	if not is_dragging and not _keyboard_moving:
@@ -1926,6 +1968,8 @@ func _on_growth_timer_timeout() -> void:
 				have_babies()
 	
 func have_babies(force_spawn: bool = false)  -> void:
+	if bool(get_meta("story_disable_birth", false)):
+		return
 	if _is_bean_lifecycle_enabled() and bean_stage != BeanGrowthStage.POD_READY:
 		return
 	
@@ -2014,6 +2058,16 @@ func _on_evaporate_timer_timeout() -> void:
 
 func _on_body_entered(body: Node2D) -> void:
 	if (self.type == body.quarry_type):#"maize"):
+		if body is Tuktuk and bool(get_meta("story_villager", false)):
+			story_predator_disrupt_timer = maxf(story_predator_disrupt_timer, STORY_PREDATOR_DISRUPT_SECONDS)
+			for res in assets.keys():
+				assets[res] = maxi(int(assets[res]) - 1, 0)
+				if bars.has(res):
+					bars[res].value = assets[res]
+			body.caught = true
+			body.speed = maxf(body.speed - 80.0, 80.0)
+			body.going = Vector2(1, randi_range(-1, 1))
+			return
 		
 		#print("bird endered: ", body)
 		if(body.caught == false and caught_by == null):

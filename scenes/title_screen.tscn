@@ -65,11 +65,17 @@ layout_mode = 2
 theme_override_constants/separation = 11
 alignment = 1
 
-[node name="Label" type="Label" parent="CenterContainer/VBoxContainer"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 42
-text = "Social Soil Gardening"
+[node name="TopLabel" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 68.0
+offset_bottom = 228.0
+grow_horizontal = 2
+theme_override_font_sizes/font_size = 56
+text = "Social\nSoil"
 horizontal_alignment = 1
+vertical_alignment = 1
 
 [node name="HBoxContainer" type="HBoxContainer" parent="CenterContainer/VBoxContainer"]
 visible = false
@@ -89,7 +95,7 @@ text = "People"
 [node name="Tutorial" type="Button" parent="CenterContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 43
-text = "Story"
+text = "Story Mode"
 
 [node name="FreeGarden" type="Button" parent="CenterContainer/VBoxContainer"]
 visible = false

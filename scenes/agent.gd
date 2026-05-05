@@ -49,6 +49,10 @@ const LIFECYCLE_PARENT_BOUND_TILES := 4
 const MOBILE_DOUBLE_TAP_WINDOW_MSEC := 320
 const MOBILE_DOUBLE_TAP_MAX_DISTANCE := 54.0
 const MOBILE_TAP_SLOP_DISTANCE := 28.0
+const HARVEST_GUIDE_BEAN_RECT := Rect2(0.04, 0.26, 0.50, 0.56)
+const HARVEST_GUIDE_SQUASH_RECT := Rect2(0.02, 0.30, 0.42, 0.52)
+const HARVEST_GUIDE_MAIZE_RECT := Rect2(0.28, 0.20, 0.42, 0.66)
+const HARVEST_GUIDE_MYCO_RECT := Rect2(0.08, 0.08, 0.84, 0.84)
 
 signal trade(pos)
 signal clicked
@@ -333,6 +337,44 @@ func _get_world_foundation_node() -> Node:
 	return get_node_or_null("../../WorldFoundation")
 
 
+func _rect_from_normalized(source: Rect2, normalized: Rect2) -> Rect2:
+	return Rect2(
+		Vector2(
+			source.position.x + source.size.x * normalized.position.x,
+			source.position.y + source.size.y * normalized.position.y
+		),
+		Vector2(
+			source.size.x * normalized.size.x,
+			source.size.y * normalized.size.y
+		)
+	)
+
+
+func _get_tree_harvest_hotspot_rect() -> Rect2:
+	if not is_instance_valid(sprite) or not sprite.has_method("get_rect"):
+		return Rect2()
+	var rect: Rect2 = sprite.get_rect()
+	return _rect_from_normalized(rect, Rect2(0.06, 0.44, 0.40, 0.34))
+
+
+func get_story_harvest_guidance_rect_local() -> Rect2:
+	if not can_drag_for_inventory_harvest():
+		return Rect2()
+	if not is_instance_valid(sprite) or not sprite.has_method("get_rect"):
+		return Rect2()
+	var rect: Rect2 = sprite.get_rect()
+	var crop_type = str(type)
+	if crop_type == "tree":
+		return _get_tree_harvest_hotspot_rect()
+	if crop_type == "maize":
+		return _rect_from_normalized(rect, HARVEST_GUIDE_MAIZE_RECT)
+	if crop_type == "squash":
+		return _rect_from_normalized(rect, HARVEST_GUIDE_SQUASH_RECT)
+	if crop_type == "myco":
+		return _rect_from_normalized(rect, HARVEST_GUIDE_MYCO_RECT)
+	return _rect_from_normalized(rect, HARVEST_GUIDE_BEAN_RECT)
+
+
 func _is_tree_harvest_hotspot_hit(world_pos: Vector2) -> bool:
 	if not _is_tree_lifecycle_type():
 		return false
@@ -341,13 +383,8 @@ func _is_tree_harvest_hotspot_hit(world_pos: Vector2) -> bool:
 	if not is_instance_valid(sprite) or not sprite.has_method("get_rect"):
 		return false
 
-	# Acorn-only harvest hotspot: left/lower pocket of the mature tree sprite,
-	# with a small extension rightward for ease of clicking.
-	var rect: Rect2 = sprite.get_rect()
-	var hotspot = Rect2(
-		Vector2(rect.position.x + rect.size.x * 0.06, rect.position.y + rect.size.y * 0.44),
-		Vector2(rect.size.x * 0.40, rect.size.y * 0.34)
-	)
+	# Acorn-only harvest hotspot: left/lower pocket of the mature tree sprite.
+	var hotspot = _get_tree_harvest_hotspot_rect()
 	var sprite_local_click = sprite.to_local(world_pos)
 	if not hotspot.has_point(sprite_local_click):
 		return false

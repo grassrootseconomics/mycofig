@@ -14,8 +14,11 @@ var last_agent = null
 var next_agent = null
 var resContainer = null
 var drag_preview_sprite: Sprite2D = null
+var drag_preview_outline: Line2D = null
 var minimap_panel: Control = null
 var inventory_spawn_rng := RandomNumberGenerator.new()
+const INVENTORY_DRAG_THRESHOLD_MOUSE := 8.0
+const INVENTORY_DRAG_THRESHOLD_TOUCH := 18.0
 const AUTO_SPAWN_ATTEMPTS := 96
 const AUTO_SPAWN_SWEEP_STEPS := 48
 const PARENT_BOUNDED_AUTO_ATTEMPTS := 96
@@ -36,6 +39,10 @@ const INVENTORY_BACKPLATE_COLORS := {
 	"tree": Color(0.30, 0.63, 1.0, 0.58)
 }
 const INVENTORY_BACKPLATE_DEFAULT := Color(0.08, 0.12, 0.18, 0.28)
+const INVENTORY_SELECTED_OUTLINE_COLOR := Color(0.98, 0.96, 0.58, 0.98)
+const INVENTORY_DRAG_PREVIEW_OUTLINE_COLOR := Color(0.98, 0.96, 0.58, 0.95)
+const INVENTORY_PHASE1_SPARKLE_COLOR := Color(1.0, 0.98, 0.58, 0.95)
+const INVENTORY_PHASE1_SPARKLE_PULSE_SPEED := 4.6
 const TUTORIAL_PANEL_EXPANDED_SIZE := Vector2(372, 178)
 const TUTORIAL_PANEL_COLLAPSED_SIZE := Vector2(44, 44)
 
@@ -46,12 +53,26 @@ var _inventory_texture_cache: Dictionary = {}
 var _active_touch_drag_id := -1
 var _slot_backplates: Dictionary = {}
 var _slot_lock_glyphs: Dictionary = {}
+var _slot_selection_frames: Dictionary = {}
+var _slot_sparkle_rings: Dictionary = {}
 var _back_confirm_dialog: ConfirmationDialog = null
 var _minimap_drag_locked := false
 var _tutorial_toggle_button: Button = null
 var _tutorial_collapsed := false
 var _tutorial_last_visible := false
 var _tutorial_last_text := ""
+var _selected_inventory_item := ""
+var _pointer_is_down := false
+var _pointer_is_touch := false
+var _pointer_drag_active := false
+var _pointer_press_pos := Vector2.ZERO
+var _pointer_press_item := ""
+var _pointer_press_selection_changed := false
+var _last_pointer_pos := Vector2.ZERO
+var _story_phase1_sparkle_active := false
+var _story_phase5_basket_sparkle_active := false
+var _story_phase1_pending_types: Dictionary = {}
+var _story_phase1_sparkle_time := 0.0
 
 func _ready() -> void:
 	#$PalletContainer2/HBoxContainer/ActiveTexture.texture = Global.active_agent.sprite_texture
@@ -146,10 +167,12 @@ func _set_inventory_lock_glyph(icon: TextureRect, show_glyph: bool) -> void:
 		glyph_label.anchor_bottom = 1.0
 		glyph_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		glyph_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		glyph_label.z_index = 30
 		glyph_label.add_theme_font_size_override("font_size", 24)
 		glyph_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.92))
 		host.add_child(glyph_label)
 		_slot_lock_glyphs[icon] = glyph_label
+	glyph_label.z_index = 30
 	glyph_label.text = INVENTORY_LOCKED_GLYPH
 	glyph_label.visible = show_glyph
 
@@ -184,6 +207,8 @@ func _set_inventory_tab(_tab_id: String = "farm") -> void:
 		icon.set_meta("item_name", item)
 		_apply_inventory_backplate_for_item(icon, item)
 		_set_inventory_lock_glyph(icon, false)
+	_refresh_inventory_selection_visuals()
+	_refresh_inventory_phase1_sparkle_visuals()
 
 
 func _make_inventory_backplate_style(color: Color) -> StyleBoxFlat:
@@ -201,15 +226,181 @@ func _make_inventory_backplate_style(color: Color) -> StyleBoxFlat:
 	return style
 
 
+func _make_inventory_selection_frame_style() -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0, 0, 0, 0)
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_radius_bottom_right = 8
+	style.border_width_left = 4
+	style.border_width_top = 4
+	style.border_width_right = 4
+	style.border_width_bottom = 4
+	style.border_color = INVENTORY_SELECTED_OUTLINE_COLOR
+	style.expand_margin_left = 3.0
+	style.expand_margin_top = 3.0
+	style.expand_margin_right = 3.0
+	style.expand_margin_bottom = 3.0
+	return style
+
+
+func _make_inventory_sparkle_ring_style() -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0, 0, 0, 0)
+	style.corner_radius_top_left = 9
+	style.corner_radius_top_right = 9
+	style.corner_radius_bottom_left = 9
+	style.corner_radius_bottom_right = 9
+	style.border_width_left = 3
+	style.border_width_top = 3
+	style.border_width_right = 3
+	style.border_width_bottom = 3
+	style.border_color = INVENTORY_PHASE1_SPARKLE_COLOR
+	style.expand_margin_left = 2.0
+	style.expand_margin_top = 2.0
+	style.expand_margin_right = 2.0
+	style.expand_margin_bottom = 2.0
+	return style
+
+
+func _ensure_slot_sparkle_ring(icon: TextureRect, host: Panel) -> void:
+	if not is_instance_valid(icon) or not is_instance_valid(host):
+		return
+	var ring: Panel = _slot_sparkle_rings.get(icon, null)
+	if not is_instance_valid(ring):
+		ring = host.get_node_or_null("Phase1SparkleRing")
+	if not is_instance_valid(ring):
+		ring = Panel.new()
+		ring.name = "Phase1SparkleRing"
+		ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		ring.anchors_preset = Control.PRESET_FULL_RECT
+		ring.anchor_right = 1.0
+		ring.anchor_bottom = 1.0
+		ring.offset_left = 0.0
+		ring.offset_top = 0.0
+		ring.offset_right = 0.0
+		ring.offset_bottom = 0.0
+		ring.z_index = 10
+		host.add_child(ring)
+	ring.add_theme_stylebox_override("panel", _make_inventory_sparkle_ring_style())
+	ring.visible = false
+	ring.modulate = Color(1, 1, 1, 0.0)
+	_slot_sparkle_rings[icon] = ring
+
+
+func _ensure_slot_selection_frame(icon: TextureRect, host: Panel) -> void:
+	if not is_instance_valid(icon) or not is_instance_valid(host):
+		return
+	var frame: Panel = _slot_selection_frames.get(icon, null)
+	if not is_instance_valid(frame):
+		frame = host.get_node_or_null("SelectionFrame")
+	if not is_instance_valid(frame):
+		frame = Panel.new()
+		frame.name = "SelectionFrame"
+		frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		frame.anchors_preset = Control.PRESET_FULL_RECT
+		frame.anchor_right = 1.0
+		frame.anchor_bottom = 1.0
+		frame.offset_left = 0.0
+		frame.offset_top = 0.0
+		frame.offset_right = 0.0
+		frame.offset_bottom = 0.0
+		frame.z_index = 20
+		host.add_child(frame)
+	frame.add_theme_stylebox_override("panel", _make_inventory_selection_frame_style())
+	frame.visible = false
+	_slot_selection_frames[icon] = frame
+
+
+func _refresh_inventory_selection_visuals() -> void:
+	for icon in _slot_icons:
+		if not is_instance_valid(icon):
+			continue
+		var frame: Panel = _slot_selection_frames.get(icon, null)
+		if not is_instance_valid(frame):
+			continue
+		if _selected_inventory_item == "":
+			frame.visible = false
+			continue
+		if not icon.visible:
+			frame.visible = false
+			continue
+		if not icon.has_meta("item_name"):
+			frame.visible = false
+			continue
+		var item_name = str(icon.get_meta("item_name"))
+		frame.visible = item_name == _selected_inventory_item and int(Global.inventory.get(item_name, 0)) > 0
+
+
+func _refresh_inventory_phase1_sparkle_visuals() -> void:
+	for icon in _slot_icons:
+		if not is_instance_valid(icon):
+			continue
+		var ring: Panel = _slot_sparkle_rings.get(icon, null)
+		if not is_instance_valid(ring):
+			continue
+		ring.visible = false
+		ring.modulate = Color(1, 1, 1, 0.0)
+		if not icon.visible:
+			continue
+		if not icon.has_meta("item_name"):
+			continue
+		var item_name = str(icon.get_meta("item_name"))
+		if item_name == "":
+			continue
+		var item_count = int(Global.inventory.get(item_name, 0))
+		if item_count <= 0:
+			continue
+		var show_phase1 = _story_phase1_sparkle_active and bool(_story_phase1_pending_types.get(item_name, false))
+		var show_phase5_basket = _story_phase5_basket_sparkle_active and item_name == "basket"
+		ring.visible = show_phase1 or show_phase5_basket
+
+
+func _update_inventory_phase1_sparkle_animation(delta: float) -> void:
+	if not _story_phase1_sparkle_active and not _story_phase5_basket_sparkle_active:
+		return
+	_story_phase1_sparkle_time += maxf(delta, 0.0)
+	for idx in range(_slot_icons.size()):
+		var icon: TextureRect = _slot_icons[idx]
+		if not is_instance_valid(icon):
+			continue
+		var ring: Panel = _slot_sparkle_rings.get(icon, null)
+		if not is_instance_valid(ring) or not ring.visible:
+			continue
+		var phase_offset = float(idx) * 0.42
+		var pulse = 0.42 + 0.58 * (0.5 + 0.5 * sin(_story_phase1_sparkle_time * INVENTORY_PHASE1_SPARKLE_PULSE_SPEED + phase_offset))
+		ring.modulate = Color(1, 1, 1, pulse)
+
+
+func set_story_inventory_sparkle_targets(phase1_active: bool, phase1_pending_types: Dictionary, phase5_basket_active: bool) -> void:
+	_story_phase1_sparkle_active = phase1_active
+	_story_phase5_basket_sparkle_active = phase5_basket_active
+	_story_phase1_pending_types.clear()
+	for key in phase1_pending_types.keys():
+		_story_phase1_pending_types[str(key)] = bool(phase1_pending_types[key])
+	if not _story_phase1_sparkle_active and not _story_phase5_basket_sparkle_active:
+		_story_phase1_sparkle_time = 0.0
+	_refresh_inventory_phase1_sparkle_visuals()
+
+
+func set_story_phase1_inventory_sparkle_targets(active: bool, pending_types: Dictionary) -> void:
+	set_story_inventory_sparkle_targets(active, pending_types, _story_phase5_basket_sparkle_active)
+
+
 func _ensure_inventory_backplates() -> void:
 	_slot_backplates.clear()
 	_slot_lock_glyphs.clear()
+	_slot_selection_frames.clear()
+	_slot_sparkle_rings.clear()
 	for icon in _slot_icons:
 		if not is_instance_valid(icon):
 			continue
 		var existing_parent = icon.get_parent()
 		if existing_parent is Panel and bool(existing_parent.get_meta("inventory_backplate", false)):
 			_slot_backplates[icon] = existing_parent
+			_ensure_slot_sparkle_ring(icon, existing_parent)
+			_ensure_slot_selection_frame(icon, existing_parent)
 			continue
 		var host := Panel.new()
 		host.name = str(icon.name, "Backplate")
@@ -232,6 +423,8 @@ func _ensure_inventory_backplates() -> void:
 		icon.offset_right = -4.0
 		icon.offset_bottom = -4.0
 		_slot_backplates[icon] = host
+		_ensure_slot_sparkle_ring(icon, host)
+		_ensure_slot_selection_frame(icon, host)
 
 
 func _apply_inventory_backplate_for_item(icon: TextureRect, item_name: String) -> void:
@@ -242,6 +435,7 @@ func _apply_inventory_backplate_for_item(icon: TextureRect, item_name: String) -
 		return
 	var base_color: Color = INVENTORY_BACKPLATE_COLORS.get(item_name, INVENTORY_BACKPLATE_DEFAULT)
 	host.add_theme_stylebox_override("panel", _make_inventory_backplate_style(base_color))
+	_refresh_inventory_selection_visuals()
 
 
 func _get_inventory_item_texture(item_name: String) -> Texture2D:
@@ -289,6 +483,11 @@ func refresh_inventory_counts() -> void:
 		var count = int(Global.inventory.get(item, 0))
 		label.text = str(count)
 		icon.modulate.a = 1.0 if count > 0 else 0.5
+	if _selected_inventory_item != "" and int(Global.inventory.get(_selected_inventory_item, 0)) <= 0:
+		_clear_inventory_selection()
+		return
+	_refresh_inventory_selection_visuals()
+	_refresh_inventory_phase1_sparkle_visuals()
 
 
 func get_inventory_icon_center(agent_name: String) -> Vector2:
@@ -320,6 +519,7 @@ func refund_inventory_item(agent_name: String, amount: int = 1) -> void:
 
 func _process(delta: float) -> void:
 	_update_minimap_input_lock()
+	_update_inventory_phase1_sparkle_animation(delta)
 	_refresh_tutorial_panel_state()
 	_layout_quit_container()
 	_layout_tutorial_container()
@@ -330,7 +530,7 @@ func _update_minimap_input_lock() -> void:
 	if not is_instance_valid(minimap_panel):
 		_minimap_drag_locked = false
 		return
-	var should_lock = Global.is_dragging or next_agent != null
+	var should_lock = Global.is_dragging or _selected_inventory_item != ""
 	if should_lock == _minimap_drag_locked:
 		return
 	_minimap_drag_locked = should_lock
@@ -507,9 +707,36 @@ func _ensure_drag_preview() -> void:
 	drag_preview_sprite.visible = false
 	drag_preview_sprite.centered = true
 	drag_preview_sprite.z_as_relative = false
-	drag_preview_sprite.z_index = 200
+	drag_preview_sprite.z_index = 202
 	drag_preview_sprite.modulate = Color(1,1,1,0.85)
 	add_child(drag_preview_sprite)
+	drag_preview_outline = Line2D.new()
+	drag_preview_outline.visible = false
+	drag_preview_outline.z_as_relative = false
+	drag_preview_outline.z_index = 201
+	drag_preview_outline.width = 4.0
+	drag_preview_outline.default_color = INVENTORY_DRAG_PREVIEW_OUTLINE_COLOR
+	drag_preview_outline.closed = false
+	add_child(drag_preview_outline)
+
+
+func _refresh_drag_preview_outline(texture: Texture2D) -> void:
+	if not is_instance_valid(drag_preview_outline):
+		return
+	drag_preview_outline.clear_points()
+	var half_size := Vector2(16, 16)
+	if is_instance_valid(texture):
+		half_size = texture.get_size() * 0.5
+	half_size += Vector2(4.0, 4.0)
+	var top_left = Vector2(-half_size.x, -half_size.y)
+	var top_right = Vector2(half_size.x, -half_size.y)
+	var bottom_right = Vector2(half_size.x, half_size.y)
+	var bottom_left = Vector2(-half_size.x, half_size.y)
+	drag_preview_outline.add_point(top_left)
+	drag_preview_outline.add_point(top_right)
+	drag_preview_outline.add_point(bottom_right)
+	drag_preview_outline.add_point(bottom_left)
+	drag_preview_outline.add_point(top_left)
 
 
 func _get_inventory_agent_at(mouse_pos: Vector2) -> String:
@@ -537,19 +764,28 @@ func _start_inventory_drag(agent_name: String, mouse_pos: Vector2) -> void:
 			break
 	if is_instance_valid(icon):
 		drag_preview_sprite.texture = icon.texture
+		_refresh_drag_preview_outline(icon.texture)
 	drag_preview_sprite.global_position = mouse_pos
 	drag_preview_sprite.visible = true
+	if is_instance_valid(drag_preview_outline):
+		drag_preview_outline.global_position = mouse_pos
+		drag_preview_outline.visible = true
 
 
 func _update_inventory_drag(mouse_pos: Vector2) -> void:
 	if is_instance_valid(drag_preview_sprite) and drag_preview_sprite.visible:
 		drag_preview_sprite.global_position = mouse_pos
+	if is_instance_valid(drag_preview_outline) and drag_preview_outline.visible:
+		drag_preview_outline.global_position = mouse_pos
 
 
 func _end_inventory_drag() -> void:
 	if is_instance_valid(drag_preview_sprite):
 		drag_preview_sprite.visible = false
 		drag_preview_sprite.texture = null
+	if is_instance_valid(drag_preview_outline):
+		drag_preview_outline.visible = false
+		drag_preview_outline.clear_points()
 
 
 func _ensure_back_confirm_dialog() -> void:
@@ -875,48 +1111,172 @@ func _get_auto_spawn_target(agent_name: String) -> Dictionary:
 	return target
 
 
-func _drop_inventory_agent(drop_pos: Vector2) -> void:
-	if next_agent == null:
+func _select_inventory_item(agent_name: String) -> void:
+	if agent_name == "":
 		return
-	var spawn_name = str(next_agent)
+	if int(Global.inventory.get(agent_name, 0)) <= 0:
+		return
+	_selected_inventory_item = agent_name
+	next_agent = agent_name
+	_refresh_inventory_selection_visuals()
+	_update_minimap_input_lock()
+
+
+func _clear_world_tile_hint() -> void:
+	var world = _get_world_foundation()
+	if is_instance_valid(world) and world.has_method("clear_drag_tile_hint"):
+		world.clear_drag_tile_hint()
+
+
+func _clear_inventory_selection() -> void:
+	var previous_item = _selected_inventory_item
+	_selected_inventory_item = ""
+	next_agent = null
+	_pointer_is_down = false
+	_pointer_is_touch = false
+	_pointer_press_item = ""
+	_pointer_press_selection_changed = false
+	_pointer_drag_active = false
+	_end_inventory_drag()
+	_clear_world_tile_hint()
+	if previous_item != "":
+		emit_signal("inventory_drag_preview", previous_item, Vector2.ZERO, false)
+	_refresh_inventory_selection_visuals()
+	_refresh_inventory_phase1_sparkle_visuals()
+	_update_minimap_input_lock()
+
+
+func _get_world_tile_drop_data(screen_pos: Vector2) -> Dictionary:
+	var result := {
+		"ok": false,
+		"coord": Vector2i(-1, -1),
+		"pos": Vector2.ZERO
+	}
+	var world = _get_world_foundation()
+	if not _supports_tile_world(world):
+		return result
+	var view = get_viewport().get_visible_rect()
+	if not view.has_point(screen_pos):
+		return result
+	if $MarginContainer.get_global_rect().has_point(screen_pos):
+		return result
+	var world_pos = _screen_to_world(screen_pos)
+	var coord = Vector2i(world.world_to_tile(world_pos))
+	if not world.in_bounds(coord):
+		return result
+	result["ok"] = true
+	result["coord"] = coord
+	result["pos"] = world.tile_to_world_center(coord)
+	return result
+
+
+func _can_place_inventory_item_at_world_pos(item_name: String, world_pos: Vector2) -> bool:
+	if item_name == "":
+		return false
+	var level_root = get_node_or_null("..")
+	if is_instance_valid(level_root) and level_root.has_method("can_place_inventory_item_at_world_pos"):
+		return bool(level_root.can_place_inventory_item_at_world_pos(item_name, world_pos))
+	var world = _get_world_foundation()
+	if not _supports_tile_world(world):
+		return false
+	var coord = Vector2i(world.world_to_tile(world_pos))
+	if not world.in_bounds(coord):
+		return false
+	return true
+
+
+func _uses_two_tile_vertical_hint(item_name: String) -> bool:
+	return item_name == "tree" and not bool(Global.social_mode)
+
+
+func _flash_invalid_selected_tile_hint(screen_pos: Vector2) -> void:
+	if _selected_inventory_item == "":
+		return
+	var tile_data = _get_world_tile_drop_data(screen_pos)
+	if not bool(tile_data.get("ok", false)):
+		return
+	var world = _get_world_foundation()
+	if not is_instance_valid(world):
+		return
+	var coord: Vector2i = tile_data["coord"]
+	var secondary_coord := Vector2i(-1, -1)
+	var show_secondary := false
+	if _uses_two_tile_vertical_hint(_selected_inventory_item):
+		secondary_coord = coord + Vector2i(0, -1)
+		show_secondary = true
+	if world.has_method("flash_drag_tile_hint"):
+		world.flash_drag_tile_hint(coord, false, secondary_coord, show_secondary, 0.32)
+	elif world.has_method("set_drag_tile_hint"):
+		world.set_drag_tile_hint(coord, false, secondary_coord, show_secondary)
+
+
+func _update_selected_tile_hint(screen_pos: Vector2) -> void:
+	if _selected_inventory_item == "":
+		_clear_world_tile_hint()
+		return
+	var tile_data = _get_world_tile_drop_data(screen_pos)
+	if not bool(tile_data.get("ok", false)):
+		_clear_world_tile_hint()
+		emit_signal("inventory_drag_preview", _selected_inventory_item, Vector2.ZERO, false)
+		return
+	var world = _get_world_foundation()
+	if not is_instance_valid(world) or not world.has_method("set_drag_tile_hint"):
+		return
+	var target_pos: Vector2 = tile_data["pos"]
+	var coord: Vector2i = tile_data["coord"]
+	var can_place = _can_place_inventory_item_at_world_pos(_selected_inventory_item, target_pos)
+	var secondary_coord := Vector2i(-1, -1)
+	var show_secondary := false
+	if _uses_two_tile_vertical_hint(_selected_inventory_item):
+		secondary_coord = coord + Vector2i(0, -1)
+		show_secondary = true
+	world.set_drag_tile_hint(coord, can_place, secondary_coord, show_secondary)
+	_emit_inventory_drag_preview(_selected_inventory_item, screen_pos, true)
+
+
+func _should_begin_inventory_drag(screen_pos: Vector2) -> bool:
+	if not _pointer_is_down:
+		return false
+	if _pointer_drag_active:
+		return false
+	if _selected_inventory_item == "":
+		return false
+	var threshold = INVENTORY_DRAG_THRESHOLD_TOUCH if _pointer_is_touch else INVENTORY_DRAG_THRESHOLD_MOUSE
+	return _pointer_press_pos.distance_to(screen_pos) >= threshold
+
+
+func _try_place_selected_item_at_screen_pos(screen_pos: Vector2) -> bool:
+	if _selected_inventory_item == "":
+		return false
+	var spawn_name = _selected_inventory_item
 	if int(Global.inventory.get(spawn_name, 0)) <= 0:
-		return
+		return false
+	var tile_data = _get_world_tile_drop_data(screen_pos)
+	if not bool(tile_data.get("ok", false)):
+		return false
+	var target_pos: Vector2 = tile_data["pos"]
+	if not _can_place_inventory_item_at_world_pos(spawn_name, target_pos):
+		return false
 	var constrained_type = _is_parent_bounded_inventory_type(spawn_name)
-	var target_pos = _screen_to_world(drop_pos)
+	var spawn_anchor = null
+	if constrained_type:
+		spawn_anchor = _get_nearest_living_myco_anchor(target_pos, _get_agents_root())
+		if not is_instance_valid(spawn_anchor):
+			return false
 	var level_root = get_node_or_null("..")
 	if is_instance_valid(level_root) and level_root.has_method("try_story_inventory_delivery"):
-		# Story farmer-delivery path must be evaluated before parent-anchor checks
-		# so constrained crop/myco inventory items can still refill farmer stock.
 		if bool(level_root.try_story_inventory_delivery(spawn_name, target_pos)):
 			Global.inventory[spawn_name] = int(Global.inventory.get(spawn_name, 0)) - 1
 			refresh_inventory_counts()
-			return
-	var spawn_anchor = null
-	var allow_replace = true
-	var manual_placement = true
-	var view = get_viewport().get_visible_rect()
-	if $MarginContainer.get_global_rect().has_point(drop_pos) or not view.has_point(drop_pos):
-		var auto_target = _get_auto_spawn_target(spawn_name)
-		if not bool(auto_target.get("ok", true)):
-			return
-		target_pos = auto_target["pos"]
-		spawn_anchor = auto_target["anchor"]
-		allow_replace = false
-		manual_placement = false
-	elif constrained_type:
-		spawn_anchor = _get_nearest_living_myco_anchor(target_pos, _get_agents_root())
-		if not is_instance_valid(spawn_anchor):
-			return
-	var world = _get_world_foundation()
-	if is_instance_valid(world) and world.has_method("is_world_pos_revealed"):
-		if not bool(world.is_world_pos_revealed(target_pos)):
-			return
+			return true
 	var new_agent_dict = {
-		"name" : spawn_name,
+		"name": spawn_name,
 		"pos": target_pos,
-		"allow_replace": allow_replace,
+		"allow_replace": false,
 		"from_inventory": true,
-		"manual_placement": manual_placement
+		"manual_placement": true,
+		"require_exact_tile": true,
+		"strict_exact_tile": true
 	}
 	if is_instance_valid(spawn_anchor):
 		new_agent_dict["spawn_anchor"] = spawn_anchor
@@ -926,29 +1286,83 @@ func _drop_inventory_agent(drop_pos: Vector2) -> void:
 	emit_signal("new_agent", new_agent_dict)
 	Global.inventory[spawn_name] = int(Global.inventory.get(spawn_name, 0)) - 1
 	refresh_inventory_counts()
+	return true
 
 
 func _on_inventory_pointer_moved(screen_pos: Vector2) -> void:
-	if next_agent != null:
+	_last_pointer_pos = screen_pos
+	if _selected_inventory_item == "":
+		return
+	if _should_begin_inventory_drag(screen_pos):
+		_pointer_drag_active = true
+		_start_inventory_drag(_selected_inventory_item, screen_pos)
+	if _pointer_drag_active:
 		_update_inventory_drag(screen_pos)
-		_emit_inventory_drag_preview(next_agent, screen_pos, true)
+	_update_selected_tile_hint(screen_pos)
 
 
-func _on_inventory_pointer_pressed(screen_pos: Vector2) -> void:
+func _on_inventory_pointer_pressed(screen_pos: Vector2, from_touch: bool = false) -> void:
+	_pointer_is_down = true
+	_pointer_is_touch = from_touch
+	_pointer_drag_active = false
+	_pointer_press_pos = screen_pos
+	_last_pointer_pos = screen_pos
+	_pointer_press_item = ""
+	_pointer_press_selection_changed = false
 	var selected = _get_inventory_agent_at(screen_pos)
-	if selected != "" and Global.inventory[selected] > 0:
-		next_agent = selected
-		_start_inventory_drag(selected, screen_pos)
-		_emit_inventory_drag_preview(selected, screen_pos, true)
+	if selected != "" and int(Global.inventory.get(selected, 0)) > 0:
+		_pointer_press_item = selected
+		if _selected_inventory_item != selected:
+			_select_inventory_item(selected)
+			_pointer_press_selection_changed = true
+	if _selected_inventory_item != "":
+		_update_selected_tile_hint(screen_pos)
 		_update_minimap_input_lock()
 
 
-func _on_inventory_pointer_released(screen_pos: Vector2) -> void:
-	if next_agent != null:
-		_drop_inventory_agent(screen_pos)
-		_emit_inventory_drag_preview(next_agent, screen_pos, false)
-	next_agent = null
-	_end_inventory_drag()
+func _on_inventory_pointer_released(screen_pos: Vector2, from_touch: bool = false) -> void:
+	_last_pointer_pos = screen_pos
+	var active_item = _selected_inventory_item
+	var was_dragging = _pointer_drag_active
+	var pressed_item = _pointer_press_item
+	var selection_changed = _pointer_press_selection_changed
+	_pointer_is_down = false
+	_pointer_is_touch = from_touch
+	_pointer_press_item = ""
+	_pointer_press_selection_changed = false
+	_pointer_drag_active = false
+	if active_item == "":
+		_update_minimap_input_lock()
+		return
+	if was_dragging:
+		_update_inventory_drag(screen_pos)
+		var placed_from_drag = _try_place_selected_item_at_screen_pos(screen_pos)
+		if placed_from_drag:
+			_clear_inventory_selection()
+		else:
+			_end_inventory_drag()
+			emit_signal("inventory_drag_preview", active_item, Vector2.ZERO, false)
+			_flash_invalid_selected_tile_hint(screen_pos)
+			_refresh_inventory_selection_visuals()
+			_update_minimap_input_lock()
+		return
+	if pressed_item != "" and pressed_item == active_item and not selection_changed:
+		var released_item = _get_inventory_agent_at(screen_pos)
+		if released_item == active_item:
+			_clear_inventory_selection()
+			return
+	if pressed_item != "" and pressed_item == active_item and selection_changed:
+		_refresh_inventory_selection_visuals()
+		_update_selected_tile_hint(screen_pos)
+		_update_minimap_input_lock()
+		return
+	var placed_by_tap = _try_place_selected_item_at_screen_pos(screen_pos)
+	if placed_by_tap:
+		_clear_inventory_selection()
+		return
+	emit_signal("inventory_drag_preview", active_item, Vector2.ZERO, false)
+	_flash_invalid_selected_tile_hint(screen_pos)
+	_refresh_inventory_selection_visuals()
 	_update_minimap_input_lock()
 
 
@@ -965,9 +1379,9 @@ func _input(event):
 		if Global.is_mobile_platform:
 			return
 		if event.pressed:
-			_on_inventory_pointer_pressed(event.position)
+			_on_inventory_pointer_pressed(event.position, false)
 		else:
-			_on_inventory_pointer_released(event.position)
+			_on_inventory_pointer_released(event.position, false)
 		return
 
 	if event is InputEventScreenTouch:
@@ -975,11 +1389,11 @@ func _input(event):
 			if _active_touch_drag_id != -1 and event.index != _active_touch_drag_id:
 				return
 			_active_touch_drag_id = event.index
-			_on_inventory_pointer_pressed(event.position)
+			_on_inventory_pointer_pressed(event.position, true)
 		else:
 			if event.index != _active_touch_drag_id:
 				return
-			_on_inventory_pointer_released(event.position)
+			_on_inventory_pointer_released(event.position, true)
 			_active_touch_drag_id = -1
 		return
 

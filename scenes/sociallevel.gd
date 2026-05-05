@@ -111,6 +111,30 @@ func _resolve_exact_tile_spawn_pos(pos: Vector2, ignore_agent: Variant = null) -
 	return result
 
 
+func can_place_inventory_item_at_world_pos(item_name: String, world_pos: Vector2) -> bool:
+	var spawn_name = str(item_name)
+	if spawn_name == "":
+		return false
+	if int(Global.inventory.get(spawn_name, 0)) <= 0:
+		return false
+	var world = _get_world_foundation()
+	if not (is_instance_valid(world) and world.has_method("world_to_tile") and world.has_method("tile_to_world_center") and world.has_method("in_bounds")):
+		return false
+	var coord = Vector2i(world.world_to_tile(world_pos))
+	if not world.in_bounds(coord):
+		return false
+	var target_pos = world.tile_to_world_center(coord)
+	if world.has_method("is_world_pos_revealed") and not bool(world.is_world_pos_revealed(target_pos)):
+		return false
+	var exact_spawn = _resolve_exact_tile_spawn_pos(target_pos)
+	if not bool(exact_spawn.get("ok", false)):
+		return false
+	if spawn_name == "myco" and world.has_method("can_place_myco_on_tile"):
+		if not bool(world.call("can_place_myco_on_tile", coord)):
+			return false
+	return true
+
+
 func _find_replaceable_agent_at_world_pos(pos: Vector2, ignore_agent: Variant = null) -> Node:
 	var world = _get_world_foundation()
 	if not is_instance_valid(world):

@@ -36,6 +36,12 @@ const STORY_PHASE5_OBJECTIVE_KEY := "village_everyone_trading"
 const AMBIENT_TREE_AUDIO_RADIUS_TILES := 4.0
 const AMBIENT_TREE_AUDIO_SILENT_DB := -36.0
 const AMBIENT_TREE_AUDIO_FADE_SPEED_DB := 28.0
+const STORY_GUIDANCE_RING_COLOR := Color(1.0, 0.96, 0.50, 1.0)
+const STORY_GUIDANCE_RING_WIDTH := 3.0
+const STORY_GUIDANCE_RING_PULSE_SPEED := 5.2
+const STORY_GUIDANCE_RING_PAD := 6.0
+const STORY_GUIDANCE_RING_REFRESH_SEC := 0.08
+const STORY_PHASE2_HARVEST_RING_NAME := "StoryPhase2HarvestRing"
 const STORY_PHASE1_REQUIRED_PLACED_TYPES := {
 	"bean": true,
 	"squash": true,
@@ -110,6 +116,8 @@ var _story_phase5_target_villager_ids: Dictionary = {}
 var _story_phase5_traded_villager_ids: Dictionary = {}
 var _story_phase5_all_villagers_trading := false
 var _story_phase5_basket_placed := false
+var _story_guidance_pulse_time := 0.0
+var _story_guidance_refresh_accum := 0.0
 var _ambient_tree_audio_base_db := 0.0
 @onready var _bird_sound_player: AudioStreamPlayer2D = get_node_or_null("BirdSound")
 @onready var _bird_long_player: AudioStreamPlayer = get_node_or_null("BirdLong")
@@ -363,6 +371,7 @@ func _set_story_phase(phase_id: int) -> void:
 		_story_phase4_farmer_delivery_types.clear()
 	if safe_phase == 5:
 		_story_reset_phase5_trading_progress()
+	_story_sync_phase1_inventory_sparkle_targets()
 
 
 func _story_is_phase1_required_placement_type(agent_type: String) -> bool:
@@ -382,6 +391,160 @@ func _story_has_all_required_types(tracked: Dictionary, required: Dictionary) ->
 		if not bool(tracked.get(required_type, false)):
 			return false
 	return true
+
+
+func _story_collect_phase1_pending_placement_types() -> Dictionary:
+	var pending: Dictionary = {}
+	for required_type in STORY_PHASE1_REQUIRED_PLACED_TYPES.keys():
+		if bool(_story_phase1_placed_types.get(required_type, false)):
+			continue
+		pending[str(required_type)] = true
+	return pending
+
+
+func _story_collect_phase2_pending_harvest_types() -> Dictionary:
+	var pending: Dictionary = {}
+	for required_type in STORY_PHASE2_REQUIRED_INVENTORY_HARVEST_TYPES.keys():
+		if bool(_story_phase2_inventory_harvested_types.get(required_type, false)):
+			continue
+		pending[str(required_type)] = true
+	return pending
+
+
+func _story_is_phase5_basket_inventory_guidance_active() -> bool:
+	if not _is_story_mode() or _story_phase_id != 5:
+		return false
+	return int(Global.inventory.get("basket", 0)) > 0
+
+
+func _story_sync_phase1_inventory_sparkle_targets() -> void:
+	var ui_node = get_node_or_null("UI")
+	if not is_instance_valid(ui_node):
+		return
+	var phase1_active = _is_story_mode() and _story_phase_id == 1
+	var phase1_pending: Dictionary = {}
+	if phase1_active:
+		phase1_pending = _story_collect_phase1_pending_placement_types()
+	var phase5_basket_active = _story_is_phase5_basket_inventory_guidance_active()
+	if ui_node.has_method("set_story_inventory_sparkle_targets"):
+		ui_node.set_story_inventory_sparkle_targets(phase1_active, phase1_pending, phase5_basket_active)
+		return
+	if ui_node.has_method("set_story_phase1_inventory_sparkle_targets"):
+		ui_node.set_story_phase1_inventory_sparkle_targets(phase1_active, phase1_pending)
+
+
+func _hide_story_phase2_harvest_guidance_ring(agent: Node) -> void:
+	if not is_instance_valid(agent):
+		return
+	var ring: Line2D = agent.get_node_or_null(STORY_PHASE2_HARVEST_RING_NAME) as Line2D
+	if is_instance_valid(ring):
+		ring.visible = false
+
+
+func _ensure_story_phase2_harvest_guidance_ring(agent: Node) -> Line2D:
+	if not is_instance_valid(agent):
+		return null
+	var existing = agent.get_node_or_null(STORY_PHASE2_HARVEST_RING_NAME)
+	var existing_ring: Line2D = existing as Line2D
+	if is_instance_valid(existing_ring):
+		return existing_ring
+	if is_instance_valid(existing):
+		existing.queue_free()
+	var ring := Line2D.new()
+	ring.name = STORY_PHASE2_HARVEST_RING_NAME
+	ring.width = STORY_GUIDANCE_RING_WIDTH
+	ring.antialiased = true
+	ring.z_as_relative = false
+	ring.z_index = 120
+	ring.default_color = STORY_GUIDANCE_RING_COLOR
+	ring.visible = false
+	agent.add_child(ring)
+	return ring
+
+
+func _update_story_phase2_harvest_guidance_ring_shape(agent: Node, ring: Line2D) -> void:
+	if not is_instance_valid(agent) or not is_instance_valid(ring):
+		return
+	var sprite = agent.get_node_or_null("Sprite2D")
+	if not (sprite is Sprite2D):
+		ring.visible = false
+		return
+	var sprite_node: Sprite2D = sprite
+	if not is_instance_valid(sprite_node.texture):
+		ring.visible = false
+		return
+	var guide_rect = Rect2()
+	if agent.has_method("get_story_harvest_guidance_rect_local"):
+		var candidate = agent.get_story_harvest_guidance_rect_local()
+		if candidate is Rect2:
+			guide_rect = candidate
+	if guide_rect.size.x <= 0.001 or guide_rect.size.y <= 0.001:
+		guide_rect = sprite_node.get_rect()
+	var scaled_rect: Rect2 = guide_rect * Transform2D(0, sprite_node.scale, 0, Vector2.ZERO)
+	var left = sprite_node.position.x + scaled_rect.position.x - STORY_GUIDANCE_RING_PAD
+	var top = sprite_node.position.y + scaled_rect.position.y - STORY_GUIDANCE_RING_PAD
+	var right = left + scaled_rect.size.x + STORY_GUIDANCE_RING_PAD * 2.0
+	var bottom = top + scaled_rect.size.y + STORY_GUIDANCE_RING_PAD * 2.0
+	ring.clear_points()
+	ring.add_point(Vector2(left, top))
+	ring.add_point(Vector2(right, top))
+	ring.add_point(Vector2(right, bottom))
+	ring.add_point(Vector2(left, bottom))
+	ring.add_point(Vector2(left, top))
+
+
+func _update_story_phase2_harvest_guidance_ring_visual(agent: Node, ring: Line2D) -> void:
+	if not is_instance_valid(agent) or not is_instance_valid(ring):
+		return
+	var phase_offset = float(int(agent.get_instance_id()) % 19) * 0.33
+	var pulse = 0.42 + 0.58 * (0.5 + 0.5 * sin(_story_guidance_pulse_time * STORY_GUIDANCE_RING_PULSE_SPEED + phase_offset))
+	ring.width = STORY_GUIDANCE_RING_WIDTH + pulse * 1.35
+	ring.default_color = Color(STORY_GUIDANCE_RING_COLOR.r, STORY_GUIDANCE_RING_COLOR.g, STORY_GUIDANCE_RING_COLOR.b, 0.38 + pulse * 0.62)
+
+
+func _should_show_story_phase2_harvest_guidance(agent: Node, pending_types: Dictionary) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	if bool(agent.get("dead")):
+		return false
+	var crop_type = str(agent.get("type"))
+	if crop_type == "":
+		return false
+	if not bool(pending_types.get(crop_type, false)):
+		return false
+	if not agent.has_method("can_drag_for_inventory_harvest"):
+		return false
+	return bool(agent.can_drag_for_inventory_harvest())
+
+
+func _refresh_story_phase2_harvest_guidance_visuals(delta: float) -> void:
+	_story_guidance_pulse_time += maxf(delta, 0.0)
+	_story_guidance_refresh_accum += maxf(delta, 0.0)
+	var refresh_shape = _story_guidance_refresh_accum >= STORY_GUIDANCE_RING_REFRESH_SEC
+	if refresh_shape:
+		_story_guidance_refresh_accum = 0.0
+	var phase2_active = _is_story_mode() and _story_phase_id == 2
+	var pending_types: Dictionary = {}
+	if phase2_active:
+		pending_types = _story_collect_phase2_pending_harvest_types()
+	if not phase2_active or pending_types.is_empty():
+		for agent in $Agents.get_children():
+			_hide_story_phase2_harvest_guidance_ring(agent)
+		return
+	for agent in $Agents.get_children():
+		if not _should_show_story_phase2_harvest_guidance(agent, pending_types):
+			_hide_story_phase2_harvest_guidance_ring(agent)
+			continue
+		var ring = _ensure_story_phase2_harvest_guidance_ring(agent)
+		if not is_instance_valid(ring):
+			continue
+		if refresh_shape or ring.get_point_count() < 5:
+			_update_story_phase2_harvest_guidance_ring_shape(agent, ring)
+		if ring.get_point_count() < 5:
+			ring.visible = false
+			continue
+		_update_story_phase2_harvest_guidance_ring_visual(agent, ring)
+		ring.visible = true
 
 
 func _story_collect_villager_ids() -> Dictionary:
@@ -471,6 +634,7 @@ func _story_refresh_hud() -> void:
 			ui_node.set_story_village_marker(Vector2.ZERO, false)
 		if ui_node.has_method("refresh_inventory_counts"):
 			ui_node.refresh_inventory_counts()
+		_story_sync_phase1_inventory_sparkle_targets()
 		return
 	if ui_node.has_method("set_village_inventory_unlocked"):
 		ui_node.set_village_inventory_unlocked(_story_village_revealed)
@@ -478,6 +642,7 @@ func _story_refresh_hud() -> void:
 		ui_node.set_story_village_marker(_story_village_center_world, not _story_village_revealed)
 	if ui_node.has_method("refresh_inventory_counts"):
 		ui_node.refresh_inventory_counts()
+	_story_sync_phase1_inventory_sparkle_targets()
 
 
 func _find_story_farmer_at_world_pos(world_pos: Vector2) -> Node:
@@ -575,6 +740,59 @@ func try_story_inventory_delivery(item_type: String, world_pos: Vector2) -> bool
 	# Story farmer deliveries refill the farmer's actual N resource bar.
 	_refill_story_farmer_n_resource(target_farmer)
 	_story_try_advance_phase_milestones()
+	return true
+
+
+func can_place_inventory_item_at_world_pos(item_name: String, world_pos: Vector2) -> bool:
+	var spawn_name = str(item_name)
+	if spawn_name == "":
+		return false
+	if int(Global.inventory.get(spawn_name, 0)) <= 0:
+		return false
+	var world = _get_world_foundation()
+	if not _supports_world_tiles(world):
+		return false
+	var coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(world_pos)))
+	var target_pos = world.tile_to_world_center(coord)
+	var story_village_item = _is_story_village_item_type(spawn_name)
+	if _is_story_mode() and story_village_item:
+		if not _story_village_revealed:
+			return false
+		if not _is_story_village_spawn_allowed(target_pos):
+			return false
+	if _is_story_mode() and not story_village_item:
+		if _story_village_revealed and _story_phase_id >= 4 and _story_is_phase4_required_farmer_delivery_type(spawn_name):
+			if is_instance_valid(_find_story_farmer_at_world_pos(target_pos)):
+				return true
+	if world.has_method("is_world_pos_revealed") and not bool(world.is_world_pos_revealed(target_pos)):
+		return false
+	if _is_parent_bounded_spawn_type(spawn_name):
+		var parent_anchor = _find_nearest_living_myco_anchor(target_pos)
+		if not _is_valid_parent_anchor(parent_anchor):
+			return false
+		var parent_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(parent_anchor.global_position)))
+		if _tile_chebyshev_distance(coord, parent_coord) > DEFAULT_PARENT_BOUND_RADIUS_TILES:
+			return false
+		if LevelHelpersRef.is_tile_occupied(self, $Agents, coord):
+			return false
+	elif spawn_name == "tree":
+		# Acorn/tree footprint in plants mode is two vertical tiles:
+		# base tile + tile above.
+		var upper_coord = coord + Vector2i(0, -1)
+		if not world.in_bounds(upper_coord):
+			return false
+		if LevelHelpersRef.is_tile_occupied(self, $Agents, coord):
+			return false
+		if LevelHelpersRef.is_tile_occupied(self, $Agents, upper_coord):
+			return false
+	else:
+		var exact_spawn = _resolve_exact_tile_spawn_pos(target_pos)
+		if not bool(exact_spawn.get("ok", false)):
+			return false
+	if spawn_name == "myco":
+		var myco_gate = _validate_myco_spawn(target_pos)
+		if not bool(myco_gate.get("ok", false)):
+			return false
 	return true
 
 
@@ -832,6 +1050,7 @@ func _on_agent_harvest_committed(harvest_type: String, destination: String) -> v
 	if destination == "farmer" and _story_phase_id >= 4 and _story_is_phase4_required_farmer_delivery_type(normalized_type):
 		_story_phase4_farmer_delivery_types[normalized_type] = true
 	_story_try_advance_phase_milestones()
+	_story_sync_phase1_inventory_sparkle_targets()
 
 
 func _count_living_myco(ignore_agent: Variant = null) -> int:
@@ -1035,10 +1254,13 @@ func _ready():
 		if is_instance_valid(world) and world.has_method("clear_permanent_reveal"):
 			world.clear_permanent_reveal()
 		_story_refresh_hud()
+		_story_sync_phase1_inventory_sparkle_targets()
 	elif Global.mode == "tutorial":
 		$"UI/TutorialMarginContainer1".visible = true
 		$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
 		_set_tutorial_panel_color(Global.stage_colors[Global.stage])
+	else:
+		_story_sync_phase1_inventory_sparkle_targets()
 
 	var world_center = _get_world_center()
 	mid_width = int(world_center.x)
@@ -1157,6 +1379,7 @@ func _input(event):
 func _process(_delta: float) -> void:
 	_update_tree_ambient_audio(_delta)
 	LevelHelpersRef.update_agent_hover_focus(self, $Agents)
+	_refresh_story_phase2_harvest_guidance_visuals(_delta)
 	if _is_story_mode():
 		_story_progress_accum += _delta
 		if _story_progress_accum >= 0.35:
@@ -1486,6 +1709,15 @@ func _on_new_agent(agent_dict) -> void:
 					spawn_pos = replace_pos
 
 	if is_parent_bounded:
+		if from_inventory and require_exact_tile:
+			var world_for_exact = _get_world_foundation()
+			if _supports_world_tiles(world_for_exact):
+				var exact_coord = _clamp_tile_coord(world_for_exact, Vector2i(world_for_exact.world_to_tile(spawn_pos)))
+				var exact_parent_coord = _clamp_tile_coord(world_for_exact, Vector2i(world_for_exact.world_to_tile(parent_anchor.global_position)))
+				if _tile_chebyshev_distance(exact_coord, exact_parent_coord) > max_parent_tiles:
+					if from_inventory:
+						_refund_inventory_item(spawn_name, 1)
+					return
 		var parent_spawn = _resolve_parent_bounded_spawn_pos(spawn_pos, parent_anchor, max_parent_tiles, ignore_agent, require_exact_tile)
 		if not bool(parent_spawn["ok"]):
 			if from_inventory:
@@ -1568,6 +1800,7 @@ func _on_new_agent(agent_dict) -> void:
 			if spawn_name == "basket":
 				_story_phase5_basket_placed = true
 			_story_try_advance_phase_milestones()
+			_story_sync_phase1_inventory_sparkle_targets()
 		request_all_agents_dirty()
 		if _is_story_mode() and _is_story_village_actor(new_agent):
 			_story_refresh_hud()

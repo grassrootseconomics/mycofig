@@ -73,7 +73,13 @@ var _touch_drag_id: int = -1
 var _touch_drag_last := Vector2.ZERO
 var _drag_hint_visible := false
 var _drag_hint_coord := Vector2i(-1, -1)
+var _drag_hint_secondary_visible := false
+var _drag_hint_secondary_coord := Vector2i(-1, -1)
 var _drag_hint_available := true
+var _drag_hint_alpha := 1.0
+var _drag_hint_fading := false
+var _drag_hint_fade_elapsed := 0.0
+var _drag_hint_fade_duration := 0.28
 var _soil_tick_timer: Timer = null
 var _fog_tick_timer: Timer = null
 var _residue_records: Array = []
@@ -439,15 +445,31 @@ func reset_to_baseline() -> void:
 	_update_debug_label()
 
 
-func set_drag_tile_hint(coord: Vector2i, available: bool) -> void:
+func set_drag_tile_hint(coord: Vector2i, available: bool, secondary_coord: Vector2i = Vector2i(-1, -1), show_secondary: bool = false) -> void:
 	if not in_bounds(coord):
 		clear_drag_tile_hint()
 		return
-	if _drag_hint_visible and _drag_hint_coord == coord and _drag_hint_available == available:
+	var secondary_visible = show_secondary and in_bounds(secondary_coord)
+	var normalized_secondary = secondary_coord if secondary_visible else Vector2i(-1, -1)
+	if _drag_hint_visible and _drag_hint_coord == coord and _drag_hint_available == available and _drag_hint_secondary_visible == secondary_visible and _drag_hint_secondary_coord == normalized_secondary and not _drag_hint_fading and _drag_hint_alpha >= 0.999:
 		return
 	_drag_hint_visible = true
 	_drag_hint_coord = coord
+	_drag_hint_secondary_visible = secondary_visible
+	_drag_hint_secondary_coord = normalized_secondary
 	_drag_hint_available = available
+	_drag_hint_alpha = 1.0
+	_drag_hint_fading = false
+	_drag_hint_fade_elapsed = 0.0
+	queue_redraw()
+
+
+func flash_drag_tile_hint(coord: Vector2i, available: bool = false, secondary_coord: Vector2i = Vector2i(-1, -1), show_secondary: bool = false, fade_duration: float = 0.32) -> void:
+	set_drag_tile_hint(coord, available, secondary_coord, show_secondary)
+	_drag_hint_fading = true
+	_drag_hint_fade_elapsed = 0.0
+	_drag_hint_fade_duration = maxf(fade_duration, 0.05)
+	_drag_hint_alpha = 1.0
 	queue_redraw()
 
 
@@ -456,7 +478,20 @@ func clear_drag_tile_hint() -> void:
 		return
 	_drag_hint_visible = false
 	_drag_hint_coord = Vector2i(-1, -1)
+	_drag_hint_secondary_visible = false
+	_drag_hint_secondary_coord = Vector2i(-1, -1)
+	_drag_hint_fading = false
+	_drag_hint_fade_elapsed = 0.0
+	_drag_hint_alpha = 1.0
 	queue_redraw()
+
+
+func _draw_drag_hint_tile(coord: Vector2i, hint_color: Color, alpha_scale: float) -> void:
+	if not in_bounds(coord):
+		return
+	var hint_rect = Rect2(Vector2(coord.x * tile_size, coord.y * tile_size), Vector2(tile_size, tile_size))
+	draw_rect(hint_rect, Color(hint_color, 0.16 * alpha_scale), true)
+	draw_rect(hint_rect, Color(hint_color, hint_color.a * alpha_scale), false, 3.0, true)
 
 
 func _draw() -> void:
@@ -475,10 +510,11 @@ func _draw() -> void:
 					draw_string(font, rect.position + Vector2(4, 13), str(coord.x, ",", coord.y), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0, 0, 0, 0.9))
 					draw_string(font, rect.position + Vector2(4, 26), str("S", stage), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0, 0, 0, 0.9))
 	if _drag_hint_visible and in_bounds(_drag_hint_coord):
-		var hint_rect = Rect2(Vector2(_drag_hint_coord.x * tile_size, _drag_hint_coord.y * tile_size), Vector2(tile_size, tile_size))
 		var hint_color = drag_hint_available_color if _drag_hint_available else drag_hint_blocked_color
-		draw_rect(hint_rect, Color(hint_color, 0.16), true)
-		draw_rect(hint_rect, hint_color, false, 3.0, true)
+		var alpha_scale = clampf(_drag_hint_alpha, 0.0, 1.0)
+		_draw_drag_hint_tile(_drag_hint_coord, hint_color, alpha_scale)
+		if _drag_hint_secondary_visible:
+			_draw_drag_hint_tile(_drag_hint_secondary_coord, hint_color, alpha_scale)
 	_draw_story_fog_overlay()
 	if debug_overlay_enabled:
 		draw_rect(Rect2(Vector2.ZERO, get_world_rect().size), Color(1, 1, 1, 0.9), false, 3.0, true)
@@ -554,6 +590,16 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
+	if _drag_hint_visible and _drag_hint_fading:
+		_drag_hint_fade_elapsed += maxf(delta, 0.0)
+		var fade_progress = clampf(_drag_hint_fade_elapsed / maxf(_drag_hint_fade_duration, 0.05), 0.0, 1.0)
+		var next_alpha = 1.0 - fade_progress
+		if absf(next_alpha - _drag_hint_alpha) > 0.001:
+			_drag_hint_alpha = next_alpha
+			queue_redraw()
+		if fade_progress >= 1.0:
+			clear_drag_tile_hint()
+			return
 	var followed = _follow_active_agent(delta)
 	if not followed and _should_keyboard_pan():
 		var pan_dir = _get_camera_pan_vector()

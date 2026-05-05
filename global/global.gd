@@ -96,7 +96,9 @@ var assets_social = { #list of assets -
 	}
 
 var story_stage_text = {
-	1: "Phase 1: Place one of all your inventory items to begin restoring soil. Mushrooms can only grow in healthy soil, so this may take time. Select crops to check what resources they need.",
+	1: "Phase 1: Plant one of each of your crops.
+	Each one provides different nutrients. Mushrooms transport nutrients and help create healthy soil. 
+	Tap on your crops to check what nutrients they need.",
 	2: "Phase 2: Harvest each type of crop in your inventory by double clicking. Birds are hungry, so grow more crops.",
 	3: "Phase 3: Expand your garden toward the ? on the map.",
 	4: "Phase 4: You found a village! Looks like they need food. Deliver at some food to your fellow farmers so villagers can become healthy.",

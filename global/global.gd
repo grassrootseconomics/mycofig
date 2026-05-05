@@ -152,10 +152,10 @@ var ranks = {
 	50000: "Nutrient Flow Oracle",
 	100000: "Fungal Network Shepherd",
 	500000: "Mycorrhizal Visionary",
-	1000000: "Soil Web Custodian Moja",
-	2000000: "Soil Web Custodian Mbili",
-	3000000: "Soil Web Custodian Tatu",
-	4000000: "Soil Web Custodian Nne",
+	1000000: "Soil Web Custodian 1",
+	2000000: "Soil Web Custodian 2",
+	3000000: "Soil Web Custodian 3",
+	4000000: "Soil Web Custodian 4",
 	5000000: "Grassroots Economist"
 }
 

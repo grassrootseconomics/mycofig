@@ -13,10 +13,10 @@ config_version=5
 config/name="Social Soil Gardening"
 config/version="1.0.0"
 run/main_scene="res://scenes/title_screen.tscn"
+config/quit_on_go_back=false
 config/features=PackedStringArray("4.5", "GL Compatibility")
 boot_splash/image="res://loading/shamba-logo-ge.png"
 config/icon="res://icon.svg"
-config/quit_on_go_back=false
 
 [autoload]
 

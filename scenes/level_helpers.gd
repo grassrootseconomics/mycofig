@@ -105,6 +105,16 @@ static func clear_focus_outline_if_owner(level_root: Node, owner_agent: Variant)
 	clear_selection_boxes(level_root)
 
 
+static func clear_mobile_selection_and_bars(level_root: Node, agents_root: Node) -> void:
+	if not Global.is_mobile_platform:
+		return
+	Global.active_agent = null
+	Global.bars_on = false
+	Global.prevent_auto_select = true
+	clear_selection_boxes(level_root)
+	refresh_agent_bar_visibility(agents_root)
+
+
 static func _pointer_over_core_ui(level_root: Node, screen_pos: Vector2) -> bool:
 	if not is_instance_valid(level_root):
 		return false

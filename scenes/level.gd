@@ -155,6 +155,20 @@ func _get_world_center() -> Vector2:
 	return Global.get_world_center(self)
 
 
+func _set_tutorial_panel_color(color: Color) -> void:
+	var helper_panel: Panel = get_node_or_null("UI/TutorialMarginContainer1/HelperPanel")
+	if not is_instance_valid(helper_panel):
+		return
+	var style_box = helper_panel.get_theme_stylebox("panel")
+	var helper_style := StyleBoxFlat.new()
+	if style_box is StyleBoxFlat:
+		var duplicated = (style_box as StyleBoxFlat).duplicate()
+		if duplicated is StyleBoxFlat:
+			helper_style = duplicated
+	helper_style.bg_color = color
+	helper_panel.add_theme_stylebox_override("panel", helper_style)
+
+
 func _get_listener_world_position() -> Vector2:
 	var camera = get_viewport().get_camera_2d()
 	if is_instance_valid(camera):
@@ -313,7 +327,7 @@ func get_story_tuktuk_spawn_position() -> Vector2:
 func _story_set_prompt(text: String) -> void:
 	$"UI/TutorialMarginContainer1".visible = true
 	$"UI/TutorialMarginContainer1/Label".text = text
-	$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors.get(1, Color(0.2, 0.4, 0.2, 0.8))
+	_set_tutorial_panel_color(Global.stage_colors.get(1, Color(0.2, 0.4, 0.2, 0.8)))
 
 
 func _story_reset_phase_state() -> void:
@@ -442,7 +456,7 @@ func _story_try_advance_phase_milestones() -> void:
 			_set_story_phase(5)
 	if _story_phase_id == 5:
 		_story_update_phase5_trading_completion()
-		if _story_phase5_all_villagers_trading and _story_phase5_basket_placed:
+		if _story_phase5_all_villagers_trading:
 			_set_story_phase(6)
 
 
@@ -527,6 +541,8 @@ func can_agent_harvest_to_inventory(agent: Node) -> bool:
 func try_story_harvest_drop(agent: Node, world_pos: Vector2) -> bool:
 	if not _is_story_mode() or not _story_village_revealed:
 		return false
+	if _story_phase_id < 4:
+		return false
 	if not is_instance_valid(agent):
 		return false
 	if not _story_is_phase4_required_farmer_delivery_type(str(agent.get("type"))):
@@ -546,6 +562,8 @@ func try_story_harvest_drop(agent: Node, world_pos: Vector2) -> bool:
 
 func try_story_inventory_delivery(item_type: String, world_pos: Vector2) -> bool:
 	if not _is_story_mode() or not _story_village_revealed:
+		return false
+	if _story_phase_id < 4:
 		return false
 	var normalized_type = str(item_type)
 	if not _story_is_phase4_required_farmer_delivery_type(normalized_type):
@@ -811,7 +829,7 @@ func _on_agent_harvest_committed(harvest_type: String, destination: String) -> v
 	var normalized_type = str(harvest_type)
 	if destination == "inventory" and _story_is_phase2_required_inventory_harvest_type(normalized_type):
 		_story_phase2_inventory_harvested_types[normalized_type] = true
-	if destination == "farmer" and _story_is_phase4_required_farmer_delivery_type(normalized_type):
+	if destination == "farmer" and _story_phase_id >= 4 and _story_is_phase4_required_farmer_delivery_type(normalized_type):
 		_story_phase4_farmer_delivery_types[normalized_type] = true
 	_story_try_advance_phase_milestones()
 
@@ -987,6 +1005,7 @@ func _ready():
 	#uix.connect('new_agent',_on_new_agent)
 	$UI.connect('new_agent',_on_new_agent)
 	$UI.connect("inventory_drag_preview", _on_inventory_drag_preview)
+	$UI.connect("request_back_to_menu", _on_ui_request_back_to_menu)
 	$UI.setup()
 	_mute_runtime_audio_if_headless()
 	_setup_perf_monitor()
@@ -1019,7 +1038,7 @@ func _ready():
 	elif Global.mode == "tutorial":
 		$"UI/TutorialMarginContainer1".visible = true
 		$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
-		$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+		_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 
 	var world_center = _get_world_center()
 	mid_width = int(world_center.x)
@@ -1097,7 +1116,40 @@ func _ready():
 	#cloud.connect('trade', _on_agent_trade)
 	
 			
+func _is_android_back_input(event: InputEvent) -> bool:
+	if not Global.is_mobile_platform:
+		return false
+	if event.is_action_pressed("ui_cancel"):
+		return true
+	if event is InputEventKey:
+		var key_event := event as InputEventKey
+		return key_event.pressed and not key_event.echo and key_event.keycode == KEY_ESCAPE
+	return false
+
+
+func _handle_android_back_request(event: InputEvent) -> bool:
+	if not _is_android_back_input(event):
+		return false
+	if get_tree().paused:
+		if $UI.has_method("show_back_to_menu_confirm"):
+			$UI.show_back_to_menu_confirm()
+	else:
+		if $UI.has_method("set_pause_state"):
+			$UI.set_pause_state(true)
+		else:
+			get_tree().paused = true
+	get_viewport().set_input_as_handled()
+	return true
+
+
+func _on_ui_request_back_to_menu() -> void:
+	Global.score = 0
+	get_tree().call_deferred("change_scene_to_file", "res://scenes/game_over.tscn")
+
+
 func _input(event):
+	if _handle_android_back_request(event):
+		return
 	if LevelHelpersRef.handle_gameplay_hotkeys(event, self, $Agents, false):
 		return
 
@@ -1838,7 +1890,7 @@ func _on_tutorial_timer_timeout() -> void:
 			if(c_buds >=4):
 				Global.stage += 1
 				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 				
 		elif(Global.stage == 2):
 			
@@ -1850,7 +1902,7 @@ func _on_tutorial_timer_timeout() -> void:
 			if(num_myco >=2):
 				Global.stage += 1
 				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 		elif(Global.stage == 3):
 			
 			var c_buds = 0
@@ -1863,7 +1915,7 @@ func _on_tutorial_timer_timeout() -> void:
 			if(num_myco >= 3 and c_buds >=2):
 				Global.stage += 1
 				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 		elif(Global.stage == 4):
 			
 			var c_maize = 0
@@ -1884,7 +1936,7 @@ func _on_tutorial_timer_timeout() -> void:
 			if(c_maize >=3):
 				Global.stage = 5
 				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 		
 		elif(Global.stage == 5):
 			
@@ -1908,7 +1960,7 @@ func _on_tutorial_timer_timeout() -> void:
 			if(c_maize >=2 and Global.values['K']>1):
 				Global.stage = 6
 				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 				
 		elif(Global.stage == 6):
 			
@@ -1935,7 +1987,7 @@ func _on_tutorial_timer_timeout() -> void:
 			if(c_maize >=2 and Global.values['K']>1):
 				Global.stage = 7
 				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 		
 		elif(Global.stage == 7):
 			
@@ -1947,7 +1999,7 @@ func _on_tutorial_timer_timeout() -> void:
 			if(c_maize >=2 and Global.values['K']<=1.1):
 				Global.stage = 8
 				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 				$"UI/RestartContainer".visible=true
 
 

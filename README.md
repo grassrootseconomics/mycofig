@@ -34,6 +34,43 @@ Headless benchmark runner (deterministic seed + scenario):
 godot4 --path . --headless --scene res://scenes/benchmark_runner.tscn -- --scenario=s2 --seed=1337 --duration=120 --target=700
 ```
 
+## Android (APK-First)
+- Android presets are defined in `export_presets.cfg`:
+  - `Android-TestAPK` (phone install testing)
+  - `Android-PlayAAB` (Google Play upload)
+- Stable Android package/application ID:
+  - `org.grassecon.socialsoilgardening`
+- Version contract:
+  - `versionName`: `1.0.0` (from `project.godot` + preset override)
+  - `versionCode`: `1` (must be incremented before each Play upload)
+
+Local test export:
+
+```bash
+mkdir -p build/android
+godot4 --headless --path . --export-debug "Android-TestAPK" build/android/social-soil-gardening-test.apk
+```
+
+Install on a connected phone:
+
+```bash
+adb install -r build/android/social-soil-gardening-test.apk
+```
+
+Play upload export (signed AAB via release keystore):
+
+```bash
+godot4 --headless --path . --export-release "Android-PlayAAB" build/android/social-soil-gardening-play.aab
+```
+
+CI workflow:
+- `.github/workflows/android-build.yml` builds reproducible Android artifacts from `v*` tags.
+- Artifact names include app version + git SHA.
+- Signed AAB export in CI requires these repository secrets:
+  - `ANDROID_RELEASE_KEYSTORE_BASE64`
+  - `GODOT_ANDROID_KEYSTORE_RELEASE_USER`
+  - `GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD`
+
 ## Game Modes
 Choose mode from title screen:
 - `Story`
@@ -56,6 +93,7 @@ Choose mode from title screen:
 - `B`: toggle resource bars (bars start OFF by default).
 - `+` / `-`: change movement speed.
 - `Esc` or `Q`: end run / go to game-over screen.
+- `Android Back`: first press pauses, next press opens exit-to-menu confirmation.
 - Inventory panel visibility: no hotkey yet (always shown).
 - `N`: toggle runtime performance overlay.
 - `V`: toggle Story fog-of-war on/off (debug runtime toggle).

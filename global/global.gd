@@ -96,10 +96,10 @@ var assets_social = { #list of assets -
 	}
 
 var story_stage_text = {
-	1: "Phase 1: Place bean, squash, maize, tree, and fungi from inventory to begin restoring soil. Fungi can only be placed on Semi-Healthy or Healthy soil, so this may take time. Hover or select agents to check resource bars and spot shortages.",
-	2: "Phase 2: Harvest one ripe bean, squash, maize, acorn, and mushroom to grow your inventory. Birds are hungry, so grow more crops.",
-	3: "Phase 3: Expand toward the ? on the map.",
-	4: "Phase 4: You found a village! Looks like they need food. Deliver at least one harvest item to any farmer so village trading can begin.",
+	1: "Phase 1: Place one of all your inventory items to begin restoring soil. Mushrooms can only grow in healthy soil, so this may take time. Select crops to check what resources they need.",
+	2: "Phase 2: Harvest each type of crop in your inventory by double clicking. Birds are hungry, so grow more crops.",
+	3: "Phase 3: Expand your garden toward the ? on the map.",
+	4: "Phase 4: You found a village! Looks like they need food. Deliver at some food to your fellow farmers so villagers can become healthy.",
 	5: "Phase 5: Place a basket from your inventory and help all villagers exchange even if they don't have money.",
 	6: "Phase 6: Complete! You restored soil health, revived the ecosystem, and helped the village recover. Well done!"
 }

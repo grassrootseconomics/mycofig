@@ -5,6 +5,7 @@ var time_elapsed := 0
 #signal sliderChanged(info_dict)
 signal new_agent(agent_dict)
 signal inventory_drag_preview(agent_name, world_pos, active)
+signal request_back_to_menu
 
 var sliders = []
 
@@ -14,8 +15,6 @@ var next_agent = null
 var resContainer = null
 var drag_preview_sprite: Sprite2D = null
 var minimap_panel: Control = null
-var _farm_tab_button: Button = null
-var _village_tab_button: Button = null
 var inventory_spawn_rng := RandomNumberGenerator.new()
 const AUTO_SPAWN_ATTEMPTS := 96
 const AUTO_SPAWN_SWEEP_STEPS := 48
@@ -27,8 +26,9 @@ const PARENT_BOUNDED_TYPES := {
 	"squash": true,
 	"maize": true
 }
-const FARM_TAB_ITEMS := ["bean", "squash", "maize", "tree", "myco"]
-const VILLAGE_TAB_ITEMS := ["farmer", "vendor", "cook", "basket"]
+const INVENTORY_SLOT_ITEMS := ["bean", "squash", "maize", "tree", "myco", "basket"]
+const INVENTORY_BASKET_SLOT_INDEX := 5
+const INVENTORY_LOCKED_GLYPH := "?"
 const INVENTORY_BACKPLATE_COLORS := {
 	"bean": Color(0.44, 0.86, 0.34, 0.58),
 	"squash": Color(1.0, 0.55, 0.20, 0.58),
@@ -36,21 +36,30 @@ const INVENTORY_BACKPLATE_COLORS := {
 	"tree": Color(0.30, 0.63, 1.0, 0.58)
 }
 const INVENTORY_BACKPLATE_DEFAULT := Color(0.08, 0.12, 0.18, 0.28)
+const TUTORIAL_PANEL_EXPANDED_SIZE := Vector2(372, 178)
+const TUTORIAL_PANEL_COLLAPSED_SIZE := Vector2(44, 44)
 
-var _current_inventory_tab := "farm"
-var _village_tab_unlocked := false
 var _slot_icons: Array = []
 var _slot_labels: Array = []
 var _slot_items: Array = []
 var _inventory_texture_cache: Dictionary = {}
 var _active_touch_drag_id := -1
 var _slot_backplates: Dictionary = {}
+var _slot_lock_glyphs: Dictionary = {}
+var _back_confirm_dialog: ConfirmationDialog = null
+var _minimap_drag_locked := false
+var _tutorial_toggle_button: Button = null
+var _tutorial_collapsed := false
+var _tutorial_last_visible := false
+var _tutorial_last_text := ""
 
 func _ready() -> void:
 	#$PalletContainer2/HBoxContainer/ActiveTexture.texture = Global.active_agent.sprite_texture
 	#resContainer = $MarginContainer/HBoxContainer/ResVBoxContainer
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	inventory_spawn_rng.randomize()
 	_ensure_drag_preview()
+	set_pause_state(false)
 
 var clicked_slider = false
 var mouseOverMyco = false
@@ -72,50 +81,27 @@ func setup():
 		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/ChooseSquash,
 		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3/ChooseMaize,
 		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4/ChooseTree,
-		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/ChooseMyco
+		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/ChooseMyco,
+		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer6/ChooseBasket
 	]
 	_slot_labels = [
 		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/BeanInv,
 		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/SquashInv,
 		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer3/MaizeInv,
 		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer4/TreeInv,
-		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/MycoInv
+		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/MycoInv,
+		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer6/BasketInv
 	]
-	_slot_items = ["", "", "", "", ""]
+	_slot_items = INVENTORY_SLOT_ITEMS.duplicate()
 	_ensure_inventory_backplates()
-	_ensure_inventory_tabs()
 	_ensure_minimap_panel()
+	_ensure_tutorial_panel_toggle()
+	_update_minimap_input_lock()
 	_set_inventory_tab("farm")
 	# Legacy valuation bars are retained in scene/code but hidden from runtime.
 	$MarginContainer/VBoxContainer/HBoxContainer/ResVBoxContainer.visible = false
 	$MarginContainer/VBoxContainer/HBoxContainer/ValVBoxContainer.visible = false
 	refresh_inventory_counts()
-
-
-func _ensure_inventory_tabs() -> void:
-	if is_instance_valid(_farm_tab_button) and is_instance_valid(_village_tab_button):
-		return
-	var tabs_row = HBoxContainer.new()
-	tabs_row.name = "InventoryTabs"
-	tabs_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	tabs_row.add_theme_constant_override("separation", 8)
-	var pallet_vbox = $MarginContainer/VBoxContainer/PalletContainer/VBoxContainer
-	pallet_vbox.add_child(tabs_row)
-	pallet_vbox.move_child(tabs_row, 0)
-
-	_farm_tab_button = Button.new()
-	_farm_tab_button.text = "Farm"
-	_farm_tab_button.pressed.connect(func() -> void: _set_inventory_tab("farm"))
-	tabs_row.add_child(_farm_tab_button)
-
-	_village_tab_button = Button.new()
-	_village_tab_button.text = "Village"
-	_village_tab_button.pressed.connect(func() -> void:
-		if _village_tab_unlocked:
-			_set_inventory_tab("village")
-	)
-	_village_tab_button.visible = _village_tab_unlocked
-	tabs_row.add_child(_village_tab_button)
 
 
 func _ensure_minimap_panel() -> void:
@@ -140,35 +126,64 @@ func _ensure_minimap_panel() -> void:
 	minimap_panel.configure(level_root, world, agents)
 
 
-func _set_inventory_tab(tab_id: String) -> void:
-	if tab_id == "village" and not _village_tab_unlocked:
-		tab_id = "farm"
-	_current_inventory_tab = tab_id
-	var items = FARM_TAB_ITEMS if tab_id == "farm" else VILLAGE_TAB_ITEMS
+func _is_story_basket_slot_unlocked() -> bool:
+	return Global.mode == "story" and int(Global.story_chapter_id) >= 5
+
+
+func _set_inventory_lock_glyph(icon: TextureRect, show_glyph: bool) -> void:
+	if not is_instance_valid(icon):
+		return
+	var host = _slot_backplates.get(icon, null)
+	if not (host is Panel):
+		return
+	var glyph_label: Label = _slot_lock_glyphs.get(icon, null)
+	if not is_instance_valid(glyph_label):
+		glyph_label = Label.new()
+		glyph_label.name = "LockedGlyph"
+		glyph_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		glyph_label.anchors_preset = Control.PRESET_FULL_RECT
+		glyph_label.anchor_right = 1.0
+		glyph_label.anchor_bottom = 1.0
+		glyph_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		glyph_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		glyph_label.add_theme_font_size_override("font_size", 24)
+		glyph_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.92))
+		host.add_child(glyph_label)
+		_slot_lock_glyphs[icon] = glyph_label
+	glyph_label.text = INVENTORY_LOCKED_GLYPH
+	glyph_label.visible = show_glyph
+
+
+func _set_inventory_tab(_tab_id: String = "farm") -> void:
+	if _slot_items.size() != INVENTORY_SLOT_ITEMS.size():
+		_slot_items = INVENTORY_SLOT_ITEMS.duplicate()
+	var basket_unlocked = _is_story_basket_slot_unlocked()
 	for idx in range(_slot_icons.size()):
 		var icon: TextureRect = _slot_icons[idx]
 		var label: Label = _slot_labels[idx]
-		if idx < items.size():
-			var item = str(items[idx])
-			_slot_items[idx] = item
-			icon.visible = true
-			label.visible = true
-			icon.texture = _get_inventory_item_texture(item)
-			icon.set_meta("item_name", item)
-			_apply_inventory_backplate_for_item(icon, item)
-		else:
-			_slot_items[idx] = ""
+		if not is_instance_valid(icon) or not is_instance_valid(label):
+			continue
+		if idx >= _slot_items.size():
 			icon.visible = false
 			label.visible = false
+			continue
+		var item = str(_slot_items[idx])
+		icon.visible = true
+		if idx == INVENTORY_BASKET_SLOT_INDEX and not basket_unlocked:
 			icon.texture = null
+			icon.modulate = Color(1, 1, 1, 1)
+			label.visible = false
+			label.text = ""
 			if icon.has_meta("item_name"):
 				icon.remove_meta("item_name")
 			_apply_inventory_backplate_for_item(icon, "")
-	if is_instance_valid(_farm_tab_button):
-		_farm_tab_button.disabled = tab_id == "farm"
-	if is_instance_valid(_village_tab_button):
-		_village_tab_button.disabled = tab_id == "village" or not _village_tab_unlocked
-	refresh_inventory_counts()
+			_set_inventory_lock_glyph(icon, true)
+			continue
+		label.visible = true
+		icon.texture = _get_inventory_item_texture(item)
+		icon.set_meta("item_name", item)
+		_apply_inventory_backplate_for_item(icon, item)
+		_set_inventory_lock_glyph(icon, false)
 
 
 func _make_inventory_backplate_style(color: Color) -> StyleBoxFlat:
@@ -188,6 +203,7 @@ func _make_inventory_backplate_style(color: Color) -> StyleBoxFlat:
 
 func _ensure_inventory_backplates() -> void:
 	_slot_backplates.clear()
+	_slot_lock_glyphs.clear()
 	for icon in _slot_icons:
 		if not is_instance_valid(icon):
 			continue
@@ -259,6 +275,7 @@ func _get_inventory_item_texture(item_name: String) -> Texture2D:
 
 
 func refresh_inventory_counts() -> void:
+	_set_inventory_tab()
 	for idx in range(_slot_icons.size()):
 		var icon: TextureRect = _slot_icons[idx]
 		var label: Label = _slot_labels[idx]
@@ -267,12 +284,11 @@ func refresh_inventory_counts() -> void:
 		var item = str(_slot_items[idx])
 		if item == "":
 			continue
+		if idx == INVENTORY_BASKET_SLOT_INDEX and not _is_story_basket_slot_unlocked():
+			continue
 		var count = int(Global.inventory.get(item, 0))
 		label.text = str(count)
 		icon.modulate.a = 1.0 if count > 0 else 0.5
-
-	if is_instance_valid(_village_tab_button):
-		_village_tab_button.disabled = _current_inventory_tab == "village" or not _village_tab_unlocked
 
 
 func get_inventory_icon_center(agent_name: String) -> Vector2:
@@ -303,7 +319,158 @@ func refund_inventory_item(agent_name: String, amount: int = 1) -> void:
 
 
 func _process(delta: float) -> void:
-	pass	
+	_update_minimap_input_lock()
+	_refresh_tutorial_panel_state()
+	_layout_quit_container()
+	_layout_tutorial_container()
+	_position_tutorial_toggle()
+
+
+func _update_minimap_input_lock() -> void:
+	if not is_instance_valid(minimap_panel):
+		_minimap_drag_locked = false
+		return
+	var should_lock = Global.is_dragging or next_agent != null
+	if should_lock == _minimap_drag_locked:
+		return
+	_minimap_drag_locked = should_lock
+	if minimap_panel.has_method("set_input_enabled"):
+		minimap_panel.call("set_input_enabled", not should_lock)
+
+
+func _ensure_tutorial_panel_toggle() -> void:
+	var tutorial = get_node_or_null("TutorialMarginContainer1")
+	if not is_instance_valid(tutorial):
+		return
+	tutorial.clip_contents = true
+	if not is_instance_valid(_tutorial_toggle_button):
+		_tutorial_toggle_button = Button.new()
+		_tutorial_toggle_button.name = "ToggleButton"
+		_tutorial_toggle_button.text = "X"
+		_tutorial_toggle_button.custom_minimum_size = Vector2(28, 28)
+		_tutorial_toggle_button.focus_mode = Control.FOCUS_NONE
+		_tutorial_toggle_button.z_as_relative = false
+		_tutorial_toggle_button.z_index = 120
+		_tutorial_toggle_button.add_theme_font_size_override("font_size", 14)
+		_tutorial_toggle_button.pressed.connect(_on_tutorial_toggle_pressed)
+		add_child(_tutorial_toggle_button)
+	_apply_tutorial_panel_state()
+
+
+func _set_tutorial_collapsed(collapsed: bool) -> void:
+	if _tutorial_collapsed == collapsed:
+		return
+	_tutorial_collapsed = collapsed
+	_apply_tutorial_panel_state()
+
+
+func _apply_tutorial_panel_state() -> void:
+	var tutorial = get_node_or_null("TutorialMarginContainer1")
+	if not is_instance_valid(tutorial):
+		return
+	var label: Label = tutorial.get_node_or_null("Label")
+	var helper_panel: Panel = tutorial.get_node_or_null("HelperPanel")
+	var content_visible = not _tutorial_collapsed
+	if is_instance_valid(label):
+		label.visible = content_visible
+	if is_instance_valid(helper_panel):
+		helper_panel.visible = content_visible
+	var target_size = TUTORIAL_PANEL_COLLAPSED_SIZE if _tutorial_collapsed else TUTORIAL_PANEL_EXPANDED_SIZE
+	tutorial.custom_minimum_size = target_size
+	tutorial.size = target_size
+	if is_instance_valid(_tutorial_toggle_button):
+		_tutorial_toggle_button.text = "i" if _tutorial_collapsed else "X"
+		_tutorial_toggle_button.visible = tutorial.visible
+	_layout_tutorial_container()
+	_position_tutorial_toggle()
+
+
+func _position_tutorial_toggle() -> void:
+	if not is_instance_valid(_tutorial_toggle_button):
+		return
+	var tutorial = get_node_or_null("TutorialMarginContainer1")
+	if not is_instance_valid(tutorial) or not tutorial.visible:
+		_tutorial_toggle_button.visible = false
+		return
+	_tutorial_toggle_button.visible = true
+	var rect = tutorial.get_global_rect()
+	var btn_size = _tutorial_toggle_button.custom_minimum_size
+	var pad := 2.0
+	_tutorial_toggle_button.global_position = Vector2(
+		rect.position.x + rect.size.x - btn_size.x - pad,
+		rect.position.y + rect.size.y - btn_size.y - pad
+	)
+
+
+func _layout_quit_container() -> void:
+	var quit_container: MarginContainer = get_node_or_null("QuitContainer")
+	var inventory_panel: MarginContainer = get_node_or_null("MarginContainer")
+	if not is_instance_valid(quit_container) or not is_instance_valid(inventory_panel):
+		return
+	var inventory_left = inventory_panel.get_global_rect().position.x
+	var midpoint = inventory_left * 0.5
+	var width = quit_container.size.x
+	if width <= 0.0:
+		width = quit_container.custom_minimum_size.x
+	if width <= 0.0:
+		width = 112.0
+	quit_container.offset_left = round(midpoint - width * 0.5)
+	quit_container.offset_right = round(midpoint + width * 0.5)
+
+
+func _layout_tutorial_container() -> void:
+	var tutorial: Control = get_node_or_null("TutorialMarginContainer1")
+	if not is_instance_valid(tutorial) or not tutorial.visible:
+		return
+	var view_rect = get_viewport().get_visible_rect()
+	var size = tutorial.size
+	if size.x <= 0.0 or size.y <= 0.0:
+		size = tutorial.custom_minimum_size
+	if size.x <= 0.0 or size.y <= 0.0:
+		size = TUTORIAL_PANEL_COLLAPSED_SIZE if _tutorial_collapsed else TUTORIAL_PANEL_EXPANDED_SIZE
+	var margin := 12.0
+	if _tutorial_collapsed:
+		tutorial.global_position = Vector2(
+			round(view_rect.position.x + margin),
+			round(view_rect.position.y + margin)
+		)
+		return
+	var top_y := 16.0
+	var score_container: Control = get_node_or_null("EndGameContainer")
+	if is_instance_valid(score_container) and score_container.visible:
+		var score_rect = score_container.get_global_rect()
+		top_y = score_rect.position.y + score_rect.size.y + 12.0
+	var x = view_rect.position.x + (view_rect.size.x - size.x) * 0.5
+	x = clampf(x, view_rect.position.x + margin, view_rect.position.x + view_rect.size.x - size.x - margin)
+	var y = maxf(top_y, view_rect.position.y + margin)
+	tutorial.global_position = Vector2(round(x), round(y))
+
+
+func _refresh_tutorial_panel_state() -> void:
+	var tutorial = get_node_or_null("TutorialMarginContainer1")
+	if not is_instance_valid(tutorial):
+		return
+	if not tutorial.visible:
+		_tutorial_last_visible = false
+		return
+	var label: Label = tutorial.get_node_or_null("Label")
+	var current_text := ""
+	if is_instance_valid(label):
+		current_text = str(label.text)
+	if not _tutorial_last_visible:
+		_tutorial_last_visible = true
+		_tutorial_last_text = current_text
+		return
+	if current_text != _tutorial_last_text:
+		_tutorial_last_text = current_text
+		if _tutorial_collapsed:
+			_set_tutorial_collapsed(false)
+
+
+func _on_tutorial_toggle_pressed() -> void:
+	_set_tutorial_collapsed(not _tutorial_collapsed)
+
+
 func _on_score_timer_timeout() -> void:
 	#time_elapsed += 1
 	#Global.score += 1
@@ -383,6 +550,63 @@ func _end_inventory_drag() -> void:
 	if is_instance_valid(drag_preview_sprite):
 		drag_preview_sprite.visible = false
 		drag_preview_sprite.texture = null
+
+
+func _ensure_back_confirm_dialog() -> void:
+	if is_instance_valid(_back_confirm_dialog):
+		return
+	_back_confirm_dialog = ConfirmationDialog.new()
+	_back_confirm_dialog.name = "BackConfirmDialog"
+	_back_confirm_dialog.title = "Quit game?"
+	_back_confirm_dialog.dialog_text = "Are you sure you want to quit?"
+	if _back_confirm_dialog.has_method("get_label"):
+		var dialog_label = _back_confirm_dialog.call("get_label")
+		if dialog_label is Label:
+			var label_node: Label = dialog_label
+			label_node.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			label_node.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	var ok_button = _back_confirm_dialog.get_ok_button()
+	if is_instance_valid(ok_button):
+		ok_button.text = "Yes"
+		ok_button.custom_minimum_size = Vector2(140, 56)
+		ok_button.add_theme_font_size_override("font_size", 18)
+	var cancel_button = _back_confirm_dialog.get_cancel_button()
+	if is_instance_valid(cancel_button):
+		cancel_button.text = "No"
+		cancel_button.custom_minimum_size = Vector2(140, 56)
+		cancel_button.add_theme_font_size_override("font_size", 18)
+	_back_confirm_dialog.confirmed.connect(_on_back_confirmed)
+	_back_confirm_dialog.canceled.connect(_on_back_confirm_canceled)
+	add_child(_back_confirm_dialog)
+
+
+func set_pause_state(paused: bool) -> void:
+	get_tree().paused = paused
+	var pause_button: Button = get_node_or_null("MarginCMarginContainer2ontainer/HBoxContainer/PauseButton")
+	if is_instance_valid(pause_button):
+		pause_button.text = "Start" if paused else "Pause"
+
+
+func show_back_to_menu_confirm() -> void:
+	set_pause_state(true)
+	_ensure_back_confirm_dialog()
+	if is_instance_valid(_back_confirm_dialog):
+		_back_confirm_dialog.popup_centered(Vector2i(420, 180))
+
+
+func hide_back_to_menu_confirm() -> void:
+	if is_instance_valid(_back_confirm_dialog):
+		_back_confirm_dialog.hide()
+
+
+func _on_back_confirmed() -> void:
+	set_pause_state(false)
+	emit_signal("request_back_to_menu")
+
+
+func _on_back_confirm_canceled() -> void:
+	set_pause_state(false)
+	hide_back_to_menu_confirm()
 
 
 func _get_agents_root() -> Node:
@@ -716,6 +940,7 @@ func _on_inventory_pointer_pressed(screen_pos: Vector2) -> void:
 		next_agent = selected
 		_start_inventory_drag(selected, screen_pos)
 		_emit_inventory_drag_preview(selected, screen_pos, true)
+		_update_minimap_input_lock()
 
 
 func _on_inventory_pointer_released(screen_pos: Vector2) -> void:
@@ -724,9 +949,12 @@ func _on_inventory_pointer_released(screen_pos: Vector2) -> void:
 		_emit_inventory_drag_preview(next_agent, screen_pos, false)
 	next_agent = null
 	_end_inventory_drag()
+	_update_minimap_input_lock()
 
 
 func _input(event):
+	if get_tree().paused:
+		return
 	if event is InputEventMouseMotion:
 		if Global.is_mobile_platform:
 			return
@@ -761,12 +989,9 @@ func _input(event):
 		_on_inventory_pointer_moved(event.position)
 
 
-func set_village_inventory_unlocked(unlocked: bool) -> void:
-	_village_tab_unlocked = unlocked
-	if is_instance_valid(_village_tab_button):
-		_village_tab_button.visible = unlocked
-	if not unlocked and _current_inventory_tab == "village":
-		_set_inventory_tab("farm")
+func set_village_inventory_unlocked(_unlocked: bool) -> void:
+	# Legacy API kept for level compatibility; tabs are removed.
+	# We still refresh because story phase changes can unlock the basket slot.
 	refresh_inventory_counts()
 
 
@@ -823,16 +1048,19 @@ func _on_choose_tree_mouse_exited() -> void:
 	mouseOverTree = false
 
 
-func _on_button_pressed() -> void:
+func _on_restart_button_pressed() -> void:
+	set_pause_state(false)
+	hide_back_to_menu_confirm()
 	Global.score = 0
 	get_tree().call_deferred("change_scene_to_file","res://scenes/title_screen.tscn")
-	
+
+
+func _on_quit_button_pressed() -> void:
+	show_back_to_menu_confirm()
 
 
 func _on_pause_button_pressed() -> void:
-	var status = get_tree().paused
-	get_tree().paused = not status
-	if(status == true):
-		$MarginCMarginContainer2ontainer/HBoxContainer/PauseButton.text = "Pause"
-	else:
-		$MarginCMarginContainer2ontainer/HBoxContainer/PauseButton.text = "Start"
+	var next_paused = not get_tree().paused
+	set_pause_state(next_paused)
+	if not next_paused:
+		hide_back_to_menu_confirm()

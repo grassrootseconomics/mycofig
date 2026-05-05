@@ -1,0 +1,126 @@
+name: Android Build
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      export_release_aab:
+        description: "Export Android-PlayAAB when signing secrets are present"
+        required: false
+        default: "true"
+      version_name:
+        description: "Optional override for versionName (defaults to project.godot config/version)"
+        required: false
+        default: ""
+      version_code:
+        description: "Optional override for versionCode (defaults to export preset value)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  android-export:
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: "4.5.1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-35
+            build-tools;35.0.0
+
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: true
+
+      - name: Prepare artifact metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/android
+
+          version_name="${{ github.event.inputs.version_name }}"
+          if [ -z "$version_name" ]; then
+            version_name="$(sed -n 's/^config\/version="\(.*\)"$/\1/p' project.godot | head -n1)"
+          fi
+          if [ -z "$version_name" ]; then
+            version_name="1.0.0"
+          fi
+
+          version_code="${{ github.event.inputs.version_code }}"
+          if [ -z "$version_code" ]; then
+            version_code="$(sed -n '/^\[preset\.2\.options\]$/,/^\[/ s/^version\/code=\([0-9]\+\)$/\1/p' export_presets.cfg | head -n1)"
+          fi
+          if [ -z "$version_code" ]; then
+            version_code="1"
+          fi
+
+          short_sha="${GITHUB_SHA::7}"
+          apk_path="build/android/social-soil-gardening-${version_name}-${short_sha}-test.apk"
+          aab_path="build/android/social-soil-gardening-${version_name}-${short_sha}-play.aab"
+
+          echo "version_name=$version_name" >> "$GITHUB_OUTPUT"
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+          echo "apk_path=$apk_path" >> "$GITHUB_OUTPUT"
+          echo "aab_path=$aab_path" >> "$GITHUB_OUTPUT"
+
+      - name: Export debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          godot --headless --path . --export-debug "Android-TestAPK" "${{ steps.meta.outputs.apk_path }}"
+
+      - name: Prepare release keystore
+        if: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 != '' }}
+        shell: bash
+        env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          keystore_path="$RUNNER_TEMP/android-upload-key.jks"
+          echo "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+          echo "GODOT_ANDROID_KEYSTORE_RELEASE_PATH=$keystore_path" >> "$GITHUB_ENV"
+
+      - name: Export signed release AAB
+        if: >-
+          (github.event_name == 'push' || github.event.inputs.export_release_aab != 'false') &&
+          secrets.ANDROID_RELEASE_KEYSTORE_BASE64 != '' &&
+          secrets.GODOT_ANDROID_KEYSTORE_RELEASE_USER != '' &&
+          secrets.GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD != ''
+        shell: bash
+        env:
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: ${{ secrets.GODOT_ANDROID_KEYSTORE_RELEASE_USER }}
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: ${{ secrets.GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          godot --headless --path . --export-release "Android-PlayAAB" "${{ steps.meta.outputs.aab_path }}"
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ steps.meta.outputs.version_name }}-${{ github.sha }}
+          path: |
+            ${{ steps.meta.outputs.apk_path }}
+            ${{ steps.meta.outputs.aab_path }}
+          if-no-files-found: warn

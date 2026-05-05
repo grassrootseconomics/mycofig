@@ -223,15 +223,11 @@ func draw_selected_box():
 func _physics_process(delta):
 	#_draw()
 	if is_dragging and draggable == true:
-		#for agent in $"../../Agents".get_children():
-		#	if(agent.is_dragging == true):
-		#		if(self.get_index() > agent.get_index()):
-		#			return
-				
 		var hit = false
-		var mouse_screen = Global.world_to_screen(self, get_global_mouse_position())
+		var pointer_world_pos = _get_drag_pointer_world_pos()
+		var pointer_screen_pos = _get_drag_pointer_screen_pos()
 		
-		if $"../../UI/MarginContainer".get_global_rect().has_point(mouse_screen):
+		if $"../../UI/MarginContainer".get_global_rect().has_point(pointer_screen_pos):
 			hit = true
 		
 		if hit==true:
@@ -239,48 +235,45 @@ func _physics_process(delta):
 			#queue_free()
 			return
 		var t = min(1.0, delay * delta)
-		var dragged_target = position.lerp(get_global_mouse_position(), t)
+		var dragged_target = position.lerp(pointer_world_pos, t)
 		position = _clamp_position_to_world(dragged_target)
 		if is_instance_valid(bar_canvas) and bar_canvas.visible:
 			_update_bar_positions()
 
 
 func _input(event):
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT:
-			var world_click_pos = Global.screen_to_world(self, event.position)
-			
-			if event.pressed:
-				if $Sprite2D.get_rect().has_point(to_local(world_click_pos)):
-					if(Global.is_dragging == false and _can_start_user_drag()):
-						_press_started_here = true
-						is_dragging = true
-						Global.is_dragging = true
-						Global.active_agent = self
-						Global.prevent_auto_select = false
-						_refresh_all_agent_bar_visibility()
-						_cancel_tile_snap()
-					else:
-						_press_started_here = true
-						Global.active_agent = self
-						Global.prevent_auto_select = false
-						_refresh_all_agent_bar_visibility()
-				else:
-					_press_started_here = false
+	if not draggable:
+		return
+	if event is InputEventMouseMotion:
+		_set_drag_pointer_screen_pos(event.position)
+		return
+	if event is InputEventScreenDrag:
+		if _active_touch_id != -1 and event.index == _active_touch_id:
+			_set_drag_pointer_screen_pos(event.position)
+		return
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			if _active_touch_id != -1 and event.index != _active_touch_id:
+				return
+			var world_touch_pos = Global.screen_to_world(self, event.position)
+			if _is_press_hit(world_touch_pos):
+				_active_touch_id = event.index
+				_on_pointer_press(event.position)
 			else:
-				var pressed_here = _press_started_here
 				_press_started_here = false
-				var was_dragging = is_dragging
-				if was_dragging:
-					is_dragging = false
-					Global.is_dragging = false
-					_begin_snap_to_nearest_tile(position)
-					_clear_drag_tile_hint()
-				if pressed_here and $Sprite2D.get_rect().has_point(to_local(world_click_pos)):
-					#emit_signal("clicked_agent",self)
-					Global.active_agent = self
-					Global.prevent_auto_select = false
-					_refresh_all_agent_bar_visibility()
+		else:
+			if event.index != _active_touch_id:
+				return
+			_on_pointer_release(event.position)
+			_active_touch_id = -1
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if Global.is_mobile_platform:
+			return
+		if event.pressed:
+			_on_pointer_press(event.position)
+		else:
+			_on_pointer_release(event.position)
 				
 
 

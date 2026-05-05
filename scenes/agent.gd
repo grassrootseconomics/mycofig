@@ -46,6 +46,9 @@ const BASE_MOVEMENT_SPEED_FOR_STARVATION := 200.0
 const MIN_STARVATION_SPEED_SCALE := 0.2
 const STORY_PREDATOR_DISRUPT_SECONDS := 4.0
 const LIFECYCLE_PARENT_BOUND_TILES := 4
+const MOBILE_DOUBLE_TAP_WINDOW_MSEC := 320
+const MOBILE_DOUBLE_TAP_MAX_DISTANCE := 54.0
+const MOBILE_TAP_SLOP_DISTANCE := 28.0
 
 signal trade(pos)
 signal clicked
@@ -171,6 +174,9 @@ var _active_touch_id := -1
 var _drag_pointer_screen_pos := Vector2.ZERO
 var _has_drag_pointer_screen_pos := false
 var _drag_pointer_down := false
+var _touch_press_screen_pos := Vector2.ZERO
+var _mobile_last_tap_time_msec := -1
+var _mobile_last_tap_screen_pos := Vector2.ZERO
 var _harvest_drag_sprite: Sprite2D = null
 var bean_pod_ticks := 0
 var bean_dead_ticks := 0
@@ -402,8 +408,62 @@ func _is_drag_pointer_held() -> bool:
 	return _drag_pointer_down or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 
 
+func _can_pointer_double_activate_harvest() -> bool:
+	if not can_drag_for_inventory_harvest():
+		return false
+	var level_root = _get_level_root()
+	if is_instance_valid(level_root) and level_root.has_method("can_agent_harvest_to_inventory"):
+		return bool(level_root.can_agent_harvest_to_inventory(self))
+	return true
+
+
+func _try_pointer_double_activate_harvest(screen_pos: Vector2) -> bool:
+	if not _can_pointer_double_activate_harvest():
+		return false
+	_set_drag_pointer_screen_pos(screen_pos)
+	_drag_pointer_down = false
+	_cancel_tile_snap()
+	_harvest_drag_only = true
+	_start_harvest_drag_proxy()
+	if _start_harvest_inventory_fly_in():
+		return true
+	_harvest_drag_only = false
+	_end_harvest_drag_proxy()
+	return false
+
+
+func _try_mouse_double_click_harvest(screen_pos: Vector2) -> bool:
+	if Global.is_mobile_platform:
+		return false
+	var world_click_pos = Global.screen_to_world(self, screen_pos)
+	if not _is_press_hit(world_click_pos):
+		return false
+	return _try_pointer_double_activate_harvest(screen_pos)
+
+
+func _handle_mobile_double_tap_release(screen_pos: Vector2, clicked_self: bool, pressed_here: bool) -> bool:
+	if not Global.is_mobile_platform:
+		return false
+	if not clicked_self or not pressed_here:
+		_mobile_last_tap_time_msec = -1
+		return false
+	if screen_pos.distance_to(_touch_press_screen_pos) > MOBILE_TAP_SLOP_DISTANCE:
+		_mobile_last_tap_time_msec = -1
+		return false
+	var now = Time.get_ticks_msec()
+	var within_window = _mobile_last_tap_time_msec >= 0 and (now - _mobile_last_tap_time_msec) <= MOBILE_DOUBLE_TAP_WINDOW_MSEC
+	var within_distance = _mobile_last_tap_screen_pos.distance_to(screen_pos) <= MOBILE_DOUBLE_TAP_MAX_DISTANCE
+	if within_window and within_distance:
+		_mobile_last_tap_time_msec = -1
+		return _try_pointer_double_activate_harvest(screen_pos)
+	_mobile_last_tap_time_msec = now
+	_mobile_last_tap_screen_pos = screen_pos
+	return false
+
+
 func _on_pointer_press(screen_pos: Vector2) -> void:
 	_set_drag_pointer_screen_pos(screen_pos)
+	_touch_press_screen_pos = screen_pos
 	var world_click_pos = Global.screen_to_world(self, screen_pos)
 	var clicked_self = _is_press_hit(world_click_pos)
 	_drag_pointer_down = clicked_self
@@ -452,6 +512,8 @@ func _on_pointer_release(screen_pos: Vector2) -> void:
 			_begin_snap_to_nearest_tile(position)
 		_harvest_drag_only = false
 		_clear_drag_tile_hint()
+	if _handle_mobile_double_tap_release(screen_pos, clicked_self, pressed_here):
+		return
 	if pressed_here and clicked_self:
 		Global.active_agent = self
 		Global.prevent_auto_select = false
@@ -1823,6 +1885,8 @@ func _input(event):
 		if Global.is_mobile_platform:
 			return
 		if event.pressed:
+			if event.double_click and _try_mouse_double_click_harvest(event.position):
+				return
 			_on_pointer_press(event.position)
 		else:
 			_on_pointer_release(event.position)

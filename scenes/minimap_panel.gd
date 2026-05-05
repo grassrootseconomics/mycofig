@@ -3,6 +3,7 @@ class_name MiniMapPanel
 
 signal camera_pan_requested(world_pos: Vector2)
 
+const LevelHelpersRef = preload("res://scenes/level_helpers.gd")
 const BG_COLOR := Color(0.04, 0.08, 0.12, 0.92)
 const BORDER_COLOR := Color(0.80, 0.88, 0.95, 0.92)
 const CAMERA_COLOR := Color(1.0, 1.0, 1.0, 0.88)
@@ -13,6 +14,7 @@ var _world_node: Node = null
 var _agents_root: Node = null
 var _dragging := false
 var _touch_drag_id := -1
+var _input_enabled := true
 var _village_marker_world := Vector2.ZERO
 var _village_marker_visible := false
 
@@ -34,17 +36,37 @@ func set_village_marker(world_pos: Vector2, visible: bool) -> void:
 	queue_redraw()
 
 
+func set_input_enabled(enabled: bool) -> void:
+	_input_enabled = enabled
+	if not _input_enabled:
+		_cancel_drag_state()
+
+
+func _cancel_drag_state() -> void:
+	_dragging = false
+	_touch_drag_id = -1
+
+
+func _clear_mobile_selection_for_pan() -> void:
+	if not Global.is_mobile_platform:
+		return
+	LevelHelpersRef.clear_mobile_selection_and_bars(_level_root, _agents_root)
+
+
 func _process(_delta: float) -> void:
 	queue_redraw()
 
 
 func _gui_input(event: InputEvent) -> void:
+	if not _input_enabled:
+		return
 	if event is InputEventScreenTouch:
 		if event.pressed:
 			if _touch_drag_id != -1 and event.index != _touch_drag_id:
 				return
 			_touch_drag_id = event.index
 			_dragging = true
+			_clear_mobile_selection_for_pan()
 			_emit_pan_for_local(event.position)
 		else:
 			if event.index != _touch_drag_id:

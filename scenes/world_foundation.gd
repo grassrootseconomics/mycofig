@@ -484,6 +484,16 @@ func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, get_world_rect().size), Color(1, 1, 1, 0.9), false, 3.0, true)
 
 
+func _clear_mobile_selection_for_pan() -> void:
+	if not Global.is_mobile_platform:
+		return
+	var level_root = get_parent()
+	if not is_instance_valid(level_root):
+		return
+	var agents_root = level_root.get_node_or_null("Agents")
+	LevelHelpersRef.clear_mobile_selection_and_bars(level_root, agents_root)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == HOTKEY_WORLD_DEBUG_OVERLAY:
@@ -521,6 +531,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			if event.pressed and _touch_drag_id == -1 and not _is_pointer_over_ui(event.position):
 				_touch_drag_id = event.index
 				_touch_drag_last = event.position
+				_clear_mobile_selection_for_pan()
 			elif not event.pressed and event.index == _touch_drag_id:
 				_touch_drag_id = -1
 		if event is InputEventScreenDrag and event.index == _touch_drag_id and not Global.is_dragging:
@@ -530,6 +541,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if enable_pan_gesture and event is InputEventPanGesture and not Global.is_dragging:
 		var pointer_pos = get_viewport().get_mouse_position()
 		if not _is_pointer_over_ui(pointer_pos):
+			_clear_mobile_selection_for_pan()
 			_pan_camera_by_screen_delta(event.delta * pan_gesture_scale)
 
 	if event is InputEventMouseMotion:

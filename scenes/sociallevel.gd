@@ -72,6 +72,20 @@ func _get_world_center() -> Vector2:
 	return Global.get_world_center(self)
 
 
+func _set_tutorial_panel_color(color: Color) -> void:
+	var helper_panel: Panel = get_node_or_null("UI/TutorialMarginContainer1/HelperPanel")
+	if not is_instance_valid(helper_panel):
+		return
+	var style_box = helper_panel.get_theme_stylebox("panel")
+	var helper_style := StyleBoxFlat.new()
+	if style_box is StyleBoxFlat:
+		var duplicated = (style_box as StyleBoxFlat).duplicate()
+		if duplicated is StyleBoxFlat:
+			helper_style = duplicated
+	helper_style.bg_color = color
+	helper_panel.add_theme_stylebox_override("panel", helper_style)
+
+
 func _resolve_tile_spawn_pos(pos: Vector2) -> Vector2:
 	return LevelHelpersRef.resolve_snapped_spawn_position(self, $Agents, pos)
 
@@ -215,6 +229,7 @@ func _ready():
 	#uix.connect('new_agent',_on_new_agent)
 	$UI.connect('new_agent',_on_new_agent)
 	$UI.connect("inventory_drag_preview", _on_inventory_drag_preview)
+	$UI.connect("request_back_to_menu", _on_ui_request_back_to_menu)
 	$UI.setup()
 	_mute_runtime_audio_if_headless()
 	_setup_perf_monitor()
@@ -231,7 +246,7 @@ func _ready():
 	if(Global.mode == "tutorial"):
 		$"UI/TutorialMarginContainer1".visible=true
 		$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
-		$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+		_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 
 	var world_center = _get_world_center()
 	mid_width = int(world_center.x)
@@ -300,7 +315,40 @@ func _ready():
 	_process_dirty_queues()
 	
 			
+func _is_android_back_input(event: InputEvent) -> bool:
+	if not Global.is_mobile_platform:
+		return false
+	if event.is_action_pressed("ui_cancel"):
+		return true
+	if event is InputEventKey:
+		var key_event := event as InputEventKey
+		return key_event.pressed and not key_event.echo and key_event.keycode == KEY_ESCAPE
+	return false
+
+
+func _handle_android_back_request(event: InputEvent) -> bool:
+	if not _is_android_back_input(event):
+		return false
+	if get_tree().paused:
+		if $UI.has_method("show_back_to_menu_confirm"):
+			$UI.show_back_to_menu_confirm()
+	else:
+		if $UI.has_method("set_pause_state"):
+			$UI.set_pause_state(true)
+		else:
+			get_tree().paused = true
+	get_viewport().set_input_as_handled()
+	return true
+
+
+func _on_ui_request_back_to_menu() -> void:
+	Global.score = 0
+	get_tree().call_deferred("change_scene_to_file", "res://scenes/game_over.tscn")
+
+
 func _input(event):
+	if _handle_android_back_request(event):
+		return
 	if LevelHelpersRef.handle_gameplay_hotkeys(event, self, $Agents, true):
 		return
 
@@ -654,7 +702,7 @@ func _on_tutorial_timer_timeout() -> void:
 			if(c_buds >=4):
 				Global.stage += 1
 				$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 			
 		elif(Global.stage == 2):
 			
@@ -666,7 +714,7 @@ func _on_tutorial_timer_timeout() -> void:
 			if(num_myco >=5):
 				Global.stage += 1
 				$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 		elif(Global.stage == 3):
 			
 			var c_buds = 0
@@ -679,7 +727,7 @@ func _on_tutorial_timer_timeout() -> void:
 			if(num_myco >= 5 and c_buds >=3):
 				Global.stage += 1
 				$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 		elif(Global.stage == 4):
 			
 			var c_maize = 0
@@ -700,7 +748,7 @@ func _on_tutorial_timer_timeout() -> void:
 			if(c_maize >=3):
 				Global.stage = 5
 				$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 		
 		elif(Global.stage == 5):
 			
@@ -724,7 +772,7 @@ func _on_tutorial_timer_timeout() -> void:
 			if(c_maize >=2 and Global.values['K']>1):
 				Global.stage = 6
 				$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 				
 		elif(Global.stage == 6):
 			
@@ -751,7 +799,7 @@ func _on_tutorial_timer_timeout() -> void:
 			if(c_maize >=2 and Global.values['K']>1):
 				Global.stage = 7
 				$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 		
 		elif(Global.stage == 7):
 			
@@ -763,7 +811,7 @@ func _on_tutorial_timer_timeout() -> void:
 			if(c_maize >=2 and Global.values['K']<=1.1):
 				Global.stage = 8
 				$"UI/TutorialMarginContainer1/Label".text = Global.social_stage_text[Global.stage]
-				$"UI/TutorialMarginContainer1/ColorRect".color = Global.stage_colors[Global.stage]
+				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 				$"UI/RestartContainer".visible=true
 
 

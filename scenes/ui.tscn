@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3 uid="uid://bmwuxpm12gkh7"]
+[gd_scene load_steps=9 format=3 uid="uid://bmwuxpm12gkh7"]
 
 [ext_resource type="Script" path="res://scenes/ui.gd" id="1_j1sfg"]
 [ext_resource type="Texture2D" uid="uid://6hcegny21br4" path="res://graphics/squash_32.png" id="4_7oh4h"]
@@ -7,6 +7,20 @@
 [ext_resource type="Texture2D" path="res://graphics/acorn_32.png" id="6_41l0c"]
 [ext_resource type="Script" path="res://scenes/pause_node.gd" id="7_65oah"]
 [ext_resource type="Texture2D" uid="uid://cqcp3xd8ymlh5" path="res://graphics/mushroom_32.png" id="7_w5alb"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_inventory_frame"]
+bg_color = Color(0, 0.129412, 0.47451, 0.572549)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.0352941, 0.0705882, 0.14902, 0.78)
+shadow_color = Color(0, 0, 0, 0.25)
+shadow_size = 4
 
 [node name="UI" type="CanvasLayer" groups=["ui"]]
 script = ExtResource("1_j1sfg")
@@ -22,14 +36,15 @@ offset_top = -159.0
 offset_right = 101.5
 grow_horizontal = 2
 grow_vertical = 0
-theme_override_constants/margin_left = 10
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 10
-theme_override_constants/margin_bottom = 10
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 14
 
-[node name="ColorRect" type="ColorRect" parent="MarginContainer"]
+[node name="InventoryFrame" type="Panel" parent="MarginContainer"]
 layout_mode = 2
-color = Color(0, 0.129412, 0.47451, 0.572549)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_inventory_frame")
 
 [node name="VBoxContainer" type="VBoxContainer" parent="MarginContainer"]
 layout_mode = 2

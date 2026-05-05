@@ -12,7 +12,7 @@ collision_mask = 2
 script = ExtResource("1_tro54")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
-scale = Vector2(2, 2)
+scale = Vector2(1, 1)
 texture = ExtResource("2_pvdeb")
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]

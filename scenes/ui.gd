@@ -29,6 +29,13 @@ const PARENT_BOUNDED_TYPES := {
 }
 const FARM_TAB_ITEMS := ["bean", "squash", "maize", "tree", "myco"]
 const VILLAGE_TAB_ITEMS := ["farmer", "vendor", "cook", "basket"]
+const INVENTORY_BACKPLATE_COLORS := {
+	"bean": Color(0.44, 0.86, 0.34, 0.58),
+	"squash": Color(1.0, 0.55, 0.20, 0.58),
+	"maize": Color(1.0, 0.45, 0.75, 0.60),
+	"tree": Color(0.30, 0.63, 1.0, 0.58)
+}
+const INVENTORY_BACKPLATE_DEFAULT := Color(0.08, 0.12, 0.18, 0.28)
 
 var _current_inventory_tab := "farm"
 var _village_tab_unlocked := false
@@ -37,6 +44,7 @@ var _slot_labels: Array = []
 var _slot_items: Array = []
 var _inventory_texture_cache: Dictionary = {}
 var _active_touch_drag_id := -1
+var _slot_backplates: Dictionary = {}
 
 func _ready() -> void:
 	#$PalletContainer2/HBoxContainer/ActiveTexture.texture = Global.active_agent.sprite_texture
@@ -74,6 +82,7 @@ func setup():
 		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer5/MycoInv
 	]
 	_slot_items = ["", "", "", "", ""]
+	_ensure_inventory_backplates()
 	_ensure_inventory_tabs()
 	_ensure_minimap_panel()
 	_set_inventory_tab("farm")
@@ -146,6 +155,7 @@ func _set_inventory_tab(tab_id: String) -> void:
 			label.visible = true
 			icon.texture = _get_inventory_item_texture(item)
 			icon.set_meta("item_name", item)
+			_apply_inventory_backplate_for_item(icon, item)
 		else:
 			_slot_items[idx] = ""
 			icon.visible = false
@@ -153,11 +163,69 @@ func _set_inventory_tab(tab_id: String) -> void:
 			icon.texture = null
 			if icon.has_meta("item_name"):
 				icon.remove_meta("item_name")
+			_apply_inventory_backplate_for_item(icon, "")
 	if is_instance_valid(_farm_tab_button):
 		_farm_tab_button.disabled = tab_id == "farm"
 	if is_instance_valid(_village_tab_button):
 		_village_tab_button.disabled = tab_id == "village" or not _village_tab_unlocked
 	refresh_inventory_counts()
+
+
+func _make_inventory_backplate_style(color: Color) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = color
+	style.corner_radius_top_left = 6
+	style.corner_radius_top_right = 6
+	style.corner_radius_bottom_left = 6
+	style.corner_radius_bottom_right = 6
+	style.border_width_left = 1
+	style.border_width_top = 1
+	style.border_width_right = 1
+	style.border_width_bottom = 1
+	style.border_color = Color(0.04, 0.06, 0.10, 0.70)
+	return style
+
+
+func _ensure_inventory_backplates() -> void:
+	_slot_backplates.clear()
+	for icon in _slot_icons:
+		if not is_instance_valid(icon):
+			continue
+		var existing_parent = icon.get_parent()
+		if existing_parent is Panel and bool(existing_parent.get_meta("inventory_backplate", false)):
+			_slot_backplates[icon] = existing_parent
+			continue
+		var host := Panel.new()
+		host.name = str(icon.name, "Backplate")
+		host.custom_minimum_size = Vector2(40, 40)
+		host.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		host.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		host.set_meta("inventory_backplate", true)
+		host.add_theme_stylebox_override("panel", _make_inventory_backplate_style(INVENTORY_BACKPLATE_DEFAULT))
+		if not is_instance_valid(existing_parent):
+			continue
+		var insert_index: int = icon.get_index()
+		existing_parent.add_child(host)
+		existing_parent.move_child(host, insert_index)
+		existing_parent.remove_child(icon)
+		host.add_child(icon)
+		icon.set_anchors_preset(Control.PRESET_FULL_RECT)
+		icon.offset_left = 4.0
+		icon.offset_top = 4.0
+		icon.offset_right = -4.0
+		icon.offset_bottom = -4.0
+		_slot_backplates[icon] = host
+
+
+func _apply_inventory_backplate_for_item(icon: TextureRect, item_name: String) -> void:
+	if not is_instance_valid(icon):
+		return
+	var host = _slot_backplates.get(icon, null)
+	if not (host is Panel):
+		return
+	var base_color: Color = INVENTORY_BACKPLATE_COLORS.get(item_name, INVENTORY_BACKPLATE_DEFAULT)
+	host.add_theme_stylebox_override("panel", _make_inventory_backplate_style(base_color))
 
 
 func _get_inventory_item_texture(item_name: String) -> Texture2D:

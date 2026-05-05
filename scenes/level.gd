@@ -21,7 +21,6 @@ const STORY_WORLD_COLUMNS := 26
 const STORY_WORLD_ROWS := 27
 const STORY_START_TILE := Vector2i(3, 13)
 const STORY_VILLAGE_RECT := Rect2i(16, 9, 10, 10)
-const STORY_VILLAGE_REVEAL_DISTANCE := 4
 const STORY_BIRD_SAFE_BUFFER := 6
 const STORY_TUKTUK_START_PHASE := 5
 const STORY_TUKTUK_SPAWN_RING_MIN := 1
@@ -30,7 +29,9 @@ const STORY_TUKTUK_TARGET_BUFFER := 4
 const STORY_VILLAGER_COUNT_PER_ROLE := 3
 const STORY_PHASE_MIN := 1
 const STORY_PHASE_MAX := 6
-const STORY_PHASE3_MYCO_NEAR_VILLAGER_RADIUS := 4
+const STORY_PHASE3_MYCO_NEAR_VILLAGER_MIN_RADIUS := 3
+const STORY_PHASE3_MYCO_NEAR_VILLAGER_MAX_RADIUS := 7
+const STORY_PHASE4_FARMER_HARVEST_RADIUS := 8
 const STORY_VILLAGE_PERMANENT_REVEAL_BUFFER := 4
 const STORY_PHASE5_OBJECTIVE_KEY := "village_everyone_trading"
 const AMBIENT_TREE_AUDIO_RADIUS_TILES := 4.0
@@ -112,6 +113,9 @@ var _story_phase1_placed_types: Dictionary = {}
 var _story_phase2_inventory_harvested_types: Dictionary = {}
 var _story_phase3_myco_near_villager := false
 var _story_phase4_farmer_delivery_types: Dictionary = {}
+var _story_phase4_required_farmer_ids: Dictionary = {}
+var _story_phase4_completed_farmer_ids: Dictionary = {}
+var _story_phase4_reserved_crop_to_farmer_ids: Dictionary = {}
 var _story_phase5_target_villager_ids: Dictionary = {}
 var _story_phase5_traded_villager_ids: Dictionary = {}
 var _story_phase5_all_villagers_trading := false
@@ -344,6 +348,9 @@ func _story_reset_phase_state() -> void:
 	_story_phase2_inventory_harvested_types.clear()
 	_story_phase3_myco_near_villager = false
 	_story_phase4_farmer_delivery_types.clear()
+	_story_phase4_required_farmer_ids.clear()
+	_story_phase4_completed_farmer_ids.clear()
+	_story_phase4_reserved_crop_to_farmer_ids.clear()
 	_story_phase5_target_villager_ids.clear()
 	_story_phase5_traded_villager_ids.clear()
 	_story_phase5_all_villagers_trading = false
@@ -369,7 +376,13 @@ func _set_story_phase(phase_id: int) -> void:
 		_story_phase3_myco_near_villager = false
 	if safe_phase == 4:
 		_story_phase4_farmer_delivery_types.clear()
+		_story_phase4_required_farmer_ids.clear()
+		_story_phase4_completed_farmer_ids.clear()
+		_story_phase4_reserved_crop_to_farmer_ids.clear()
+		_story_reveal_village()
+		_story_phase4_required_farmer_ids = _story_collect_phase4_initial_farmer_ids()
 	if safe_phase == 5:
+		_story_phase4_reserved_crop_to_farmer_ids.clear()
 		_story_reset_phase5_trading_progress()
 	_story_sync_phase1_inventory_sparkle_targets()
 
@@ -556,6 +569,98 @@ func _story_collect_villager_ids() -> Dictionary:
 	return ids
 
 
+func _story_collect_phase4_initial_farmer_ids() -> Dictionary:
+	var ids: Dictionary = {}
+	for agent in $Agents.get_children():
+		if not _is_story_villager(agent):
+			continue
+		if str(agent.get("type")) != "farmer":
+			continue
+		ids[int(agent.get_instance_id())] = true
+	return ids
+
+
+func _story_find_live_agent_by_instance_id(agent_id: int) -> Node:
+	for agent in $Agents.get_children():
+		if not is_instance_valid(agent):
+			continue
+		if int(agent.get_instance_id()) != agent_id:
+			continue
+		if bool(agent.get("dead")):
+			return null
+		return agent
+	return null
+
+
+func _story_is_phase4_farmer_auto_harvest_crop_type(crop_type: String) -> bool:
+	return crop_type == "bean" or crop_type == "squash" or crop_type == "maize" or crop_type == "tree"
+
+
+func _story_phase4_release_reservations_for_farmer_id(farmer_id: int) -> void:
+	if farmer_id <= 0:
+		return
+	var stale_keys: Array = []
+	for crop_id_variant in _story_phase4_reserved_crop_to_farmer_ids.keys():
+		if int(_story_phase4_reserved_crop_to_farmer_ids[crop_id_variant]) != farmer_id:
+			continue
+		stale_keys.append(crop_id_variant)
+	for crop_id_variant in stale_keys:
+		_story_phase4_reserved_crop_to_farmer_ids.erase(crop_id_variant)
+
+
+func _story_phase4_cleanup_harvest_reservations() -> void:
+	if _story_phase4_reserved_crop_to_farmer_ids.is_empty():
+		return
+	var stale_keys: Array = []
+	for crop_id_variant in _story_phase4_reserved_crop_to_farmer_ids.keys():
+		var crop_id = int(crop_id_variant)
+		var farmer_id = int(_story_phase4_reserved_crop_to_farmer_ids[crop_id_variant])
+		var crop = _story_find_live_agent_by_instance_id(crop_id)
+		var farmer = _story_find_live_agent_by_instance_id(farmer_id)
+		if not is_instance_valid(crop) or not is_instance_valid(farmer):
+			stale_keys.append(crop_id_variant)
+			continue
+		if not _is_story_villager(farmer) or str(farmer.get("type")) != "farmer":
+			stale_keys.append(crop_id_variant)
+			continue
+		var crop_type = str(crop.get("type"))
+		if not _story_is_phase4_farmer_auto_harvest_crop_type(crop_type):
+			stale_keys.append(crop_id_variant)
+			continue
+		if not crop.has_method("can_drag_for_inventory_harvest"):
+			stale_keys.append(crop_id_variant)
+			continue
+		if not bool(crop.call("can_drag_for_inventory_harvest")):
+			stale_keys.append(crop_id_variant)
+	for crop_id_variant in stale_keys:
+		_story_phase4_reserved_crop_to_farmer_ids.erase(crop_id_variant)
+
+
+func _story_phase4_has_all_required_farmers_completed_harvest() -> bool:
+	if _story_phase4_required_farmer_ids.is_empty():
+		return false
+	for farmer_id_variant in _story_phase4_required_farmer_ids.keys():
+		if not bool(_story_phase4_completed_farmer_ids.get(farmer_id_variant, false)):
+			return false
+	return true
+
+
+func _story_get_base_villager_layout() -> Array:
+	var top_people_row_y = STORY_VILLAGE_RECT.position.y + 5
+	return [
+		{"role": "farmer", "tile": Vector2i(STORY_VILLAGE_RECT.position.x + 5, top_people_row_y)},
+		{"role": "vendor", "tile": Vector2i(STORY_VILLAGE_RECT.position.x + 6, top_people_row_y)},
+		{"role": "cook", "tile": Vector2i(STORY_VILLAGE_RECT.position.x + 7, top_people_row_y)}
+	]
+
+
+func _story_get_base_villager_tiles() -> Array:
+	var tiles: Array = []
+	for villager_cfg in _story_get_base_villager_layout():
+		tiles.append(Vector2i(villager_cfg["tile"]))
+	return tiles
+
+
 func _story_reset_phase5_trading_progress() -> void:
 	_story_phase5_target_villager_ids = _story_collect_villager_ids()
 	_story_phase5_traded_villager_ids.clear()
@@ -587,17 +692,27 @@ func _story_update_phase5_trading_completion() -> void:
 
 
 func _is_story_myco_near_any_villager(world_pos: Vector2) -> bool:
-	if not _is_story_mode() or not _story_village_revealed:
+	if not _is_story_mode():
 		return false
 	var world = _get_world_foundation()
 	if not _supports_world_tiles(world):
 		return false
 	var myco_coord = _world_to_tile_coord(world, world_pos)
+	var saw_live_villager := false
 	for agent in $Agents.get_children():
 		if not _is_story_villager(agent):
 			continue
+		saw_live_villager = true
 		var villager_coord = _world_to_tile_coord(world, agent.global_position)
-		if _tile_chebyshev_distance(myco_coord, villager_coord) <= STORY_PHASE3_MYCO_NEAR_VILLAGER_RADIUS:
+		var villager_dist = _tile_chebyshev_distance(myco_coord, villager_coord)
+		if villager_dist >= STORY_PHASE3_MYCO_NEAR_VILLAGER_MIN_RADIUS and villager_dist <= STORY_PHASE3_MYCO_NEAR_VILLAGER_MAX_RADIUS:
+			return true
+	if saw_live_villager:
+		return false
+	for villager_tile in _story_get_base_villager_tiles():
+		var target_coord = _clamp_tile_coord(world, Vector2i(villager_tile))
+		var target_dist = _tile_chebyshev_distance(myco_coord, target_coord)
+		if target_dist >= STORY_PHASE3_MYCO_NEAR_VILLAGER_MIN_RADIUS and target_dist <= STORY_PHASE3_MYCO_NEAR_VILLAGER_MAX_RADIUS:
 			return true
 	return false
 
@@ -615,7 +730,7 @@ func _story_try_advance_phase_milestones() -> void:
 		if _story_phase3_myco_near_villager:
 			_set_story_phase(4)
 	if _story_phase_id == 4:
-		if not _story_phase4_farmer_delivery_types.is_empty():
+		if _story_phase4_has_all_required_farmers_completed_harvest():
 			_set_story_phase(5)
 	if _story_phase_id == 5:
 		_story_update_phase5_trading_completion()
@@ -693,14 +808,117 @@ func _refill_story_farmer_n_resource(target_farmer: Node) -> void:
 		n_bar.value = n_cap
 
 
-func can_agent_harvest_to_inventory(agent: Node) -> bool:
+func _story_farmer_is_low_n(target_farmer: Node) -> bool:
+	if not is_instance_valid(target_farmer):
+		return false
+	var needs_data = target_farmer.get("needs")
+	var assets_data = target_farmer.get("assets")
+	if typeof(needs_data) != TYPE_DICTIONARY or typeof(assets_data) != TYPE_DICTIONARY:
+		return false
+	var needs: Dictionary = needs_data
+	var assets: Dictionary = assets_data
+	var n_need = float(needs.get("N", 10.0))
+	if n_need <= 0.0:
+		n_need = 10.0
+	var current_n = float(assets.get("N", 0.0))
+	# Trigger auto-harvest once farmer N is no longer above need (no excess N to trade).
+	return current_n <= n_need
+
+
+func story_farmer_auto_harvest_is_enabled(farmer: Node) -> bool:
 	if not _is_story_mode() or not _story_village_revealed:
-		return true
-	if not is_instance_valid(agent):
-		return true
-	if not _is_crop_type(str(agent.get("type"))):
-		return true
-	return false
+		return false
+	if _story_phase_id < 4 or _story_phase_id > 6:
+		return false
+	if not is_instance_valid(farmer):
+		return false
+	if not _is_story_villager(farmer):
+		return false
+	return str(farmer.get("type")) == "farmer"
+
+
+func story_farmer_try_assign_harvest_target(farmer: Node) -> Node:
+	if not story_farmer_auto_harvest_is_enabled(farmer):
+		return null
+	if not _story_farmer_is_low_n(farmer):
+		return null
+	var world = _get_world_foundation()
+	if not _supports_world_tiles(world):
+		return null
+	_story_phase4_cleanup_harvest_reservations()
+	var farmer_id = int(farmer.get_instance_id())
+	var farmer_coord = _world_to_tile_coord(world, farmer.global_position)
+	var best_crop: Node = null
+	var best_tile_dist := INF
+	var best_world_dist := INF
+	for candidate in $Agents.get_children():
+		if not is_instance_valid(candidate):
+			continue
+		if candidate == farmer:
+			continue
+		if bool(candidate.get("dead")):
+			continue
+		var crop_type = str(candidate.get("type"))
+		if not _story_is_phase4_farmer_auto_harvest_crop_type(crop_type):
+			continue
+		if not candidate.has_method("can_drag_for_inventory_harvest"):
+			continue
+		if not bool(candidate.call("can_drag_for_inventory_harvest")):
+			continue
+		var crop_id = int(candidate.get_instance_id())
+		var reserved_farmer_id = int(_story_phase4_reserved_crop_to_farmer_ids.get(crop_id, 0))
+		if reserved_farmer_id > 0 and reserved_farmer_id != farmer_id:
+			continue
+		var crop_coord = _world_to_tile_coord(world, candidate.global_position)
+		var tile_dist = float(_tile_chebyshev_distance(farmer_coord, crop_coord))
+		if tile_dist > STORY_PHASE4_FARMER_HARVEST_RADIUS:
+			continue
+		var world_dist = farmer.global_position.distance_squared_to(candidate.global_position)
+		if tile_dist < best_tile_dist or (is_equal_approx(tile_dist, best_tile_dist) and world_dist < best_world_dist):
+			best_tile_dist = tile_dist
+			best_world_dist = world_dist
+			best_crop = candidate
+	if not is_instance_valid(best_crop):
+		return null
+	_story_phase4_reserved_crop_to_farmer_ids[int(best_crop.get_instance_id())] = farmer_id
+	return best_crop
+
+
+func story_farmer_release_harvest_target(farmer: Node, crop: Node) -> void:
+	if not is_instance_valid(crop):
+		return
+	var crop_id = int(crop.get_instance_id())
+	if not _story_phase4_reserved_crop_to_farmer_ids.has(crop_id):
+		return
+	if not is_instance_valid(farmer):
+		_story_phase4_reserved_crop_to_farmer_ids.erase(crop_id)
+		return
+	var farmer_id = int(farmer.get_instance_id())
+	if int(_story_phase4_reserved_crop_to_farmer_ids[crop_id]) == farmer_id:
+		_story_phase4_reserved_crop_to_farmer_ids.erase(crop_id)
+
+
+func story_farmer_on_harvest_success(farmer: Node, harvest_type: String) -> void:
+	if not is_instance_valid(farmer):
+		return
+	if not _is_story_mode() or _story_phase_id < 4:
+		return
+	if not _is_story_villager(farmer) or str(farmer.get("type")) != "farmer":
+		return
+	var normalized_type = str(harvest_type)
+	if _story_is_phase4_required_farmer_delivery_type(normalized_type):
+		_story_phase4_farmer_delivery_types[normalized_type] = true
+	_refill_story_farmer_n_resource(farmer)
+	if _story_phase_id == 4:
+		var farmer_id = int(farmer.get_instance_id())
+		if bool(_story_phase4_required_farmer_ids.get(farmer_id, false)):
+			_story_phase4_completed_farmer_ids[farmer_id] = true
+		_story_phase4_release_reservations_for_farmer_id(farmer_id)
+	_story_try_advance_phase_milestones()
+
+
+func can_agent_harvest_to_inventory(_agent: Node) -> bool:
+	return true
 
 
 func try_story_harvest_drop(agent: Node, world_pos: Vector2) -> bool:
@@ -1364,12 +1582,25 @@ func _handle_android_back_request(event: InputEvent) -> bool:
 	return true
 
 
+func _is_keyboard_escape_input(event: InputEvent) -> bool:
+	if Global.is_mobile_platform:
+		return false
+	if event is InputEventKey:
+		var key_event := event as InputEventKey
+		return key_event.pressed and not key_event.echo and key_event.keycode == KEY_ESCAPE
+	return false
+
+
 func _on_ui_request_back_to_menu() -> void:
-	Global.score = 0
 	get_tree().call_deferred("change_scene_to_file", "res://scenes/game_over.tscn")
 
 
 func _input(event):
+	if _is_keyboard_escape_input(event):
+		if $UI.has_method("show_back_to_menu_confirm"):
+			$UI.show_back_to_menu_confirm()
+		get_viewport().set_input_as_handled()
+		return
 	if _handle_android_back_request(event):
 		return
 	if LevelHelpersRef.handle_gameplay_hotkeys(event, self, $Agents, false):
@@ -1404,29 +1635,17 @@ func _story_update_progress() -> void:
 	if not _is_story_mode():
 		return
 	_story_try_advance_phase_milestones()
-	if _story_phase_id >= 3 and not _story_village_revealed:
-		if _has_story_reveal_crop_contact():
-			_story_reveal_village()
-			_story_try_advance_phase_milestones()
+	if _story_phase_id >= 4 and _story_phase_id <= 6:
+		_story_phase4_cleanup_harvest_reservations()
+	if _story_phase_id == 4:
+		if _story_village_revealed and _story_phase4_required_farmer_ids.is_empty():
+			_story_phase4_required_farmer_ids = _story_collect_phase4_initial_farmer_ids()
+	if _story_phase_id >= 4 and not _story_village_revealed:
+		_story_reveal_village()
+		if _story_phase_id == 4 and _story_phase4_required_farmer_ids.is_empty():
+			_story_phase4_required_farmer_ids = _story_collect_phase4_initial_farmer_ids()
+		_story_try_advance_phase_milestones()
 	_story_refresh_hud()
-
-
-func _has_story_reveal_crop_contact() -> bool:
-	var world = _get_world_foundation()
-	if not _supports_world_tiles(world):
-		return false
-	for agent in $Agents.get_children():
-		if not is_instance_valid(agent):
-			continue
-		if bool(agent.get("dead")):
-			continue
-		var a_type = str(agent.get("type"))
-		if not _is_crop_type(a_type):
-			continue
-		var coord = _world_to_tile_coord(world, agent.global_position)
-		if _tile_distance_to_rect(coord, STORY_VILLAGE_RECT) <= STORY_VILLAGE_REVEAL_DISTANCE:
-			return true
-	return false
 
 
 func _story_reveal_village() -> void:
@@ -1486,12 +1705,7 @@ func _story_spawn_village_cast() -> void:
 	if is_instance_valid(bank):
 		spawned_village_actors.append(bank)
 
-	var top_people_row_y = STORY_VILLAGE_RECT.position.y + 5
-	var base_people: Array = [
-		{"role": "farmer", "tile": Vector2i(STORY_VILLAGE_RECT.position.x + 5, top_people_row_y)},
-		{"role": "vendor", "tile": Vector2i(STORY_VILLAGE_RECT.position.x + 6, top_people_row_y)},
-		{"role": "cook", "tile": Vector2i(STORY_VILLAGE_RECT.position.x + 7, top_people_row_y)}
-	]
+	var base_people = _story_get_base_villager_layout()
 	for person_cfg in base_people:
 		var spawned_person = _spawn_story_villager_at_tile(world, person_cfg["tile"], person_cfg["role"])
 		if spawned_person != null:
@@ -1508,7 +1722,7 @@ func _story_spawn_village_cast() -> void:
 	var candidate_tiles: Array[Vector2i] = []
 	var min_x = STORY_VILLAGE_RECT.position.x + 4
 	var max_x = STORY_VILLAGE_RECT.position.x + STORY_VILLAGE_RECT.size.x - 2
-	var min_y = top_people_row_y + 2
+	var min_y = STORY_VILLAGE_RECT.position.y + 7
 	var max_y = STORY_VILLAGE_RECT.position.y + STORY_VILLAGE_RECT.size.y - 1
 	for y in range(min_y, max_y + 1):
 		for x in range(min_x, max_x + 1):
@@ -2022,6 +2236,7 @@ func _setup_story_person_flags(person: Node, role: String) -> void:
 	person.set_meta("story_village_actor", true)
 	person.set_meta("story_disable_birth", true)
 	person.set_meta("story_disable_farmer_production", role == "farmer")
+	person.set_meta("story_home_world_pos", person.global_position)
 	person.draggable = false
 	person.killable = false
 	person.num_babies = 0

@@ -34,6 +34,7 @@ const DEFAULT_RESIDUE_LIFETIME_TICKS := 8
 const SOIL_INFLUENCE_RADIUS := 4
 const STORY_WORLD_COLUMNS := 26
 const STORY_WORLD_ROWS := 27
+const STORY_VILLAGE_RECT := Rect2i(16, 9, 10, 10)
 const STORY_FOG_TICK_SECONDS := 0.25
 const STORY_FOG_COLOR := Color(0.02, 0.03, 0.04, 0.62)
 const HOTKEY_WORLD_DEBUG_OVERLAY := KEY_Z
@@ -679,6 +680,14 @@ func _refresh_story_fog_map() -> void:
 	queue_redraw()
 
 
+func _is_story_hidden_village_tile(coord: Vector2i) -> bool:
+	if str(Global.mode) != "story":
+		return false
+	if bool(Global.village_revealed):
+		return false
+	return STORY_VILLAGE_RECT.has_point(coord)
+
+
 func _reveal_coord_radius(center: Vector2i, radius_tiles: int) -> void:
 	for dy in range(-radius_tiles, radius_tiles + 1):
 		for dx in range(-radius_tiles, radius_tiles + 1):
@@ -686,6 +695,8 @@ func _reveal_coord_radius(center: Vector2i, radius_tiles: int) -> void:
 				continue
 			var coord = center + Vector2i(dx, dy)
 			if not in_bounds(coord):
+				continue
+			if _is_story_hidden_village_tile(coord):
 				continue
 			var idx = _index_for(coord)
 			if idx >= 0 and idx < _revealed_tiles.size():

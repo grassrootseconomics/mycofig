@@ -365,12 +365,25 @@ func _handle_android_back_request(event: InputEvent) -> bool:
 	return true
 
 
+func _is_keyboard_escape_input(event: InputEvent) -> bool:
+	if Global.is_mobile_platform:
+		return false
+	if event is InputEventKey:
+		var key_event := event as InputEventKey
+		return key_event.pressed and not key_event.echo and key_event.keycode == KEY_ESCAPE
+	return false
+
+
 func _on_ui_request_back_to_menu() -> void:
-	Global.score = 0
 	get_tree().call_deferred("change_scene_to_file", "res://scenes/game_over.tscn")
 
 
 func _input(event):
+	if _is_keyboard_escape_input(event):
+		if $UI.has_method("show_back_to_menu_confirm"):
+			$UI.show_back_to_menu_confirm()
+		get_viewport().set_input_as_handled()
+		return
 	if _handle_android_back_request(event):
 		return
 	if LevelHelpersRef.handle_gameplay_hotkeys(event, self, $Agents, true):

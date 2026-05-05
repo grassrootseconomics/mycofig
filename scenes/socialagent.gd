@@ -1,10 +1,173 @@
 extends Agent
 
+const STORY_FARMER_HARVEST_IDLE := "idle"
+const STORY_FARMER_HARVEST_MOVING_TO_CROP := "moving_to_crop"
+const STORY_FARMER_HARVEST_RETURNING_HOME := "returning_home"
+const STORY_FARMER_HARVEST_SPEED_MULTIPLIER := 0.10
+const STORY_FARMER_MOVE_TO_CROP_SECONDS := 0.32 / STORY_FARMER_HARVEST_SPEED_MULTIPLIER
+const STORY_FARMER_RETURN_HOME_SECONDS := 0.30 / STORY_FARMER_HARVEST_SPEED_MULTIPLIER
+
 var is_trading = false
 var is_raining = true
+var _story_farmer_harvest_state := STORY_FARMER_HARVEST_IDLE
+var _story_farmer_harvest_target: Node = null
+var _story_farmer_harvest_home_pos := Vector2.ZERO
+var _story_farmer_harvest_home_set := false
+var _story_farmer_harvest_move_tween: Tween = null
+
+
+func _story_farmer_get_level_root() -> Node:
+	return get_node_or_null("../..")
+
+
+func _is_story_farmer_actor() -> bool:
+	if not bool(get_meta("story_villager", false)):
+		return false
+	return str(type) == "farmer"
+
+
+func _story_farmer_auto_harvest_enabled(level_root: Node) -> bool:
+	if not _is_story_farmer_actor():
+		return false
+	if not is_instance_valid(level_root):
+		return false
+	if not level_root.has_method("story_farmer_auto_harvest_is_enabled"):
+		return false
+	return bool(level_root.call("story_farmer_auto_harvest_is_enabled", self))
+
+
+func _story_farmer_stop_harvest_tween() -> void:
+	if is_instance_valid(_story_farmer_harvest_move_tween):
+		_story_farmer_harvest_move_tween.kill()
+	_story_farmer_harvest_move_tween = null
+
+
+func _story_farmer_release_target(level_root: Node) -> void:
+	if not is_instance_valid(_story_farmer_harvest_target):
+		_story_farmer_harvest_target = null
+		return
+	if is_instance_valid(level_root) and level_root.has_method("story_farmer_release_harvest_target"):
+		level_root.call("story_farmer_release_harvest_target", self, _story_farmer_harvest_target)
+	_story_farmer_harvest_target = null
+
+
+func _story_farmer_reset_harvest_state(level_root: Node) -> void:
+	_story_farmer_stop_harvest_tween()
+	_story_farmer_release_target(level_root)
+	_story_farmer_harvest_state = STORY_FARMER_HARVEST_IDLE
+
+
+func _story_farmer_resolve_home_pos() -> Vector2:
+	if _story_farmer_harvest_home_set:
+		return _story_farmer_harvest_home_pos
+	var meta_home = get_meta("story_home_world_pos", null)
+	if typeof(meta_home) == TYPE_VECTOR2:
+		_story_farmer_harvest_home_pos = meta_home
+	else:
+		_story_farmer_harvest_home_pos = global_position
+	_story_farmer_harvest_home_set = true
+	return _story_farmer_harvest_home_pos
+
+
+func _story_farmer_begin_return_home() -> void:
+	var home_pos = _story_farmer_resolve_home_pos()
+	_story_farmer_harvest_state = STORY_FARMER_HARVEST_RETURNING_HOME
+	_story_farmer_stop_harvest_tween()
+	var tween = get_tree().create_tween()
+	_story_farmer_harvest_move_tween = tween
+	tween.tween_property(self, "global_position", home_pos, STORY_FARMER_RETURN_HOME_SECONDS)
+	tween.finished.connect(_on_story_farmer_return_home_finished)
+
+
+func _story_farmer_refresh_trade_network(level_root: Node) -> void:
+	new_buddies = true
+	draw_lines = true
+	generate_buddies()
+	if not is_instance_valid(level_root):
+		return
+	if level_root.has_method("mark_agent_moved"):
+		level_root.call("mark_agent_moved", self, global_position, global_position)
+	elif level_root.has_method("request_agent_dirty"):
+		level_root.call("request_agent_dirty", self, true, true, false)
+
+
+func _on_story_farmer_return_home_finished() -> void:
+	_story_farmer_harvest_move_tween = null
+	if _story_farmer_harvest_state != STORY_FARMER_HARVEST_RETURNING_HOME:
+		return
+	_story_farmer_harvest_state = STORY_FARMER_HARVEST_IDLE
+	is_trading = false
+	logistics_ready = true
+	var level_root = _story_farmer_get_level_root()
+	_story_farmer_refresh_trade_network(level_root)
+
+
+func _on_story_farmer_arrived_at_crop() -> void:
+	_story_farmer_harvest_move_tween = null
+	if _story_farmer_harvest_state != STORY_FARMER_HARVEST_MOVING_TO_CROP:
+		return
+	var level_root = _story_farmer_get_level_root()
+	if not is_instance_valid(_story_farmer_harvest_target):
+		_story_farmer_reset_harvest_state(level_root)
+		return
+	if bool(_story_farmer_harvest_target.get("dead")):
+		_story_farmer_reset_harvest_state(level_root)
+		return
+	if not _story_farmer_harvest_target.has_method("try_harvest_to_farmer"):
+		_story_farmer_reset_harvest_state(level_root)
+		return
+	var harvested = bool(_story_farmer_harvest_target.call("try_harvest_to_farmer", self))
+	if not harvested:
+		_story_farmer_reset_harvest_state(level_root)
+		return
+	var harvest_type = str(_story_farmer_harvest_target.get("type"))
+	if is_instance_valid(level_root) and level_root.has_method("story_farmer_on_harvest_success"):
+		level_root.call("story_farmer_on_harvest_success", self, harvest_type)
+	_story_farmer_release_target(level_root)
+	_story_farmer_begin_return_home()
+
+
+func _story_farmer_begin_harvest_trip(level_root: Node) -> bool:
+	if not is_instance_valid(level_root):
+		return false
+	if not level_root.has_method("story_farmer_try_assign_harvest_target"):
+		return false
+	var crop_target = level_root.call("story_farmer_try_assign_harvest_target", self)
+	if not is_instance_valid(crop_target):
+		return false
+	_story_farmer_resolve_home_pos()
+	_story_farmer_harvest_target = crop_target
+	_story_farmer_harvest_state = STORY_FARMER_HARVEST_MOVING_TO_CROP
+	_story_farmer_stop_harvest_tween()
+	var tween = get_tree().create_tween()
+	_story_farmer_harvest_move_tween = tween
+	tween.tween_property(self, "global_position", crop_target.global_position, STORY_FARMER_MOVE_TO_CROP_SECONDS)
+	tween.finished.connect(_on_story_farmer_arrived_at_crop)
+	return true
+
+
+func _story_farmer_tick_auto_harvest(level_root: Node) -> bool:
+	if not _is_story_farmer_actor():
+		return false
+	if _story_farmer_harvest_state == STORY_FARMER_HARVEST_MOVING_TO_CROP or _story_farmer_harvest_state == STORY_FARMER_HARVEST_RETURNING_HOME:
+		logistics_ready = false
+		return true
+	if not _story_farmer_auto_harvest_enabled(level_root):
+		if _story_farmer_harvest_state != STORY_FARMER_HARVEST_IDLE or is_instance_valid(_story_farmer_harvest_target):
+			_story_farmer_reset_harvest_state(level_root)
+		return false
+	if not logistics_ready:
+		return false
+	if _story_farmer_begin_harvest_trip(level_root):
+		logistics_ready = false
+		return true
+	return false
 
 
 func logistics():
+	var level_root = _story_farmer_get_level_root()
+	if _story_farmer_tick_auto_harvest(level_root):
+		return
 	#wait for timer
 	var excess_res = null
 	var high_amt_excess = 0
@@ -274,3 +437,9 @@ func _on_dry_timer_timeout() -> void:
 			#tween.set_parallel(true)
 			#$Sprite2D.modulate.a = 1
 		$DryTimer.set_wait_time(wait_for_rain)
+
+
+func _exit_tree() -> void:
+	var level_root = _story_farmer_get_level_root()
+	_story_farmer_reset_harvest_state(level_root)
+	super._exit_tree()

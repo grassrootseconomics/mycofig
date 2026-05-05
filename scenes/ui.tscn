@@ -291,7 +291,7 @@ layout_mode = 2
 
 [node name="PauseButton" type="Button" parent="MarginCMarginContainer2ontainer/HBoxContainer"]
 layout_mode = 2
-custom_minimum_size = Vector2(96, 44)
+custom_minimum_size = Vector2(84, 38)
 text = "Pause"
 
 [node name="QuitContainer" type="MarginContainer" parent="."]
@@ -303,7 +303,7 @@ offset_left = 72.0
 offset_top = -72.0
 offset_right = 186.0
 offset_bottom = -20.0
-custom_minimum_size = Vector2(114, 52)
+custom_minimum_size = Vector2(102, 50)
 grow_horizontal = 0
 grow_vertical = 0
 theme_override_constants/margin_left = 6
@@ -313,7 +313,7 @@ theme_override_constants/margin_bottom = 6
 
 [node name="QuitButton" type="Button" parent="QuitContainer"]
 layout_mode = 2
-custom_minimum_size = Vector2(96, 44)
+custom_minimum_size = Vector2(84, 38)
 text = "Quit"
 
 [node name="PauseNode" type="Node" parent="."]

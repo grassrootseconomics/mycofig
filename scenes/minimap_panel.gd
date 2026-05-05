@@ -8,6 +8,8 @@ const BG_COLOR := Color(0.04, 0.08, 0.12, 0.92)
 const BORDER_COLOR := Color(0.80, 0.88, 0.95, 0.92)
 const CAMERA_COLOR := Color(1.0, 1.0, 1.0, 0.88)
 const VILLAGE_MARKER_COLOR := Color(1.0, 0.95, 0.35, 0.95)
+const VILLAGE_MARKER_TEXT_SIZE := 11
+const VILLAGE_MARKER_TEXT_STORY_MULTIPLIER := 2.0
 
 var _level_root: Node = null
 var _world_node: Node = null
@@ -156,7 +158,9 @@ func _draw_village_marker() -> void:
 	draw_circle(marker, 2.2, VILLAGE_MARKER_COLOR)
 	var font = ThemeDB.fallback_font
 	if font != null:
-		draw_string(font, marker + Vector2(-3.8, -6.2), "?", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, VILLAGE_MARKER_COLOR)
+		var text_scale = VILLAGE_MARKER_TEXT_STORY_MULTIPLIER if str(Global.mode) == "story" else 1.0
+		var text_size = int(round(float(VILLAGE_MARKER_TEXT_SIZE) * text_scale))
+		draw_string(font, marker + Vector2(-3.8 * text_scale, -6.2 * text_scale), "?", HORIZONTAL_ALIGNMENT_LEFT, -1, text_size, VILLAGE_MARKER_COLOR)
 
 
 func _color_for_agent_type(agent_type: String) -> Color:

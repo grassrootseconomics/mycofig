@@ -45,6 +45,9 @@ const INVENTORY_PHASE1_SPARKLE_COLOR := Color(1.0, 0.98, 0.58, 0.95)
 const INVENTORY_PHASE1_SPARKLE_PULSE_SPEED := 4.6
 const TUTORIAL_PANEL_EXPANDED_SIZE := Vector2(372, 178)
 const TUTORIAL_PANEL_COLLAPSED_SIZE := Vector2(44, 44)
+const INVENTORY_ICON_PAD_DEFAULT := 4.0
+const INVENTORY_ICON_PAD_BASKET := 7.0
+const INVENTORY_SIDE_BUTTON_BUFFER := 5.0
 
 var _slot_icons: Array = []
 var _slot_labels: Array = []
@@ -199,12 +202,14 @@ func _set_inventory_tab(_tab_id: String = "farm") -> void:
 			label.text = ""
 			if icon.has_meta("item_name"):
 				icon.remove_meta("item_name")
+			_apply_inventory_icon_slot_layout(icon, "")
 			_apply_inventory_backplate_for_item(icon, "")
 			_set_inventory_lock_glyph(icon, true)
 			continue
 		label.visible = true
 		icon.texture = _get_inventory_item_texture(item)
 		icon.set_meta("item_name", item)
+		_apply_inventory_icon_slot_layout(icon, item)
 		_apply_inventory_backplate_for_item(icon, item)
 		_set_inventory_lock_glyph(icon, false)
 	_refresh_inventory_selection_visuals()
@@ -418,13 +423,27 @@ func _ensure_inventory_backplates() -> void:
 		existing_parent.remove_child(icon)
 		host.add_child(icon)
 		icon.set_anchors_preset(Control.PRESET_FULL_RECT)
-		icon.offset_left = 4.0
-		icon.offset_top = 4.0
-		icon.offset_right = -4.0
-		icon.offset_bottom = -4.0
+		_apply_inventory_icon_slot_layout(icon, "")
 		_slot_backplates[icon] = host
 		_ensure_slot_sparkle_ring(icon, host)
 		_ensure_slot_selection_frame(icon, host)
+
+
+func _apply_inventory_icon_slot_layout(icon: TextureRect, item_name: String) -> void:
+	if not is_instance_valid(icon):
+		return
+	var pad := INVENTORY_ICON_PAD_DEFAULT
+	if item_name == "basket":
+		pad = INVENTORY_ICON_PAD_BASKET
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	else:
+		icon.expand_mode = TextureRect.EXPAND_KEEP_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP
+	icon.offset_left = pad
+	icon.offset_top = pad
+	icon.offset_right = -pad
+	icon.offset_bottom = -pad
 
 
 func _apply_inventory_backplate_for_item(icon: TextureRect, item_name: String) -> void:
@@ -604,18 +623,36 @@ func _position_tutorial_toggle() -> void:
 
 func _layout_quit_container() -> void:
 	var quit_container: MarginContainer = get_node_or_null("QuitContainer")
+	var pause_container: MarginContainer = get_node_or_null("MarginCMarginContainer2ontainer")
 	var inventory_panel: MarginContainer = get_node_or_null("MarginContainer")
-	if not is_instance_valid(quit_container) or not is_instance_valid(inventory_panel):
+	if not is_instance_valid(inventory_panel):
 		return
-	var inventory_left = inventory_panel.get_global_rect().position.x
-	var midpoint = inventory_left * 0.5
-	var width = quit_container.size.x
-	if width <= 0.0:
-		width = quit_container.custom_minimum_size.x
-	if width <= 0.0:
-		width = 112.0
-	quit_container.offset_left = round(midpoint - width * 0.5)
-	quit_container.offset_right = round(midpoint + width * 0.5)
+	var inventory_rect = inventory_panel.get_global_rect()
+	var center_y = inventory_rect.position.y + inventory_rect.size.y * 0.5
+	if is_instance_valid(quit_container):
+		var quit_size = quit_container.size
+		if quit_size.x <= 0.0 or quit_size.y <= 0.0:
+			quit_size = quit_container.custom_minimum_size
+		if quit_size.x <= 0.0:
+			quit_size.x = 96.0
+		if quit_size.y <= 0.0:
+			quit_size.y = 44.0
+		quit_container.global_position = Vector2(
+			round(inventory_rect.position.x - INVENTORY_SIDE_BUTTON_BUFFER - quit_size.x),
+			round(center_y - quit_size.y * 0.5)
+		)
+	if is_instance_valid(pause_container):
+		var pause_size = pause_container.size
+		if pause_size.x <= 0.0 or pause_size.y <= 0.0:
+			pause_size = pause_container.custom_minimum_size
+		if pause_size.x <= 0.0:
+			pause_size.x = 96.0
+		if pause_size.y <= 0.0:
+			pause_size.y = 44.0
+		pause_container.global_position = Vector2(
+			round(inventory_rect.position.x + inventory_rect.size.x + INVENTORY_SIDE_BUTTON_BUFFER),
+			round(center_y - pause_size.y * 0.5)
+		)
 
 
 func _layout_tutorial_container() -> void:

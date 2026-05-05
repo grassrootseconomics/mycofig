@@ -92,11 +92,11 @@ func _on_tutorial_pressed() -> void:
 	Global.bars_on = false
 	Global.stage = 1
 	Global.inventory = { #how many of each plant do we have to use
-	"bean": 8,
-	"squash": 8,				
-	"maize": 8,
-	"tree": 6,
-	"myco": 6,
+	"bean": 3,
+	"squash": 3,				
+	"maize": 3,
+	"tree": 3,
+	"myco": 3,
 	"farmer": 0,
 	"vendor": 0,
 	"cook": 0,
@@ -117,11 +117,11 @@ func _on_challenge_button_pressed() -> void:
 	Global.bars_on = false
 	Global.draw_lines = true
 	Global.inventory = { #how many of each plant do we have to use
-	"bean": 12,
-	"squash": 12,				
-	"maize": 12,
-	"tree": 12,
-	"myco": 12,
+	"bean": 3,
+	"squash": 3,				
+	"maize": 3,
+	"tree": 3,
+	"myco": 3,
 	"farmer": 0,
 	"vendor": 0,
 	"cook": 0,

@@ -84,10 +84,11 @@ func logistics():
 	var new_trade_queue = []
 	for trade in trade_queue:
 		if(assets[trade.trade_asset]>= trade.trade_amount):
-			assets[trade.trade_asset]-=trade.trade_amount
-			bars[trade.trade_asset].value = assets[trade.trade_asset]
-			emit_signal("trade",trade)
-		
+			if _emit_trade_with_budget(trade):
+				assets[trade.trade_asset]-=trade.trade_amount
+				bars[trade.trade_asset].value = assets[trade.trade_asset]
+			else:
+				new_trade_queue.append(trade)
 		else:
 			new_trade_queue.append(trade)
 	trade_queue = new_trade_queue
@@ -150,13 +151,17 @@ func logistics():
 			if debug_mode:
 				print(" shuffle" )
 			var need_itter = 0
-			logistics_ready = false
+			var sent_trade := false
 			for child in trade_buddies: #children:
+				if sent_trade:
+					break
 				if(is_instance_valid(child)):
 					if child.type == 'myco' and child.name != self.name:
 						if debug_mode:
 							print(" child found: ", child.name )
 						for excess in keys_e:
+							if sent_trade:
+								break
 							if(child.assets.get(excess) != null):
 								if current_excess[excess] > 0 and assets[excess] > needs[excess] and child.assets[excess]<child.needs[excess]:
 									var path_dict = {
@@ -171,13 +176,11 @@ func logistics():
 									}
 									if debug_mode:
 										print(" .... sending a trade along, ", path_dict)
-									#print(" .... sending a trade along, ", path_dict)
-									assets[excess] -= 1#amt_needed
-									bars[excess].value = assets[excess]
-									#print(excess_res, " value: ", bars[excess_res].value)
-									#bars[excess_res].update()
-									emit_signal("trade",path_dict)
-									#
+									if _emit_trade_with_budget(path_dict):
+										assets[excess] -= 1#amt_needed
+										bars[excess].value = assets[excess]
+										logistics_ready = false
+										sent_trade = true
 									#break
 									#trade.emit(path_dict)
 									#send what is in excess. 
@@ -311,9 +314,11 @@ func _on_area_entered(trade: Area2D) -> void:
 							"return_amt": null
 						}	
 						if(assets[trade.return_asset]>= return_amount):
-							assets[trade.return_asset]-=return_amount
-							bars[trade.return_asset].value = assets[trade.return_asset]
-							emit_signal("trade",path_dict)
+							if _emit_trade_with_budget(path_dict):
+								assets[trade.return_asset]-=return_amount
+								bars[trade.return_asset].value = assets[trade.return_asset]
+							else:
+								trade_queue.append(path_dict)
 						else: #add to queue
 							trade_queue.append(path_dict)
 				else:

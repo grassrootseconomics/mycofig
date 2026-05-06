@@ -20,22 +20,31 @@ var width = 0
 var _dropping := false
 var _drop_elapsed := 0.0
 var _pool_owner: Node = null
+var _visual_key := ""
+var _count_label: Label = null
 
 const DROP_FADE_SECONDS := 0.12
+const TRADE_REFERENCE_FPS := 60.0
+const TRADE_AXIS_EPSILON := 0.001
+const AGGREGATE_LABEL_MIN_AMOUNT := 2
+const AGGREGATE_LABEL_FONT_SIZE := 14
+const AGGREGATE_LABEL_COLOR := Color(1.0, 1.0, 1.0, 0.95)
 
 
 func set_variables(path_dict) -> void:
 	start_agent = path_dict.get("from_agent")
 	end_agent = path_dict.get("to_agent")
 	trade_path = path_dict.get("trade_path")
-	amount = path_dict.get("trade_amount")
+	amount = maxi(int(path_dict.get("trade_amount", 1)), 1)
 	asset = path_dict.get("trade_asset")
 	self.modulate = Global.asset_colors[asset]
 	#print(asset, " color: ", Global.asset_colors[asset])
 	type = path_dict.get("trade_type")
 	return_asset = path_dict.get("return_res")
 	return_amt = path_dict.get("return_amt")
+	_visual_key = str(path_dict.get("visual_key", ""))
 	position = start_agent.global_position
+	_refresh_trade_amount_visual()
 	#print("Created trade: ", start_agent, end_agent, trade_path)
 
 
@@ -99,6 +108,67 @@ func _advance_drop(delta: float) -> void:
 		_despawn()
 
 
+func get_trade_visual_key() -> String:
+	return _visual_key
+
+
+func get_trade_amount() -> int:
+	return maxi(int(amount), 1)
+
+
+func accumulate_trade_amount(extra_amount: int) -> bool:
+	var safe_extra = maxi(extra_amount, 0)
+	if safe_extra <= 0:
+		return false
+	amount = maxi(int(amount), 1) + safe_extra
+	_refresh_trade_amount_visual()
+	return true
+
+
+func _refresh_trade_amount_visual() -> void:
+	if int(amount) < AGGREGATE_LABEL_MIN_AMOUNT:
+		if is_instance_valid(_count_label):
+			_count_label.visible = false
+		return
+	_ensure_count_label()
+	if not is_instance_valid(_count_label):
+		return
+	_count_label.visible = true
+	_count_label.text = str("x", int(amount))
+
+
+func _ensure_count_label() -> void:
+	if is_instance_valid(_count_label):
+		return
+	_count_label = Label.new()
+	_count_label.name = "CountLabel"
+	_count_label.z_as_relative = false
+	_count_label.z_index = 12
+	_count_label.position = Vector2(7.0, -14.0)
+	_count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_count_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_count_label.add_theme_font_size_override("font_size", AGGREGATE_LABEL_FONT_SIZE)
+	_count_label.add_theme_color_override("font_color", AGGREGATE_LABEL_COLOR)
+	add_child(_count_label)
+
+
+func _get_axis_step(delta: float) -> float:
+	var safe_delta = maxf(delta, 0.0)
+	# Keep axis motion frame-rate independent while honoring the global speed cap.
+	var normalized_axis_step = maxf(float(Global.move_rate) * TRADE_REFERENCE_FPS * safe_delta, 0.0)
+	var movement_cap_step = maxf(float(Global.movement_speed) * safe_delta, 0.0)
+	return minf(normalized_axis_step, movement_cap_step)
+
+
+func _step_axis_toward(current: float, target: float, max_step: float) -> float:
+	if max_step <= 0.0:
+		return current
+	var gap = target - current
+	if absf(gap) <= max_step:
+		return target
+	return current + signf(gap) * max_step
+
+
 func _process(delta: float) -> void:
 	if not is_instance_valid(end_agent):
 		_despawn()
@@ -118,47 +188,21 @@ func _process(delta: float) -> void:
 	# Keep packet flow visible in every quality tier.
 	visible = true
 
-	#print("moving trade")
-	#move in x then y
+	# Move in axis order (x then y), normalized to time to avoid FPS-dependent speed.
 	var current_x = global_position.x
 	var current_y = global_position.y
 	var dest_x = end_agent.global_position.x
 	var dest_y = end_agent.global_position.y
-	#if last_pos != null:
-	#	if(last_pos.x == position.x and last_pos.y == position.y):
-	#		print("####Tradestuck!")
-	#last_pos = position
-	#print("####Tradestuck!??")
-
-	var new_pos = null
-
-	if current_x < dest_x:
-		if dest_x - current_x < Global.move_rate:
-			new_pos = end_agent.global_position
-		else:
-			new_pos = Vector2(current_x + Global.move_rate, current_y)
-	elif current_x > dest_x:
-		if current_x - dest_x < Global.move_rate:
-			new_pos = end_agent.global_position
-		else:
-			new_pos = Vector2(current_x - Global.move_rate, current_y)
-	elif current_y < dest_y:
-		if dest_y - current_y < Global.move_rate:
-			new_pos = end_agent.global_position
-		else:
-			new_pos = Vector2(current_x, current_y + Global.move_rate)
-	elif current_y > dest_y:
-		if current_y - dest_y < Global.move_rate:
-			new_pos = end_agent.global_position
-		else:
-			new_pos = Vector2(current_x, current_y - Global.move_rate)
-
-	if new_pos == null:
-		position = position.move_toward(end_agent.global_position, Global.movement_speed * delta)
+	var axis_step = _get_axis_step(delta)
+	var new_pos = global_position
+	if absf(dest_x - current_x) > TRADE_AXIS_EPSILON:
+		new_pos.x = _step_axis_toward(current_x, dest_x, axis_step)
+	elif absf(dest_y - current_y) > TRADE_AXIS_EPSILON:
+		new_pos.y = _step_axis_toward(current_y, dest_y, axis_step)
 	else:
-		position = position.move_toward(new_pos, Global.movement_speed * delta)
-		#new_pos#position.move_toward(Vector2(current_x+2,current_y),1)
-	#direction = (end_agent.global_position - self.global_position).normalized()
+		new_pos = end_agent.global_position
+
+	position = new_pos
 
 	var world_rect = Global.get_world_rect(self)
 	if not world_rect.has_point(position):

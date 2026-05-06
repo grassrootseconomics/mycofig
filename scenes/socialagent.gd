@@ -266,15 +266,12 @@ func logistics():
 												}
 												if debug_mode:
 													print(" .... sending a trade along, ")
-												#print(" .... sending a trade along, ", path_dict)
-												assets[excess] -= 1#amt_needed
-												bars[excess].value = assets[excess]
-												#print(excess_res, " value: ", bars[excess_res].value)
-												#bars[excess_res].update()
-												emit_signal("trade",path_dict)
-												logistics_ready = false
-												is_trading = true
-												break
+												if _emit_trade_with_budget(path_dict):
+													assets[excess] -= 1#amt_needed
+													bars[excess].value = assets[excess]
+													logistics_ready = false
+													is_trading = true
+													break
 												#trade.emit(path_dict)
 												#send what is in excess. 
 											

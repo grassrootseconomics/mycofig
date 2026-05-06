@@ -92,6 +92,16 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 37
 text = "People"
 
+[node name="RegenerationLabel" type="RichTextLabel" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 8
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
+autowrap_mode = 0
+text = "[i]Regeneration[/i]"
+horizontal_alignment = 1
+
 [node name="Tutorial" type="Button" parent="CenterContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 43

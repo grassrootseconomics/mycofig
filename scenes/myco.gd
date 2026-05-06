@@ -28,6 +28,7 @@ const MYCO_DEAD_MUSHROOM_SHRINK_LERP := 0.08
 const MYCO_DEAD_RHIZO_SHRINK_LERP := 0.07
 const MYCO_DEAD_MUSHROOM_ALPHA_STEP := 0.03
 const MYCO_MIN_ADJACENT_BUDDY_RADIUS := 72.0
+const MYCO_MAX_SENDS_PER_LOGISTICS_TICK := 2
 
 var myco_stage: int = MycoGrowthStage.SPORE
 var myco_stage_consumptions := 0
@@ -37,6 +38,7 @@ var myco_dead_ticks := 0
 var myco_starvation_ticks := 0
 var myco_harvest_ready := false
 var myco_pod_sparkle_played := false
+var trade_queue: Array = []
 
 var mushroom_base_texture: Texture2D = null
 var mushroom_base_scale := Vector2.ONE
@@ -440,6 +442,24 @@ func generate_buddies() -> void:
 
 
 func logistics():
+	var new_trade_queue: Array = []
+	for trade in trade_queue:
+		if typeof(trade) != TYPE_DICTIONARY:
+			continue
+		var trade_asset = str(trade.get("trade_asset", ""))
+		var trade_amount = int(trade.get("trade_amount", 0))
+		if trade_asset == "" or trade_amount <= 0:
+			continue
+		if assets.get(trade_asset) == null or int(assets[trade_asset]) < trade_amount:
+			new_trade_queue.append(trade)
+			continue
+		if _emit_trade_with_budget(trade):
+			assets[trade_asset] -= trade_amount
+			bars[trade_asset].value = assets[trade_asset]
+		else:
+			new_trade_queue.append(trade)
+	trade_queue = new_trade_queue
+
 	var excess_res = null
 	var high_amt_excess = 0
 	var needed_res = null
@@ -487,13 +507,17 @@ func logistics():
 			
 			if debug_mode:
 				print(" shuffle" )
-			logistics_ready = false
+			var sent_count := 0
 			for child in trade_buddies:
+				if sent_count >= MYCO_MAX_SENDS_PER_LOGISTICS_TICK:
+					break
 				if(is_instance_valid(child)):
 					if child.type == 'myco' and child.name != self.name:
 						if debug_mode:
 							print(" child found: ", child.name )
 						for excess in keys_e:
+							if sent_count >= MYCO_MAX_SENDS_PER_LOGISTICS_TICK:
+								break
 							if current_excess[excess] > 0 and assets[excess] > needs[excess] and child.assets[excess] < child.needs[excess]:
 								var path_dict = {
 									"from_agent": self,
@@ -507,9 +531,12 @@ func logistics():
 								}
 								if debug_mode:
 									print(" .... sending a trade along, ", path_dict)
-								assets[excess] -= 1
-								bars[excess].value = assets[excess]
-								emit_signal("trade", path_dict)
+								if _emit_trade_with_budget(path_dict):
+									assets[excess] -= 1
+									bars[excess].value = assets[excess]
+									sent_count += 1
+			if sent_count > 0:
+				logistics_ready = false
 
 
 func draw_selected_box():
@@ -562,9 +589,11 @@ func _on_area_entered(trade: Area2D) -> void:
 						"return_amt": null
 					}
 					if (assets[trade.return_asset] >= return_amount):
-						assets[trade.return_asset] -= return_amount
-						bars[trade.return_asset].value = assets[trade.return_asset]
-						emit_signal("trade", path_dict)
+						if _emit_trade_with_budget(path_dict):
+							assets[trade.return_asset] -= return_amount
+							bars[trade.return_asset].value = assets[trade.return_asset]
+						else:
+							trade_queue.append(path_dict)
 			trade.call_deferred("queue_free")
 		else:
 			print("Error myco without asset:", trade.asset, assets)

@@ -225,11 +225,8 @@ static func handle_gameplay_hotkeys(event: InputEvent, owner: Node, agents_root:
 		return true
 
 	if _is_pressed_key(event, HOTKEY_SPEED_DOWN):
-		Global.move_rate -= 1
-		Global.movement_speed -= 50
-		if Global.move_rate < 0:
-			Global.move_rate = 0
-			Global.movement_speed = 0
+		Global.move_rate = maxi(Global.move_rate - 1, 1)
+		Global.movement_speed = maxi(Global.movement_speed - 50, 1)
 		return true
 
 	if _is_pressed_key(event, HOTKEY_QUIT):

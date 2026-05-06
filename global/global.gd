@@ -41,6 +41,10 @@ var trade_sender_rate_per_sec := 6.0
 var trade_sender_burst := 2.0
 var trade_link_rate_per_sec := 4.0
 var trade_link_burst := 1.0
+var trade_sender_rate_per_sec_myco := 14.0
+var trade_sender_burst_myco := 4.0
+var trade_link_rate_per_sec_myco := 10.0
+var trade_link_burst_myco := 2.0
 var _trade_sender_buckets: Dictionary = {}
 var _trade_link_buckets: Dictionary = {}
 
@@ -463,25 +467,51 @@ func _consume_trade_bucket(store: Dictionary, key: String, rate_per_sec: float, 
 	return true
 
 
+func _get_trade_dispatch_profile(from_agent: Variant) -> Dictionary:
+	var sender_rate = trade_sender_rate_per_sec
+	var sender_burst = trade_sender_burst
+	var link_rate = trade_link_rate_per_sec
+	var link_burst = trade_link_burst
+	if is_instance_valid(from_agent):
+		var agent_type = str(from_agent.get("type"))
+		var is_native_myco = agent_type == "myco" and from_agent.has_node("MycoSprite")
+		if is_native_myco:
+			sender_rate = trade_sender_rate_per_sec_myco
+			sender_burst = trade_sender_burst_myco
+			link_rate = trade_link_rate_per_sec_myco
+			link_burst = trade_link_burst_myco
+	return {
+		"sender_rate": sender_rate,
+		"sender_burst": sender_burst,
+		"link_rate": link_rate,
+		"link_burst": link_burst
+	}
+
+
 func allow_trade_dispatch(from_agent: Variant, to_agent: Variant) -> bool:
 	if not trade_dispatch_limit_enabled:
 		return true
 	var sender_key = _trade_sender_key(from_agent)
 	if sender_key == "":
 		return true
+	var profile = _get_trade_dispatch_profile(from_agent)
+	var sender_rate = float(profile.get("sender_rate", trade_sender_rate_per_sec))
+	var sender_burst = float(profile.get("sender_burst", trade_sender_burst))
+	var link_rate = float(profile.get("link_rate", trade_link_rate_per_sec))
+	var link_burst = float(profile.get("link_burst", trade_link_burst))
 	var now_ms = Time.get_ticks_msec()
-	if not _consume_trade_bucket(_trade_sender_buckets, sender_key, trade_sender_rate_per_sec, trade_sender_burst, now_ms):
+	if not _consume_trade_bucket(_trade_sender_buckets, sender_key, sender_rate, sender_burst, now_ms):
 		return false
 	var link_key = _trade_link_key(from_agent, to_agent)
 	if link_key == "":
 		return true
-	if _consume_trade_bucket(_trade_link_buckets, link_key, trade_link_rate_per_sec, trade_link_burst, now_ms):
+	if _consume_trade_bucket(_trade_link_buckets, link_key, link_rate, link_burst, now_ms):
 		return true
 	var sender_state_variant = _trade_sender_buckets.get(sender_key, {})
 	if typeof(sender_state_variant) == TYPE_DICTIONARY:
 		var sender_state: Dictionary = sender_state_variant
 		var sender_tokens = float(sender_state.get("tokens", 0.0))
-		sender_state["tokens"] = minf(sender_tokens + 1.0, maxf(trade_sender_burst, 0.0))
+		sender_state["tokens"] = minf(sender_tokens + 1.0, maxf(sender_burst, 0.0))
 		_trade_sender_buckets[sender_key] = sender_state
 	return false
 

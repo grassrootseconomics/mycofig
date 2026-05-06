@@ -22,6 +22,8 @@ var _drop_elapsed := 0.0
 var _pool_owner: Node = null
 
 const DROP_FADE_SECONDS := 0.12
+const TRADE_REFERENCE_FPS := 60.0
+const TRADE_AXIS_EPSILON := 0.001
 
 
 func set_variables(path_dict) -> void:
@@ -99,6 +101,21 @@ func _advance_drop(delta: float) -> void:
 		_despawn()
 
 
+func _get_axis_step(delta: float) -> float:
+	var safe_delta = maxf(delta, 0.0)
+	# Normalize legacy frame-step motion to a fixed reference FPS.
+	return maxf(float(Global.move_rate) * TRADE_REFERENCE_FPS * safe_delta, 0.0)
+
+
+func _step_axis_toward(current: float, target: float, max_step: float) -> float:
+	if max_step <= 0.0:
+		return current
+	var gap = target - current
+	if absf(gap) <= max_step:
+		return target
+	return current + signf(gap) * max_step
+
+
 func _process(delta: float) -> void:
 	if not is_instance_valid(end_agent):
 		_despawn()
@@ -118,47 +135,21 @@ func _process(delta: float) -> void:
 	# Keep packet flow visible in every quality tier.
 	visible = true
 
-	#print("moving trade")
-	#move in x then y
+	# Move in axis order (x then y), normalized to time to avoid FPS-dependent speed.
 	var current_x = global_position.x
 	var current_y = global_position.y
 	var dest_x = end_agent.global_position.x
 	var dest_y = end_agent.global_position.y
-	#if last_pos != null:
-	#	if(last_pos.x == position.x and last_pos.y == position.y):
-	#		print("####Tradestuck!")
-	#last_pos = position
-	#print("####Tradestuck!??")
-
-	var new_pos = null
-
-	if current_x < dest_x:
-		if dest_x - current_x < Global.move_rate:
-			new_pos = end_agent.global_position
-		else:
-			new_pos = Vector2(current_x + Global.move_rate, current_y)
-	elif current_x > dest_x:
-		if current_x - dest_x < Global.move_rate:
-			new_pos = end_agent.global_position
-		else:
-			new_pos = Vector2(current_x - Global.move_rate, current_y)
-	elif current_y < dest_y:
-		if dest_y - current_y < Global.move_rate:
-			new_pos = end_agent.global_position
-		else:
-			new_pos = Vector2(current_x, current_y + Global.move_rate)
-	elif current_y > dest_y:
-		if current_y - dest_y < Global.move_rate:
-			new_pos = end_agent.global_position
-		else:
-			new_pos = Vector2(current_x, current_y - Global.move_rate)
-
-	if new_pos == null:
-		position = position.move_toward(end_agent.global_position, Global.movement_speed * delta)
+	var axis_step = _get_axis_step(delta)
+	var new_pos = global_position
+	if absf(dest_x - current_x) > TRADE_AXIS_EPSILON:
+		new_pos.x = _step_axis_toward(current_x, dest_x, axis_step)
+	elif absf(dest_y - current_y) > TRADE_AXIS_EPSILON:
+		new_pos.y = _step_axis_toward(current_y, dest_y, axis_step)
 	else:
-		position = position.move_toward(new_pos, Global.movement_speed * delta)
-		#new_pos#position.move_toward(Vector2(current_x+2,current_y),1)
-	#direction = (end_agent.global_position - self.global_position).normalized()
+		new_pos = end_agent.global_position
+
+	position = new_pos
 
 	var world_rect = Global.get_world_rect(self)
 	if not world_rect.has_point(position):

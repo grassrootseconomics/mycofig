@@ -2,8 +2,8 @@ extends Node
 
 var score := 0
 
-var move_rate = 4 #6
-var movement_speed = 100 #200
+var move_rate = 1 #4 #6
+var movement_speed = 50 #100 #200
 var social_buddy_radius = 200
 var num_connectors = 4
 var active_agent = null

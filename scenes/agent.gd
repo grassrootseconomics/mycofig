@@ -1747,13 +1747,11 @@ func logistics():
 										if(assets[excess] <=0) :
 											print("WHAAAAAATTTTT:", assets )
 											print("excess:" , current_excess)
-										assets[excess] -= 1#amt_needed
-										bars[excess].value = assets[excess]
-										#print(excess_res, " value: ", bars[excess_res].value)
-										#bars[excess_res].update()
-										emit_signal("trade",path_dict)
-										logistics_ready = false
-										break
+										if _emit_trade_with_budget(path_dict):
+											assets[excess] -= 1#amt_needed
+											bars[excess].value = assets[excess]
+											logistics_ready = false
+											break
 										#trade.emit(path_dict)
 										#send what is in excess. 
 									
@@ -1836,6 +1834,17 @@ func _exit_tree() -> void:
 	LevelHelpersRef.unregister_agent_occupancy(_get_level_root(), self)
 
 
+func _emit_trade_with_budget(path_dict: Dictionary) -> bool:
+	if typeof(path_dict) != TYPE_DICTIONARY:
+		return false
+	var from_agent = path_dict.get("from_agent", self)
+	var to_agent = path_dict.get("to_agent", null)
+	if not Global.allow_trade_dispatch(from_agent, to_agent):
+		return false
+	emit_signal("trade", path_dict)
+	return true
+
+
 func evaporate():
 
 	if assets["R"] > 0: #evaporate
@@ -1854,13 +1863,10 @@ func evaporate():
 					"return_res": null,
 					"return_amt": 0,#amt_needed
 				}
-				#print(" .... sending a trade along, ", path_dict)
-				assets["R"] -= 1#amt_needed
-				bars["R"].value = assets["R"]
-				#print(excess_res, " value: ", bars[excess_res].value)
-				#bars[excess_res].update()
-				emit_signal("trade",path_dict)
-				break
+				if _emit_trade_with_budget(path_dict):
+					assets["R"] -= 1#amt_needed
+					bars["R"].value = assets["R"]
+					break
 					
 
 

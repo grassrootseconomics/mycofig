@@ -487,13 +487,17 @@ func logistics():
 			
 			if debug_mode:
 				print(" shuffle" )
-			logistics_ready = false
+			var sent_trade := false
 			for child in trade_buddies:
+				if sent_trade:
+					break
 				if(is_instance_valid(child)):
 					if child.type == 'myco' and child.name != self.name:
 						if debug_mode:
 							print(" child found: ", child.name )
 						for excess in keys_e:
+							if sent_trade:
+								break
 							if current_excess[excess] > 0 and assets[excess] > needs[excess] and child.assets[excess] < child.needs[excess]:
 								var path_dict = {
 									"from_agent": self,
@@ -507,9 +511,11 @@ func logistics():
 								}
 								if debug_mode:
 									print(" .... sending a trade along, ", path_dict)
-								assets[excess] -= 1
-								bars[excess].value = assets[excess]
-								emit_signal("trade", path_dict)
+								if _emit_trade_with_budget(path_dict):
+									assets[excess] -= 1
+									bars[excess].value = assets[excess]
+									logistics_ready = false
+									sent_trade = true
 
 
 func draw_selected_box():
@@ -562,9 +568,9 @@ func _on_area_entered(trade: Area2D) -> void:
 						"return_amt": null
 					}
 					if (assets[trade.return_asset] >= return_amount):
-						assets[trade.return_asset] -= return_amount
-						bars[trade.return_asset].value = assets[trade.return_asset]
-						emit_signal("trade", path_dict)
+						if _emit_trade_with_budget(path_dict):
+							assets[trade.return_asset] -= return_amount
+							bars[trade.return_asset].value = assets[trade.return_asset]
 			trade.call_deferred("queue_free")
 		else:
 			print("Error myco without asset:", trade.asset, assets)

@@ -36,6 +36,13 @@ var perf_soil_tick_ms_last = 0.0
 var perf_tile_occupancy_queries = 0
 var perf_last_sample = {}
 var perf_run_metadata = {}
+var trade_dispatch_limit_enabled = true
+var trade_sender_rate_per_sec := 6.0
+var trade_sender_burst := 2.0
+var trade_link_rate_per_sec := 4.0
+var trade_link_burst := 1.0
+var _trade_sender_buckets: Dictionary = {}
+var _trade_link_buckets: Dictionary = {}
 
 
 
@@ -298,6 +305,7 @@ func _ready() -> void:
 	if is_mobile_platform:
 		# Smaller radius reduces partner scans and line churn on phones.
 		social_buddy_radius = 170
+	reset_trade_dispatch_budgets()
 
 
 func set_world_context(rect: Rect2, mode_id: String = "", scenario_id: String = "") -> void:
@@ -403,6 +411,79 @@ func get_bar_update_interval() -> float:
 			return 0.20
 		_:
 			return 0.033
+
+
+func reset_trade_dispatch_budgets() -> void:
+	_trade_sender_buckets.clear()
+	_trade_link_buckets.clear()
+
+
+func _trade_sender_key(agent: Variant) -> String:
+	if not is_instance_valid(agent):
+		return ""
+	return str(int(agent.get_instance_id()))
+
+
+func _trade_link_key(from_agent: Variant, to_agent: Variant) -> String:
+	if not is_instance_valid(from_agent) or not is_instance_valid(to_agent):
+		return ""
+	return str(int(from_agent.get_instance_id()), "->", int(to_agent.get_instance_id()))
+
+
+func _refill_trade_bucket(store: Dictionary, key: String, rate_per_sec: float, burst: float, now_ms: int) -> Dictionary:
+	var tokens = maxf(burst, 0.0)
+	var last_ms = now_ms
+	if store.has(key):
+		var existing_variant = store.get(key, {})
+		if typeof(existing_variant) == TYPE_DICTIONARY:
+			var existing: Dictionary = existing_variant
+			tokens = float(existing.get("tokens", tokens))
+			last_ms = int(existing.get("last_ms", now_ms))
+	var elapsed_ms = maxi(now_ms - last_ms, 0)
+	var elapsed_sec = float(elapsed_ms) / 1000.0
+	tokens = minf(maxf(tokens + elapsed_sec * maxf(rate_per_sec, 0.0), 0.0), maxf(burst, 0.0))
+	var updated := {
+		"tokens": tokens,
+		"last_ms": now_ms
+	}
+	store[key] = updated
+	return updated
+
+
+func _consume_trade_bucket(store: Dictionary, key: String, rate_per_sec: float, burst: float, now_ms: int, cost: float = 1.0) -> bool:
+	var safe_cost = maxf(cost, 0.0)
+	if safe_cost <= 0.0:
+		return true
+	var updated = _refill_trade_bucket(store, key, rate_per_sec, burst, now_ms)
+	var tokens = float(updated.get("tokens", 0.0))
+	if tokens + 0.0001 < safe_cost:
+		return false
+	updated["tokens"] = maxf(tokens - safe_cost, 0.0)
+	store[key] = updated
+	return true
+
+
+func allow_trade_dispatch(from_agent: Variant, to_agent: Variant) -> bool:
+	if not trade_dispatch_limit_enabled:
+		return true
+	var sender_key = _trade_sender_key(from_agent)
+	if sender_key == "":
+		return true
+	var now_ms = Time.get_ticks_msec()
+	if not _consume_trade_bucket(_trade_sender_buckets, sender_key, trade_sender_rate_per_sec, trade_sender_burst, now_ms):
+		return false
+	var link_key = _trade_link_key(from_agent, to_agent)
+	if link_key == "":
+		return true
+	if _consume_trade_bucket(_trade_link_buckets, link_key, trade_link_rate_per_sec, trade_link_burst, now_ms):
+		return true
+	var sender_state_variant = _trade_sender_buckets.get(sender_key, {})
+	if typeof(sender_state_variant) == TYPE_DICTIONARY:
+		var sender_state: Dictionary = sender_state_variant
+		var sender_tokens = float(sender_state.get("tokens", 0.0))
+		sender_state["tokens"] = minf(sender_tokens + 1.0, maxf(trade_sender_burst, 0.0))
+		_trade_sender_buckets[sender_key] = sender_state
+	return false
 
 
 func perf_count_tile_occupancy_query() -> void:

@@ -107,6 +107,20 @@ var _tutorial_expanded_size := TUTORIAL_PANEL_EXPANDED_SIZE
 var _tutorial_expanded_size_base := TUTORIAL_PANEL_EXPANDED_SIZE
 var _tutorial_collapsed_size := TUTORIAL_PANEL_COLLAPSED_SIZE
 var _inventory_side_controls_embedded := false
+var _inventory_panel: MarginContainer = null
+var _tutorial_panel: Control = null
+var _tutorial_label: Label = null
+var _tutorial_helper_panel: Panel = null
+var _endgame_container: Control = null
+var _pause_container_ref: MarginContainer = null
+var _quit_container_ref: MarginContainer = null
+var _pause_button_ref: Button = null
+var _quit_button_ref: Button = null
+var _ui_layout_elapsed := 0.0
+var _ui_layout_dirty := true
+var _last_inventory_rect := Rect2(Vector2.ZERO, Vector2.ZERO)
+var _last_tutorial_visible := false
+var _last_endgame_visible := false
 
 func _ready() -> void:
 	#$PalletContainer2/HBoxContainer/ActiveTexture.texture = Global.active_agent.sprite_texture
@@ -114,8 +128,10 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	inventory_spawn_rng.randomize()
 	_ensure_drag_preview()
+	_cache_layout_nodes()
 	_connect_viewport_resize_signal()
 	_apply_responsive_layout()
+	_flush_layout_updates(true)
 	set_pause_state(false)
 
 var clicked_slider = false
@@ -133,6 +149,7 @@ var inventory_sprites = {}
 
 
 func setup():
+	_cache_layout_nodes()
 	_slot_icons = [
 		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/ChooseBeans,
 		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/ChooseSquash,
@@ -161,6 +178,19 @@ func setup():
 	$MarginContainer/VBoxContainer/HBoxContainer/ResVBoxContainer.visible = false
 	$MarginContainer/VBoxContainer/HBoxContainer/ValVBoxContainer.visible = false
 	refresh_inventory_counts()
+	_flush_layout_updates(true)
+
+
+func _cache_layout_nodes() -> void:
+	_inventory_panel = get_node_or_null("MarginContainer")
+	_tutorial_panel = get_node_or_null("TutorialMarginContainer1")
+	_tutorial_label = get_node_or_null("TutorialMarginContainer1/Label")
+	_tutorial_helper_panel = get_node_or_null("TutorialMarginContainer1/HelperPanel")
+	_endgame_container = get_node_or_null("EndGameContainer")
+	_pause_container_ref = find_child("MarginCMarginContainer2ontainer", true, false) as MarginContainer
+	_quit_container_ref = find_child("QuitContainer", true, false) as MarginContainer
+	_pause_button_ref = find_child("PauseButton", true, false) as Button
+	_quit_button_ref = find_child("QuitButton", true, false) as Button
 
 
 func _ensure_minimap_panel() -> void:
@@ -183,22 +213,35 @@ func _ensure_minimap_panel() -> void:
 	var world = get_node_or_null("../WorldFoundation")
 	var agents = get_node_or_null("../Agents")
 	minimap_panel.configure(level_root, world, agents)
+	_request_layout_update()
 
 
 func _get_pause_container() -> MarginContainer:
-	return find_child("MarginCMarginContainer2ontainer", true, false) as MarginContainer
+	if is_instance_valid(_pause_container_ref):
+		return _pause_container_ref
+	_pause_container_ref = find_child("MarginCMarginContainer2ontainer", true, false) as MarginContainer
+	return _pause_container_ref
 
 
 func _get_quit_container() -> MarginContainer:
-	return find_child("QuitContainer", true, false) as MarginContainer
+	if is_instance_valid(_quit_container_ref):
+		return _quit_container_ref
+	_quit_container_ref = find_child("QuitContainer", true, false) as MarginContainer
+	return _quit_container_ref
 
 
 func _get_pause_button() -> Button:
-	return find_child("PauseButton", true, false) as Button
+	if is_instance_valid(_pause_button_ref):
+		return _pause_button_ref
+	_pause_button_ref = find_child("PauseButton", true, false) as Button
+	return _pause_button_ref
 
 
 func _get_quit_button() -> Button:
-	return find_child("QuitButton", true, false) as Button
+	if is_instance_valid(_quit_button_ref):
+		return _quit_button_ref
+	_quit_button_ref = find_child("QuitButton", true, false) as Button
+	return _quit_button_ref
 
 
 func _embed_pause_quit_controls_next_to_minimap() -> void:
@@ -251,6 +294,8 @@ func _embed_pause_quit_controls_next_to_minimap() -> void:
 		pause_container.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		row.move_child(pause_container, row.get_child_count() - 1)
 	_inventory_side_controls_embedded = is_instance_valid(minimap_host) and is_instance_valid(quit_container) and is_instance_valid(pause_container)
+	_cache_layout_nodes()
+	_request_layout_update()
 
 
 func _is_story_basket_slot_unlocked() -> bool:
@@ -652,6 +697,7 @@ func refresh_inventory_counts() -> void:
 		return
 	_refresh_inventory_selection_visuals()
 	_refresh_inventory_phase1_sparkle_visuals()
+	_request_layout_update()
 
 
 func _connect_viewport_resize_signal() -> void:
@@ -664,10 +710,61 @@ func _connect_viewport_resize_signal() -> void:
 
 
 func _on_viewport_size_changed() -> void:
+	_cache_layout_nodes()
 	_apply_responsive_layout()
+	_request_layout_update()
+	_flush_layout_updates(true)
+
+
+func _request_layout_update() -> void:
+	_ui_layout_dirty = true
+
+
+func _detect_layout_state_change() -> bool:
+	var changed := false
+	if is_instance_valid(_inventory_panel):
+		var inventory_rect = _inventory_panel.get_global_rect()
+		if inventory_rect != _last_inventory_rect:
+			_last_inventory_rect = inventory_rect
+			changed = true
+	elif _last_inventory_rect.size != Vector2.ZERO:
+		_last_inventory_rect = Rect2(Vector2.ZERO, Vector2.ZERO)
+		changed = true
+	var tutorial_visible = is_instance_valid(_tutorial_panel) and _tutorial_panel.visible
+	if tutorial_visible != _last_tutorial_visible:
+		_last_tutorial_visible = tutorial_visible
+		changed = true
+	var endgame_visible = is_instance_valid(_endgame_container) and _endgame_container.visible
+	if endgame_visible != _last_endgame_visible:
+		_last_endgame_visible = endgame_visible
+		changed = true
+	return changed
+
+
+func _apply_runtime_layout(force: bool = false) -> void:
+	if not force and not _ui_layout_dirty:
+		return
 	_layout_quit_container()
 	_layout_tutorial_container()
 	_position_tutorial_toggle()
+	_ui_layout_dirty = false
+
+
+func _flush_layout_updates(force: bool = false) -> void:
+	_ui_layout_elapsed = 0.0
+	_apply_runtime_layout(force or _ui_layout_dirty)
+
+
+func _update_layout_pass(delta: float) -> void:
+	var geometry_changed = _detect_layout_state_change()
+	if not Global.ui_layout_cadence_enabled:
+		_apply_runtime_layout(true)
+		return
+	_ui_layout_elapsed += maxf(delta, 0.0)
+	var interval = maxf(Global.get_ui_layout_refresh_interval(), 0.016)
+	if geometry_changed or _ui_layout_dirty or _ui_layout_elapsed >= interval:
+		_apply_runtime_layout(geometry_changed or _ui_layout_dirty)
+		_ui_layout_elapsed = 0.0
 
 
 func _estimate_wrapped_line_count(text_value: String, approx_chars_per_line: int) -> int:
@@ -683,8 +780,8 @@ func _estimate_wrapped_line_count(text_value: String, approx_chars_per_line: int
 
 
 func _update_tutorial_expanded_size_for_text() -> void:
-	var tutorial: Control = get_node_or_null("TutorialMarginContainer1")
-	var label: Label = get_node_or_null("TutorialMarginContainer1/Label")
+	var tutorial: Control = _tutorial_panel
+	var label: Label = _tutorial_label
 	if not is_instance_valid(tutorial) or not is_instance_valid(label):
 		return
 	var text_value := str(label.text)
@@ -728,7 +825,7 @@ func _apply_responsive_layout() -> void:
 	var view_size = view_rect.size
 	var compact = _is_compact_ui()
 	var tiny = _is_tiny_ui()
-	var inventory: MarginContainer = get_node_or_null("MarginContainer")
+	var inventory: MarginContainer = _inventory_panel
 	if is_instance_valid(inventory):
 		var margin_px = 10 if compact else 14
 		inventory.add_theme_constant_override("margin_left", margin_px)
@@ -762,7 +859,7 @@ func _apply_responsive_layout() -> void:
 	var minimap_row: HBoxContainer = get_node_or_null("MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/MiniMapRow")
 	if is_instance_valid(minimap_row):
 		minimap_row.add_theme_constant_override("separation", 12 if compact else 8)
-	var tutorial_label: Label = get_node_or_null("TutorialMarginContainer1/Label")
+	var tutorial_label: Label = _tutorial_label
 	if is_instance_valid(tutorial_label):
 		tutorial_label.add_theme_font_size_override("font_size", 19 if tiny else (18 if compact else 17))
 		tutorial_label.offset_left = 16.0
@@ -785,7 +882,6 @@ func _apply_responsive_layout() -> void:
 			continue
 		button.custom_minimum_size = pause_size
 		button.add_theme_font_size_override("font_size", 18 if compact else 14)
-	_update_tutorial_expanded_size_for_text()
 	_apply_tutorial_panel_state()
 
 
@@ -801,8 +897,10 @@ func get_inventory_icon_center(agent_name: String) -> Vector2:
 			continue
 		var icon_rect = icon.get_global_rect()
 		return icon_rect.position + icon_rect.size * 0.5
-	var panel_rect = $MarginContainer.get_global_rect()
-	return panel_rect.position + panel_rect.size * 0.5
+	if is_instance_valid(_inventory_panel):
+		var panel_rect = _inventory_panel.get_global_rect()
+		return panel_rect.position + panel_rect.size * 0.5
+	return get_viewport().get_visible_rect().size * 0.5
 
 
 func refund_inventory_item(agent_name: String, amount: int = 1) -> void:
@@ -820,9 +918,7 @@ func _process(delta: float) -> void:
 	_update_minimap_input_lock()
 	_update_inventory_phase1_sparkle_animation(delta)
 	_refresh_tutorial_panel_state()
-	_layout_quit_container()
-	_layout_tutorial_container()
-	_position_tutorial_toggle()
+	_update_layout_pass(delta)
 
 
 func _update_minimap_input_lock() -> void:
@@ -838,7 +934,7 @@ func _update_minimap_input_lock() -> void:
 
 
 func _ensure_tutorial_panel_toggle() -> void:
-	var tutorial = get_node_or_null("TutorialMarginContainer1")
+	var tutorial = _tutorial_panel
 	if not is_instance_valid(tutorial):
 		return
 	tutorial.clip_contents = true
@@ -853,6 +949,7 @@ func _ensure_tutorial_panel_toggle() -> void:
 		_tutorial_toggle_button.add_theme_font_size_override("font_size", 14)
 		_tutorial_toggle_button.pressed.connect(_on_tutorial_toggle_pressed)
 		add_child(_tutorial_toggle_button)
+		_request_layout_update()
 	_apply_tutorial_panel_state()
 
 
@@ -864,11 +961,11 @@ func _set_tutorial_collapsed(collapsed: bool) -> void:
 
 
 func _apply_tutorial_panel_state() -> void:
-	var tutorial = get_node_or_null("TutorialMarginContainer1")
+	var tutorial = _tutorial_panel
 	if not is_instance_valid(tutorial):
 		return
-	var label: Label = tutorial.get_node_or_null("Label")
-	var helper_panel: Panel = tutorial.get_node_or_null("HelperPanel")
+	var label: Label = _tutorial_label
+	var helper_panel: Panel = _tutorial_helper_panel
 	var content_visible = not _tutorial_collapsed
 	if is_instance_valid(label):
 		label.visible = content_visible
@@ -882,14 +979,14 @@ func _apply_tutorial_panel_state() -> void:
 	if is_instance_valid(_tutorial_toggle_button):
 		_tutorial_toggle_button.text = "i" if _tutorial_collapsed else "X"
 		_tutorial_toggle_button.visible = tutorial.visible
-	_layout_tutorial_container()
-	_position_tutorial_toggle()
+	_request_layout_update()
+	_flush_layout_updates(true)
 
 
 func _position_tutorial_toggle() -> void:
 	if not is_instance_valid(_tutorial_toggle_button):
 		return
-	var tutorial = get_node_or_null("TutorialMarginContainer1")
+	var tutorial = _tutorial_panel
 	if not is_instance_valid(tutorial) or not tutorial.visible:
 		_tutorial_toggle_button.visible = false
 		return
@@ -908,7 +1005,7 @@ func _layout_quit_container() -> void:
 		return
 	var quit_container: MarginContainer = _get_quit_container()
 	var pause_container: MarginContainer = _get_pause_container()
-	var inventory_panel: MarginContainer = get_node_or_null("MarginContainer")
+	var inventory_panel: MarginContainer = _inventory_panel
 	if not is_instance_valid(inventory_panel):
 		return
 	var inventory_rect = inventory_panel.get_global_rect()
@@ -940,7 +1037,7 @@ func _layout_quit_container() -> void:
 
 
 func _layout_tutorial_container() -> void:
-	var tutorial: Control = get_node_or_null("TutorialMarginContainer1")
+	var tutorial: Control = _tutorial_panel
 	if not is_instance_valid(tutorial) or not tutorial.visible:
 		return
 	var view_rect = get_viewport().get_visible_rect()
@@ -957,7 +1054,7 @@ func _layout_tutorial_container() -> void:
 		)
 		return
 	var top_y := 16.0
-	var score_container: Control = get_node_or_null("EndGameContainer")
+	var score_container: Control = _endgame_container
 	if is_instance_valid(score_container) and score_container.visible:
 		var score_rect = score_container.get_global_rect()
 		top_y = score_rect.position.y + score_rect.size.y + 12.0
@@ -968,13 +1065,13 @@ func _layout_tutorial_container() -> void:
 
 
 func _refresh_tutorial_panel_state() -> void:
-	var tutorial = get_node_or_null("TutorialMarginContainer1")
+	var tutorial = _tutorial_panel
 	if not is_instance_valid(tutorial):
 		return
 	if not tutorial.visible:
 		_tutorial_last_visible = false
 		return
-	var label: Label = tutorial.get_node_or_null("Label")
+	var label: Label = _tutorial_label
 	var current_text := ""
 	if is_instance_valid(label):
 		current_text = str(label.text)

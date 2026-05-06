@@ -391,7 +391,8 @@ func _input(event):
 
 
 func _process(_delta: float) -> void:
-	LevelHelpersRef.update_agent_hover_focus(self, $Agents)
+	if not Global.is_mobile_platform:
+		LevelHelpersRef.update_agent_hover_focus(self, $Agents)
 	_dirty_refresh_accum += _delta
 	if _dirty_refresh_accum >= Global.get_dirty_refresh_interval():
 		_dirty_refresh_accum = 0.0

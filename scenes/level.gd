@@ -35,6 +35,7 @@ const STORY_PHASE4_FARMER_HARVEST_RADIUS := 8
 const STORY_VILLAGE_PERMANENT_REVEAL_BUFFER := 4
 const STORY_PHASE5_OBJECTIVE_KEY := "village_everyone_trading"
 const AMBIENT_TREE_AUDIO_RADIUS_TILES := 4.0
+const AMBIENT_TREE_AUDIO_SCAN_INTERVAL := 0.20
 const AMBIENT_TREE_AUDIO_SILENT_DB := -36.0
 const AMBIENT_TREE_AUDIO_FADE_SPEED_DB := 28.0
 const STORY_GUIDANCE_RING_COLOR := Color(1.0, 0.96, 0.50, 1.0)
@@ -123,6 +124,8 @@ var _story_phase5_basket_placed := false
 var _story_guidance_pulse_time := 0.0
 var _story_guidance_refresh_accum := 0.0
 var _ambient_tree_audio_base_db := 0.0
+var _ambient_tree_audio_scan_elapsed := AMBIENT_TREE_AUDIO_SCAN_INTERVAL
+var _ambient_tree_audio_target_db := AMBIENT_TREE_AUDIO_SILENT_DB
 @onready var _bird_sound_player: AudioStreamPlayer2D = get_node_or_null("BirdSound")
 @onready var _bird_long_player: AudioStreamPlayer = get_node_or_null("BirdLong")
 @onready var _car_sound_player: AudioStreamPlayer2D = get_node_or_null("CarSound")
@@ -188,13 +191,7 @@ func _get_listener_world_position() -> Vector2:
 	return _get_world_center()
 
 
-func _update_tree_ambient_audio(delta: float) -> void:
-	if _is_headless_runtime():
-		return
-	if not is_instance_valid(_bird_long_player):
-		return
-	if not _bird_long_player.playing:
-		_bird_long_player.play()
+func _compute_tree_ambient_target_db() -> float:
 	var world = _get_world_foundation()
 	var tile_size_world := 64.0
 	if is_instance_valid(world):
@@ -214,11 +211,24 @@ func _update_tree_ambient_audio(delta: float) -> void:
 		var world_dist = listener_pos.distance_to(agent.global_position)
 		if world_dist < nearest_tree_dist:
 			nearest_tree_dist = world_dist
-	var target_db = AMBIENT_TREE_AUDIO_SILENT_DB
-	if nearest_tree_dist <= radius_world:
-		var normalized = clampf(1.0 - (nearest_tree_dist / radius_world), 0.0, 1.0)
-		target_db = lerpf(AMBIENT_TREE_AUDIO_SILENT_DB, _ambient_tree_audio_base_db, normalized)
-	_bird_long_player.volume_db = move_toward(_bird_long_player.volume_db, target_db, AMBIENT_TREE_AUDIO_FADE_SPEED_DB * delta)
+	if nearest_tree_dist > radius_world:
+		return AMBIENT_TREE_AUDIO_SILENT_DB
+	var normalized = clampf(1.0 - (nearest_tree_dist / radius_world), 0.0, 1.0)
+	return lerpf(AMBIENT_TREE_AUDIO_SILENT_DB, _ambient_tree_audio_base_db, normalized)
+
+
+func _update_tree_ambient_audio(delta: float) -> void:
+	if _is_headless_runtime():
+		return
+	if not is_instance_valid(_bird_long_player):
+		return
+	if not _bird_long_player.playing:
+		_bird_long_player.play()
+	_ambient_tree_audio_scan_elapsed += maxf(delta, 0.0)
+	if _ambient_tree_audio_scan_elapsed >= AMBIENT_TREE_AUDIO_SCAN_INTERVAL:
+		_ambient_tree_audio_scan_elapsed = 0.0
+		_ambient_tree_audio_target_db = _compute_tree_ambient_target_db()
+	_bird_long_player.volume_db = move_toward(_bird_long_player.volume_db, _ambient_tree_audio_target_db, AMBIENT_TREE_AUDIO_FADE_SPEED_DB * delta)
 
 
 func _is_story_mode() -> bool:
@@ -1613,7 +1623,8 @@ func _input(event):
 
 func _process(_delta: float) -> void:
 	_update_tree_ambient_audio(_delta)
-	LevelHelpersRef.update_agent_hover_focus(self, $Agents)
+	if not Global.is_mobile_platform:
+		LevelHelpersRef.update_agent_hover_focus(self, $Agents)
 	_refresh_story_phase2_harvest_guidance_visuals(_delta)
 	if _is_story_mode():
 		_story_progress_accum += _delta

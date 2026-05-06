@@ -19,6 +19,12 @@ var _touch_drag_id := -1
 var _input_enabled := true
 var _village_marker_world := Vector2.ZERO
 var _village_marker_visible := false
+var _redraw_elapsed := 0.0
+var _redraw_requested := true
+var _last_camera_center := Vector2.INF
+var _last_camera_size := Vector2.ZERO
+var _last_panel_size := Vector2.ZERO
+var _last_world_rect := Rect2(Vector2.ZERO, Vector2.ZERO)
 
 
 func _ready() -> void:
@@ -29,24 +35,30 @@ func configure(level_root: Node, world_node: Node, agents_root: Node) -> void:
 	_level_root = level_root
 	_world_node = world_node
 	_agents_root = agents_root
-	queue_redraw()
+	_request_redraw()
 
 
 func set_village_marker(world_pos: Vector2, visible: bool) -> void:
+	if _village_marker_world == world_pos and _village_marker_visible == visible:
+		return
 	_village_marker_world = world_pos
 	_village_marker_visible = visible
-	queue_redraw()
+	_request_redraw()
 
 
 func set_input_enabled(enabled: bool) -> void:
+	if _input_enabled == enabled:
+		return
 	_input_enabled = enabled
 	if not _input_enabled:
 		_cancel_drag_state()
+	_request_redraw()
 
 
 func _cancel_drag_state() -> void:
 	_dragging = false
 	_touch_drag_id = -1
+	_request_redraw()
 
 
 func _clear_mobile_selection_for_pan() -> void:
@@ -55,8 +67,49 @@ func _clear_mobile_selection_for_pan() -> void:
 	LevelHelpersRef.clear_mobile_selection_and_bars(_level_root, _agents_root)
 
 
-func _process(_delta: float) -> void:
-	queue_redraw()
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_RESIZED:
+		_request_redraw()
+
+
+func _request_redraw() -> void:
+	_redraw_requested = true
+
+
+func _camera_or_world_changed() -> bool:
+	var changed := false
+	if _last_panel_size != size:
+		_last_panel_size = size
+		changed = true
+	var world_rect = _get_world_rect()
+	if _last_world_rect != world_rect:
+		_last_world_rect = world_rect
+		changed = true
+	if is_instance_valid(_level_root):
+		var viewport = _level_root.get_viewport()
+		if viewport != null:
+			var view_size = viewport.get_visible_rect().size
+			if _last_camera_size != view_size:
+				_last_camera_size = view_size
+				changed = true
+			var camera = viewport.get_camera_2d()
+			if is_instance_valid(camera):
+				var center = camera.get_screen_center_position()
+				if _last_camera_center == Vector2.INF or _last_camera_center.distance_squared_to(center) > 0.01:
+					_last_camera_center = center
+					changed = true
+	return changed
+
+
+func _process(delta: float) -> void:
+	_redraw_elapsed += maxf(delta, 0.0)
+	if _camera_or_world_changed():
+		_request_redraw()
+	var interval = Global.get_minimap_interaction_redraw_interval() if _dragging else Global.get_minimap_idle_redraw_interval()
+	if _redraw_requested or _redraw_elapsed >= maxf(interval, 0.016):
+		_redraw_elapsed = 0.0
+		_redraw_requested = false
+		queue_redraw()
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -68,6 +121,7 @@ func _gui_input(event: InputEvent) -> void:
 				return
 			_touch_drag_id = event.index
 			_dragging = true
+			_request_redraw()
 			_clear_mobile_selection_for_pan()
 			_emit_pan_for_local(event.position)
 		else:
@@ -75,11 +129,13 @@ func _gui_input(event: InputEvent) -> void:
 				return
 			_touch_drag_id = -1
 			_dragging = false
+			_request_redraw()
 		return
 	if event is InputEventScreenDrag:
 		if event.index != _touch_drag_id:
 			return
 		_dragging = true
+		_request_redraw()
 		_emit_pan_for_local(event.position)
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
@@ -87,12 +143,15 @@ func _gui_input(event: InputEvent) -> void:
 			return
 		if event.pressed:
 			_dragging = true
+			_request_redraw()
 			_emit_pan_for_local(event.position)
 		else:
 			_dragging = false
+			_request_redraw()
 	elif event is InputEventMouseMotion and _dragging:
 		if Global.is_mobile_platform:
 			return
+		_request_redraw()
 		_emit_pan_for_local(event.position)
 
 
@@ -100,6 +159,7 @@ func _emit_pan_for_local(local_pos: Vector2) -> void:
 	var world_pos = _map_to_world(local_pos)
 	if world_pos == Vector2.INF:
 		return
+	_request_redraw()
 	emit_signal("camera_pan_requested", world_pos)
 
 

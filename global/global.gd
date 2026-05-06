@@ -36,6 +36,8 @@ var perf_soil_tick_ms_last = 0.0
 var perf_tile_occupancy_queries = 0
 var perf_last_sample = {}
 var perf_run_metadata = {}
+var minimap_adaptive_redraw_enabled = true
+var ui_layout_cadence_enabled = true
 var trade_dispatch_limit_enabled = true
 var trade_sender_rate_per_sec := 6.0
 var trade_sender_burst := 2.0
@@ -419,6 +421,36 @@ func get_bar_update_interval() -> float:
 			return 0.20
 		_:
 			return 0.033
+
+
+func get_minimap_idle_redraw_interval() -> float:
+	if not minimap_adaptive_redraw_enabled:
+		return 0.016
+	match get_effective_perf_tier():
+		1:
+			return 0.125
+		2:
+			return 0.20
+		_:
+			return 0.083333
+
+
+func get_minimap_interaction_redraw_interval() -> float:
+	if not minimap_adaptive_redraw_enabled:
+		return 0.016
+	return 0.033333
+
+
+func get_ui_layout_refresh_interval() -> float:
+	if not ui_layout_cadence_enabled:
+		return 0.0
+	match get_effective_perf_tier():
+		1:
+			return 0.10
+		2:
+			return 0.14
+		_:
+			return 0.066667
 
 
 func get_trade_visual_link_packet_cap() -> int:

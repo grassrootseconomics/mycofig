@@ -37,6 +37,7 @@ var myco_dead_ticks := 0
 var myco_starvation_ticks := 0
 var myco_harvest_ready := false
 var myco_pod_sparkle_played := false
+var trade_queue: Array = []
 
 var mushroom_base_texture: Texture2D = null
 var mushroom_base_scale := Vector2.ONE
@@ -440,6 +441,24 @@ func generate_buddies() -> void:
 
 
 func logistics():
+	var new_trade_queue: Array = []
+	for trade in trade_queue:
+		if typeof(trade) != TYPE_DICTIONARY:
+			continue
+		var trade_asset = str(trade.get("trade_asset", ""))
+		var trade_amount = int(trade.get("trade_amount", 0))
+		if trade_asset == "" or trade_amount <= 0:
+			continue
+		if assets.get(trade_asset) == null or int(assets[trade_asset]) < trade_amount:
+			new_trade_queue.append(trade)
+			continue
+		if _emit_trade_with_budget(trade):
+			assets[trade_asset] -= trade_amount
+			bars[trade_asset].value = assets[trade_asset]
+		else:
+			new_trade_queue.append(trade)
+	trade_queue = new_trade_queue
+
 	var excess_res = null
 	var high_amt_excess = 0
 	var needed_res = null
@@ -571,6 +590,8 @@ func _on_area_entered(trade: Area2D) -> void:
 						if _emit_trade_with_budget(path_dict):
 							assets[trade.return_asset] -= return_amount
 							bars[trade.return_asset].value = assets[trade.return_asset]
+						else:
+							trade_queue.append(path_dict)
 			trade.call_deferred("queue_free")
 		else:
 			print("Error myco without asset:", trade.asset, assets)

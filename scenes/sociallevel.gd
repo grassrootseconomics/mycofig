@@ -42,6 +42,8 @@ var _dirty_lines_agents: Dictionary = {}
 var _dirty_tile_hints_agents: Dictionary = {}
 var _trade_pool: Array = []
 var _shutdown_cleanup_done := false
+var _bank_hotkey_enabled := true
+const BASKET_NEAR_PERSON_MAX_TILES := 4
 
 
 func _is_headless_runtime() -> bool:
@@ -111,6 +113,32 @@ func _resolve_exact_tile_spawn_pos(pos: Vector2, ignore_agent: Variant = null) -
 	return result
 
 
+func _tile_chebyshev_distance(a: Vector2i, b: Vector2i) -> int:
+	return maxi(abs(a.x - b.x), abs(a.y - b.y))
+
+
+func _is_village_person_type(agent_type: String) -> bool:
+	return agent_type == "bean" or agent_type == "squash" or agent_type == "maize" or agent_type == "farmer" or agent_type == "vendor" or agent_type == "cook"
+
+
+func _can_place_basket_near_person(world_pos: Vector2) -> bool:
+	var world = _get_world_foundation()
+	if not (is_instance_valid(world) and world.has_method("world_to_tile")):
+		return false
+	var basket_coord = Vector2i(world.world_to_tile(world_pos))
+	for agent in $Agents.get_children():
+		if not is_instance_valid(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if not _is_village_person_type(str(agent.get("type"))):
+			continue
+		var person_coord = Vector2i(world.world_to_tile(agent.global_position))
+		if _tile_chebyshev_distance(basket_coord, person_coord) <= BASKET_NEAR_PERSON_MAX_TILES:
+			return true
+	return false
+
+
 func can_place_inventory_item_at_world_pos(item_name: String, world_pos: Vector2) -> bool:
 	var spawn_name = str(item_name)
 	if spawn_name == "":
@@ -129,6 +157,9 @@ func can_place_inventory_item_at_world_pos(item_name: String, world_pos: Vector2
 	var exact_spawn = _resolve_exact_tile_spawn_pos(target_pos)
 	if not bool(exact_spawn.get("ok", false)):
 		return false
+	if spawn_name == "basket" or spawn_name == "myco":
+		if not _can_place_basket_near_person(target_pos):
+			return false
 	if spawn_name == "myco" and world.has_method("can_place_myco_on_tile"):
 		if not bool(world.call("can_place_myco_on_tile", coord)):
 			return false
@@ -378,6 +409,19 @@ func _on_ui_request_back_to_menu() -> void:
 	get_tree().call_deferred("change_scene_to_file", "res://scenes/game_over.tscn")
 
 
+func toggle_bank_hotkey() -> void:
+	_bank_hotkey_enabled = not _bank_hotkey_enabled
+	for agent in $Agents.get_children():
+		if not is_instance_valid(agent):
+			continue
+		if str(agent.get("type")) != "bank":
+			continue
+		agent.set_meta("bank_disabled", not _bank_hotkey_enabled)
+		if _bank_hotkey_enabled:
+			agent.set("logistics_ready", true)
+	print("Bank trading hotkey state: ", "ON" if _bank_hotkey_enabled else "OFF")
+
+
 func _input(event):
 	if _is_keyboard_escape_input(event):
 		if $UI.has_method("show_back_to_menu_confirm"):
@@ -454,6 +498,8 @@ func _spawn_trade(path_dict) -> void:
 	if typeof(path_dict) != TYPE_DICTIONARY:
 		return
 	var trade_dict: Dictionary = path_dict.duplicate()
+	if int(trade_dict.get("created_at_msec", 0)) <= 0:
+		trade_dict["created_at_msec"] = Time.get_ticks_msec()
 	var trade_amount = maxi(int(trade_dict.get("trade_amount", 1)), 1)
 	trade_dict["trade_amount"] = trade_amount
 	if Global.trade_visual_hybrid_enabled:
@@ -525,12 +571,26 @@ func _on_update_score() -> void:
 	if(Global.mode == "challenge" and Global.ranks[current_score_lvl] == "Grassroots Economist"):
 		get_tree().call_deferred("change_scene_to_file","res://scenes/game_over.tscn")
 
+
+func _refund_inventory_item(item_name: String, amount: int = 1) -> void:
+	if item_name == "":
+		return
+	if amount <= 0:
+		return
+	Global.inventory[item_name] = int(Global.inventory.get(item_name, 0)) + amount
+	var ui_node = get_node_or_null("UI")
+	if is_instance_valid(ui_node) and ui_node.has_method("refresh_inventory_counts"):
+		ui_node.refresh_inventory_counts()
+
+
 func _on_new_agent(agent_dict) -> void:
 	#print("found signal: ", agent_dict)
 	var new_agent = null
+	var spawn_name = str(agent_dict["name"])
 	var spawn_pos = agent_dict["pos"]
 	var ignore_agent = agent_dict.get("ignore_agent", null)
 	var require_exact_tile = bool(agent_dict.get("require_exact_tile", false))
+	var from_inventory = bool(agent_dict.get("from_inventory", false))
 	if bool(agent_dict.get("allow_replace", false)):
 		var replace_target = _find_replaceable_agent_at_world_pos(spawn_pos, ignore_agent)
 		if is_instance_valid(replace_target):
@@ -543,21 +603,27 @@ func _on_new_agent(agent_dict) -> void:
 	if require_exact_tile:
 		var exact_spawn = _resolve_exact_tile_spawn_pos(spawn_pos, ignore_agent)
 		if not bool(exact_spawn["ok"]):
+			if from_inventory:
+				_refund_inventory_item(spawn_name, 1)
 			return
 		spawn_pos = exact_spawn["pos"]
-	if agent_dict["name"]  == "squash":
+	if (spawn_name == "myco" or spawn_name == "basket") and not _can_place_basket_near_person(spawn_pos):
+		if from_inventory:
+			_refund_inventory_item(spawn_name, 1)
+		return
+	if spawn_name  == "squash":
 		$TwinkleSound.play()
 		new_agent = make_squash(spawn_pos)
-	elif agent_dict["name"]  == "bean":
+	elif spawn_name  == "bean":
 		$TwinkleSound.play()
 		new_agent = make_bean(spawn_pos)
-	elif agent_dict["name"]  == "maize":
+	elif spawn_name  == "maize":
 		$TwinkleSound.play()
 		new_agent = make_maize(spawn_pos)
-	elif agent_dict["name"]  == "myco":
+	elif spawn_name  == "myco" or spawn_name == "basket":
 		$SquelchSound.play()
 		new_agent = make_myco(spawn_pos)
-	elif agent_dict["name"]  == "tree":
+	elif spawn_name  == "tree":
 		$BushSound.play()
 		new_agent = make_tree(spawn_pos)
 	
@@ -760,7 +826,7 @@ func _make_bi_myco(pos: Vector2, asset_key: String):
 	basket.set_variables(myco_dict)
 	$Agents.add_child(basket)
 	basket.draw_lines = true
-	basket.draggable = false
+	basket.draggable = true
 	basket.killable = false
 	basket.sprite.modulate = Global.asset_colors[asset_key]
 	

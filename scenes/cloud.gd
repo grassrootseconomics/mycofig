@@ -52,6 +52,8 @@ var bars_offset = { #list of needed assets with need level
 
 
 func _is_story_mode_runtime() -> bool:
+	if Global.has_method("is_parallel_village_runtime"):
+		return bool(Global.is_parallel_village_runtime())
 	return str(Global.mode) == "story"
 
 

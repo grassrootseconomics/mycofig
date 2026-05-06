@@ -6,6 +6,12 @@ const STORY_FARMER_HARVEST_RETURNING_HOME := "returning_home"
 const STORY_FARMER_HARVEST_SPEED_MULTIPLIER := 0.10
 const STORY_FARMER_MOVE_TO_CROP_SECONDS := 0.32 / STORY_FARMER_HARVEST_SPEED_MULTIPLIER
 const STORY_FARMER_RETURN_HOME_SECONDS := 0.30 / STORY_FARMER_HARVEST_SPEED_MULTIPLIER
+const FARMER_CARRY_OFFSET := Vector2(16.0, -20.0)
+const FARMER_CARRY_SCALE := Vector2(0.7, 0.7)
+const CARRY_TEX_BEAN := preload("res://graphics/bean.png")
+const CARRY_TEX_SQUASH := preload("res://graphics/squash_32.png")
+const CARRY_TEX_MAIZE := preload("res://graphics/maize_32.png")
+const CARRY_TEX_TREE := preload("res://graphics/acorn_32.png")
 
 var is_trading = false
 var is_raining = true
@@ -14,6 +20,9 @@ var _story_farmer_harvest_target: Node = null
 var _story_farmer_harvest_home_pos := Vector2.ZERO
 var _story_farmer_harvest_home_set := false
 var _story_farmer_harvest_move_tween: Tween = null
+var _story_farmer_carry_sprite: Sprite2D = null
+var _story_farmer_carried_harvest_type := ""
+var _story_farmer_carried_harvest_source: Node = null
 
 
 func _story_farmer_get_level_root() -> Node:
@@ -51,10 +60,98 @@ func _story_farmer_release_target(level_root: Node) -> void:
 	_story_farmer_harvest_target = null
 
 
+func _story_farmer_get_carry_texture(harvest_type: String) -> Texture2D:
+	match harvest_type:
+		"bean":
+			return CARRY_TEX_BEAN
+		"squash":
+			return CARRY_TEX_SQUASH
+		"maize":
+			return CARRY_TEX_MAIZE
+		"tree":
+			return CARRY_TEX_TREE
+	return null
+
+
+func _story_farmer_show_carry_visual(harvest_type: String) -> void:
+	_story_farmer_clear_carry_visual()
+	var carry_texture = _story_farmer_get_carry_texture(harvest_type)
+	if not is_instance_valid(carry_texture):
+		return
+	var carry_sprite := Sprite2D.new()
+	carry_sprite.name = "FarmerCarrySprite"
+	carry_sprite.texture = carry_texture
+	carry_sprite.position = FARMER_CARRY_OFFSET
+	carry_sprite.scale = FARMER_CARRY_SCALE
+	carry_sprite.z_index = 20
+	add_child(carry_sprite)
+	_story_farmer_carry_sprite = carry_sprite
+
+
+func _story_farmer_clear_carry_visual() -> void:
+	if is_instance_valid(_story_farmer_carry_sprite):
+		_story_farmer_carry_sprite.queue_free()
+	_story_farmer_carry_sprite = null
+
+
+func _story_farmer_clear_carry_state() -> void:
+	_story_farmer_clear_carry_visual()
+	_story_farmer_carried_harvest_type = ""
+	_story_farmer_carried_harvest_source = null
+
+
+func _story_farmer_abort_carried_harvest() -> void:
+	if is_instance_valid(_story_farmer_carried_harvest_source):
+		if _story_farmer_carried_harvest_source.has_method("cancel_farmer_harvest_delivery"):
+			_story_farmer_carried_harvest_source.call("cancel_farmer_harvest_delivery")
+	_story_farmer_clear_carry_state()
+
+
+func _story_farmer_finalize_carried_harvest(level_root: Node) -> void:
+	if _story_farmer_carried_harvest_type == "":
+		_story_farmer_clear_carry_state()
+		return
+	var delivered_type = _story_farmer_carried_harvest_type
+	var delivered := false
+	if is_instance_valid(_story_farmer_carried_harvest_source):
+		if _story_farmer_carried_harvest_source.has_method("finalize_farmer_harvest_delivery"):
+			delivered = bool(_story_farmer_carried_harvest_source.call("finalize_farmer_harvest_delivery", self))
+		elif _story_farmer_carried_harvest_source.has_method("try_harvest_to_farmer"):
+			delivered = bool(_story_farmer_carried_harvest_source.call("try_harvest_to_farmer", self))
+	if delivered and is_instance_valid(level_root) and level_root.has_method("story_farmer_on_harvest_success"):
+		level_root.call("story_farmer_on_harvest_success", self, delivered_type)
+	_story_farmer_clear_carry_state()
+
+
 func _story_farmer_reset_harvest_state(level_root: Node) -> void:
 	_story_farmer_stop_harvest_tween()
+	_story_farmer_abort_carried_harvest()
 	_story_farmer_release_target(level_root)
 	_story_farmer_harvest_state = STORY_FARMER_HARVEST_IDLE
+
+
+func _story_farmer_is_harvest_target_valid(crop_target: Node) -> bool:
+	if not is_instance_valid(crop_target):
+		return false
+	if bool(crop_target.get("dead")):
+		return false
+	if not crop_target.has_method("try_harvest_to_farmer"):
+		return false
+	if crop_target.has_method("can_drag_for_inventory_harvest"):
+		if not bool(crop_target.call("can_drag_for_inventory_harvest")):
+			return false
+	return true
+
+
+func _story_farmer_reacquire_harvest_target(level_root: Node) -> bool:
+	_story_farmer_reset_harvest_state(level_root)
+	logistics_ready = true
+	if not _story_farmer_auto_harvest_enabled(level_root):
+		return false
+	if not _story_farmer_begin_harvest_trip(level_root):
+		return false
+	logistics_ready = false
+	return true
 
 
 func _story_farmer_resolve_home_pos() -> Vector2:
@@ -95,10 +192,11 @@ func _on_story_farmer_return_home_finished() -> void:
 	_story_farmer_harvest_move_tween = null
 	if _story_farmer_harvest_state != STORY_FARMER_HARVEST_RETURNING_HOME:
 		return
+	var level_root = _story_farmer_get_level_root()
+	_story_farmer_finalize_carried_harvest(level_root)
 	_story_farmer_harvest_state = STORY_FARMER_HARVEST_IDLE
 	is_trading = false
 	logistics_ready = true
-	var level_root = _story_farmer_get_level_root()
 	_story_farmer_refresh_trade_network(level_root)
 
 
@@ -107,22 +205,22 @@ func _on_story_farmer_arrived_at_crop() -> void:
 	if _story_farmer_harvest_state != STORY_FARMER_HARVEST_MOVING_TO_CROP:
 		return
 	var level_root = _story_farmer_get_level_root()
-	if not is_instance_valid(_story_farmer_harvest_target):
-		_story_farmer_reset_harvest_state(level_root)
+	if not _story_farmer_is_harvest_target_valid(_story_farmer_harvest_target):
+		_story_farmer_reacquire_harvest_target(level_root)
 		return
-	if bool(_story_farmer_harvest_target.get("dead")):
-		_story_farmer_reset_harvest_state(level_root)
-		return
-	if not _story_farmer_harvest_target.has_method("try_harvest_to_farmer"):
-		_story_farmer_reset_harvest_state(level_root)
-		return
-	var harvested = bool(_story_farmer_harvest_target.call("try_harvest_to_farmer", self))
+	var harvest_source = _story_farmer_harvest_target
+	var harvest_type = str(harvest_source.get("type"))
+	var harvested := false
+	if harvest_source.has_method("begin_farmer_harvest_delivery"):
+		harvested = bool(harvest_source.call("begin_farmer_harvest_delivery", self))
+	elif harvest_source.has_method("try_harvest_to_farmer"):
+		harvested = bool(harvest_source.call("try_harvest_to_farmer", self))
 	if not harvested:
-		_story_farmer_reset_harvest_state(level_root)
+		_story_farmer_reacquire_harvest_target(level_root)
 		return
-	var harvest_type = str(_story_farmer_harvest_target.get("type"))
-	if is_instance_valid(level_root) and level_root.has_method("story_farmer_on_harvest_success"):
-		level_root.call("story_farmer_on_harvest_success", self, harvest_type)
+	_story_farmer_carried_harvest_type = harvest_type
+	_story_farmer_carried_harvest_source = harvest_source
+	_story_farmer_show_carry_visual(harvest_type)
 	_story_farmer_release_target(level_root)
 	_story_farmer_begin_return_home()
 
@@ -133,7 +231,7 @@ func _story_farmer_begin_harvest_trip(level_root: Node) -> bool:
 	if not level_root.has_method("story_farmer_try_assign_harvest_target"):
 		return false
 	var crop_target = level_root.call("story_farmer_try_assign_harvest_target", self)
-	if not is_instance_valid(crop_target):
+	if not _story_farmer_is_harvest_target_valid(crop_target):
 		return false
 	_story_farmer_resolve_home_pos()
 	_story_farmer_harvest_target = crop_target
@@ -149,13 +247,23 @@ func _story_farmer_begin_harvest_trip(level_root: Node) -> bool:
 func _story_farmer_tick_auto_harvest(level_root: Node) -> bool:
 	if not _is_story_farmer_actor():
 		return false
-	if _story_farmer_harvest_state == STORY_FARMER_HARVEST_MOVING_TO_CROP or _story_farmer_harvest_state == STORY_FARMER_HARVEST_RETURNING_HOME:
+	if _story_farmer_harvest_state == STORY_FARMER_HARVEST_MOVING_TO_CROP:
+		if not _story_farmer_is_harvest_target_valid(_story_farmer_harvest_target):
+			_story_farmer_reacquire_harvest_target(level_root)
+		if _story_farmer_harvest_state == STORY_FARMER_HARVEST_MOVING_TO_CROP:
+			logistics_ready = false
+			return true
+		return false
+	if _story_farmer_harvest_state == STORY_FARMER_HARVEST_RETURNING_HOME:
 		logistics_ready = false
 		return true
 	if not _story_farmer_auto_harvest_enabled(level_root):
 		if _story_farmer_harvest_state != STORY_FARMER_HARVEST_IDLE or is_instance_valid(_story_farmer_harvest_target):
 			_story_farmer_reset_harvest_state(level_root)
 		return false
+	if is_instance_valid(level_root) and level_root.has_method("story_farmer_has_pending_inbound_trades"):
+		if bool(level_root.call("story_farmer_has_pending_inbound_trades", self)):
+			return false
 	if not logistics_ready:
 		return false
 	if _story_farmer_begin_harvest_trip(level_root):
@@ -164,10 +272,232 @@ func _story_farmer_tick_auto_harvest(level_root: Node) -> bool:
 	return false
 
 
+func _is_story_village_person_actor() -> bool:
+	if not bool(get_meta("story_village_actor", false)):
+		return false
+	var role = str(type)
+	return role == "farmer" or role == "vendor" or role == "cook"
+
+
+func _should_use_villager_r_liquidity_cycle() -> bool:
+	if not bool(Global.villager_r_medium_only):
+		return false
+	return _is_story_village_person_actor()
+
+
+func _get_villager_r_buffer_target() -> int:
+	return maxi(int(Global.villager_r_buffer_target), 0)
+
+
+func _get_villager_surplus_dominance_margin() -> int:
+	return maxi(int(Global.villager_surplus_dominance_margin), 1)
+
+
+func _get_villager_max_liquidity_inflight_swaps() -> int:
+	return int(Global.villager_max_liquidity_inflight_swaps)
+
+
+func _count_inflight_liquidity_swaps_for_self() -> int:
+	var trades_root = get_node_or_null("../../Trades")
+	if not is_instance_valid(trades_root):
+		return 0
+	var self_id = int(get_instance_id())
+	var inflight_count := 0
+	for trade_packet in trades_root.get_children():
+		if not is_instance_valid(trade_packet):
+			continue
+		var liquidity_trade_value = trade_packet.get("liquidity_cycle_trade")
+		if not bool(liquidity_trade_value):
+			continue
+		var liquidity_origin_value = trade_packet.get("liquidity_cycle_origin_id")
+		var liquidity_origin_id := 0
+		if liquidity_origin_value != null:
+			liquidity_origin_id = int(liquidity_origin_value)
+		if liquidity_origin_id != self_id:
+			continue
+		inflight_count += 1
+	return inflight_count
+
+
+func _is_liquidity_swap_backpressure_blocked() -> bool:
+	var max_inflight = _get_villager_max_liquidity_inflight_swaps()
+	if max_inflight <= 0:
+		return false
+	return _count_inflight_liquidity_swaps_for_self() >= max_inflight
+
+
+func _get_liquidity_dominant_nutrient() -> String:
+	var nutrients: Array[String] = ["N", "P", "K"]
+	var best_res := ""
+	var best_value := -INF
+	var min_value := INF
+	for res in nutrients:
+		if assets.get(res) == null:
+			continue
+		var value = float(assets[res])
+		if value > best_value:
+			best_value = value
+			best_res = res
+		if value < min_value:
+			min_value = value
+	if best_res == "" or min_value == INF:
+		return ""
+	if best_value <= 0.0:
+		return ""
+	if (best_value - min_value) < float(_get_villager_surplus_dominance_margin()):
+		return ""
+	return best_res
+
+
+func _get_liquidity_any_tradeable_nutrient() -> String:
+	var nutrients: Array[String] = ["N", "P", "K"]
+	var best_res := ""
+	var best_value := 0.0
+	for res in nutrients:
+		if assets.get(res) == null:
+			continue
+		var value = float(assets[res])
+		if value > best_value:
+			best_value = value
+			best_res = res
+	if best_value <= 0.0:
+		return ""
+	return best_res
+
+
+func _get_highest_nutrient_deficit() -> String:
+	var nutrients: Array[String] = ["N", "P", "K"]
+	var best_need := ""
+	var best_deficit := 0.0
+	for res in nutrients:
+		if assets.get(res) == null or needs.get(res) == null:
+			continue
+		var deficit = float(needs[res]) - float(assets[res])
+		if deficit > best_deficit:
+			best_deficit = deficit
+			best_need = res
+	return best_need
+
+
+func _get_sorted_nutrient_deficits() -> Array[String]:
+	var nutrients: Array[String] = ["N", "P", "K"]
+	var deficit_pairs: Array = []
+	for res in nutrients:
+		if assets.get(res) == null or needs.get(res) == null:
+			continue
+		var deficit = float(needs[res]) - float(assets[res])
+		if deficit > 0.0:
+			deficit_pairs.append({"res": res, "deficit": deficit})
+	deficit_pairs.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return float(a["deficit"]) > float(b["deficit"])
+	)
+	var ordered: Array[String] = []
+	for pair in deficit_pairs:
+		ordered.append(str(pair["res"]))
+	return ordered
+
+
+func _get_liquidity_r_fill_target() -> float:
+	var need_r = float(needs.get("R", 0.0))
+	if need_r <= 0.0:
+		need_r = float(_get_villager_r_buffer_target())
+	return maxf(need_r, float(_get_villager_r_buffer_target()))
+
+
+func _can_bank_offer_r_to_target(target: Node, offered_res: String) -> bool:
+	if str(type) != "bank" or offered_res != "R":
+		return true
+	if not is_instance_valid(target):
+		return false
+	if target.assets.get("R") == null or target.needs.get("R") == null:
+		return true
+	# Basket/target max is needs["R"] * 2, so half capacity is needs["R"].
+	return float(target.assets["R"]) < float(target.needs["R"])
+
+
+func _try_send_liquidity_swap(offered_res: String, requested_res: String, debug_mode: bool = false) -> bool:
+	if offered_res == "" or requested_res == "":
+		return false
+	if assets.get(offered_res) == null or float(assets[offered_res]) <= 0.0:
+		return false
+	trade_buddies.shuffle()
+	for child in trade_buddies:
+		if not is_instance_valid(child):
+			continue
+		if child.type != "myco" or child.name == self.name:
+			continue
+		if child.assets.get(offered_res) == null or child.assets.get(requested_res) == null:
+			continue
+		if float(child.assets[requested_res]) <= 0.0:
+			continue
+		if offered_res != "R" and child.assets[offered_res] >= child.needs[offered_res] * 2:
+			continue
+		var path_dict = {
+			"from_agent": self,
+			"to_agent": child,
+			"trade_path": [self, child],
+			"trade_asset": offered_res,
+			"trade_amount": 1,
+			"trade_type": "swap",
+			"return_res": requested_res,
+			"return_amt": 1,
+			"liquidity_cycle_trade": true,
+			"liquidity_cycle_origin_id": int(get_instance_id())
+		}
+		if debug_mode:
+			print("liquidity swap: ", offered_res, " -> ", requested_res, " via ", child.name)
+		if _emit_trade_with_budget(path_dict):
+			assets[offered_res] -= 1
+			bars[offered_res].value = assets[offered_res]
+			logistics_ready = false
+			is_trading = true
+			return true
+	return false
+
+
+func _run_villager_r_liquidity_cycle(debug_mode: bool = false) -> void:
+	if not logistics_ready or not is_raining:
+		return
+	if _is_liquidity_swap_backpressure_blocked():
+		return
+	var deficit_order = _get_sorted_nutrient_deficits()
+	var has_deficit = not deficit_order.is_empty()
+	var dominant_res = _get_liquidity_dominant_nutrient()
+	var tradeable_res = dominant_res
+	if tradeable_res == "":
+		tradeable_res = _get_liquidity_any_tradeable_nutrient()
+	var current_r = float(assets.get("R", 0.0))
+	var r_fill_target = _get_liquidity_r_fill_target()
+	if has_deficit:
+		# Phase 1: spend available liquidity on deficits first.
+		if current_r > 0.0:
+			for deficit_res in deficit_order:
+				if _try_send_liquidity_swap("R", deficit_res, debug_mode):
+					return
+		# Phase 2: build liquidity from tradeable nutrient up to target R.
+		if current_r < r_fill_target and tradeable_res != "":
+			if _try_send_liquidity_swap(tradeable_res, "R", debug_mode):
+				return
+		# Fallback: if buy routes are currently unavailable, keep selling any tradeable nutrient.
+		if tradeable_res != "":
+			_try_send_liquidity_swap(tradeable_res, "R", debug_mode)
+		return
+	var r_buffer_target = float(_get_villager_r_buffer_target())
+	if current_r < r_buffer_target:
+		_try_send_liquidity_swap(dominant_res, "R", debug_mode)
+
+
 func logistics():
 	var level_root = _story_farmer_get_level_root()
 	if _story_farmer_tick_auto_harvest(level_root):
 		return
+	if str(type) == "bank" and bool(get_meta("bank_disabled", false)):
+		logistics_ready = false
+		is_trading = false
+		return
+	var farmer_trade_any_n := false
+	if _is_story_farmer_actor() and is_instance_valid(level_root) and level_root.has_method("story_farmer_should_trade_any_n"):
+		farmer_trade_any_n = bool(level_root.call("story_farmer_should_trade_any_n", self))
 	#wait for timer
 	var excess_res = null
 	var high_amt_excess = 0
@@ -175,6 +505,10 @@ func logistics():
 	var high_amt_needed = 0
 	
 	var debug_mode = false
+	
+	if _should_use_villager_r_liquidity_cycle():
+		_run_villager_r_liquidity_cycle(debug_mode)
+		return
 	
 	
 	
@@ -187,7 +521,6 @@ func logistics():
 			print("New Round in: ", name ,", ", assets, " needs: ", needs)	
 		#determine if there are extra resources (offers)
 		#find excess stock
-		
 		for res in assets:
 			current_excess[res] = -999
 			current_needs[res] = -999	
@@ -195,9 +528,18 @@ func logistics():
 			if(res == "R"):
 				if assets[res] > 0:
 					current_excess[res] = assets[res]
+			
+			if farmer_trade_any_n and res == "N":
+				if float(assets[res]) > 0.0:
+					current_excess[res] = assets[res]
+					excess_res = res
+				# Treat N as always-tradable for story/challenge farmers in this mode.
+				# Re-harvest timing is handled separately by the level-side low-N threshold.
+				current_needs[res] = -999
+				continue
 					
 			var c_excess = assets[res] - needs[res] 
-			
+		
 			if assets[res] > needs[res]:
 				#if c_excess > high_amt_excess:
 				high_amt_excess = c_excess
@@ -253,7 +595,7 @@ func logistics():
 										if child.assets.get(excess) != null and child.assets.get(need) != null:
 											if debug_mode:
 												print( " ... myco assets: " , child.assets)
-											if(child.assets[excess] < child.needs[excess] *2):
+											if(child.assets[excess] < child.needs[excess] *2 and _can_bank_offer_r_to_target(child, excess)):
 												var path_dict = {
 													"from_agent": self,
 													"to_agent": child,

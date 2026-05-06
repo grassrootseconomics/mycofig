@@ -30,7 +30,7 @@ enum BeanGrowthStage {
 	DEAD
 }
 
-const BEAN_OVERRIPE_TICKS := 14
+const BEAN_OVERRIPE_TICKS := 20
 const BEAN_DEAD_CLEANUP_TICKS := 6
 const BEAN_DEAD_RESPAWN_DELAY_TICKS := 1
 const BEAN_POST_HARVEST_TO_DEAD_TICKS := 2
@@ -191,6 +191,7 @@ var bean_stage_textures := {}
 var bean_base_scale := Vector2.ONE
 var bean_residue_pending := false
 var bean_residue_emitted := false
+var _farmer_harvest_delivery_reserved := false
 var _bar_update_accum := 0.0
 var _last_occupancy_scale := Vector2(-99999.0, -99999.0)
 var _last_bar_camera_center := Vector2(INF, INF)
@@ -452,7 +453,11 @@ func _can_pointer_activate_harvest() -> bool:
 
 
 func _pointer_reposition_override_enabled() -> bool:
-	return _is_reposition_subject() and bool(Global.allow_agent_reposition)
+	return _global_reposition_override_enabled()
+
+
+func _global_reposition_override_enabled() -> bool:
+	return bool(Global.allow_agent_reposition)
 
 
 func _activate_resource_bars_for_interaction() -> void:
@@ -489,6 +494,11 @@ func _on_pointer_press(screen_pos: Vector2) -> void:
 		_press_started_here = true
 		_activate_resource_bars_for_interaction()
 		var reposition_override = _pointer_reposition_override_enabled()
+		if not reposition_override and _is_inventory_placement_active():
+			# Inventory placement gestures should never start crop drag/harvest flows.
+			_press_started_here = false
+			_drag_pointer_down = false
+			return
 		if not reposition_override and _can_pointer_activate_harvest():
 			return
 		if Global.is_dragging == false and _can_start_user_drag():
@@ -512,6 +522,8 @@ func _on_pointer_release(screen_pos: Vector2) -> void:
 	var pressed_here = _press_started_here
 	_press_started_here = false
 	var reposition_override = _pointer_reposition_override_enabled()
+	if not reposition_override and _is_inventory_placement_active():
+		return
 	if not reposition_override and pressed_here and clicked_self and _try_pointer_activate_harvest(screen_pos):
 		return
 	var was_dragging = is_dragging
@@ -536,6 +548,16 @@ func _on_pointer_release(screen_pos: Vector2) -> void:
 
 func _get_level_root() -> Node:
 	return get_node_or_null("../..")
+
+
+func _is_inventory_placement_active() -> bool:
+	var ui_node = get_node_or_null("../../UI")
+	if not is_instance_valid(ui_node):
+		return false
+	if ui_node.has_method("is_inventory_placement_active"):
+		return bool(ui_node.call("is_inventory_placement_active"))
+	var selected_item = str(ui_node.get("_selected_inventory_item"))
+	return selected_item != ""
 
 
 func _get_agents_root() -> Node:
@@ -892,11 +914,20 @@ func _is_hover_bar_subject() -> bool:
 
 
 func _is_story_mode_runtime() -> bool:
+	if Global.has_method("is_parallel_village_runtime"):
+		return bool(Global.is_parallel_village_runtime())
 	return str(Global.mode) == "story"
 
 
 func _is_story_village_actor_node(node: Variant) -> bool:
 	return is_instance_valid(node) and bool(node.get_meta("story_village_actor", false))
+
+
+func _is_story_village_person_node(node: Variant) -> bool:
+	if not _is_story_village_actor_node(node):
+		return false
+	var node_type = str(node.get("type"))
+	return node_type == "farmer" or node_type == "vendor" or node_type == "cook"
 
 
 func _can_share_story_trade_network(candidate: Variant) -> bool:
@@ -914,6 +945,10 @@ func _can_share_story_trade_network(candidate: Variant) -> bool:
 
 
 func _can_user_reposition() -> bool:
+	if _global_reposition_override_enabled():
+		return true
+	if _is_story_village_actor_node(self) and str(type) == "myco":
+		return true
 	if not _is_reposition_subject():
 		return true
 	return bool(Global.allow_agent_reposition)
@@ -1097,6 +1132,17 @@ func _get_lifecycle_texture_scale_adjust(texture: Texture2D) -> Vector2:
 	)
 
 
+func _get_stage_texture_scale_adjust(texture: Texture2D, stage_value: int) -> Vector2:
+	var adjust = _get_lifecycle_texture_scale_adjust(texture)
+	# Squash lifecycle art uses wider stage atlases than the base inventory sprite.
+	# Preserve squash stage aspect ratio with uniform scaling so the full plant
+	# (sprout/vine/pod/dead) does not get squeezed.
+	if _get_lifecycle_crop_type() == "squash":
+		var uniform = maxf(adjust.x, adjust.y)
+		return Vector2(uniform, uniform)
+	return adjust
+
+
 func _get_lifecycle_stage_texture_path(stage_value: int) -> String:
 	var crop_type = _get_lifecycle_crop_type()
 	if crop_type == "tree":
@@ -1200,7 +1246,7 @@ func _set_bean_stage(new_stage: int, force: bool = false) -> void:
 		sprite.modulate = Color.WHITE
 		sprite.offset = _get_lifecycle_stage_sprite_offset(bean_stage)
 		var stage_scale = _get_bean_stage_target_scale(bean_stage)
-		stage_scale *= _get_lifecycle_texture_scale_adjust(next_texture)
+		stage_scale *= _get_stage_texture_scale_adjust(next_texture, bean_stage)
 		if bean_stage == BeanGrowthStage.DEAD:
 			sprite.modulate = Color(0.92, 0.86, 0.78, 1.0)
 			sprite.scale = stage_scale
@@ -1231,6 +1277,7 @@ func _reset_bean_lifecycle() -> void:
 	bean_pod_sparkle_played = false
 	bean_residue_pending = false
 	bean_residue_emitted = false
+	_farmer_harvest_delivery_reserved = false
 	bean_stage = BeanGrowthStage.SPROUT
 	_set_bean_stage(BeanGrowthStage.SPROUT, true)
 
@@ -1344,6 +1391,8 @@ func _advance_bean_lifecycle(consumed_all_nutrients: bool) -> void:
 		return
 
 	if bean_stage == BeanGrowthStage.POD_READY:
+		if _farmer_harvest_delivery_reserved:
+			return
 		bean_pod_ticks += 1
 		var pod_baby_tick = bean_pod_ticks > 0 and (bean_pod_ticks % BEAN_POD_BABY_TICK_INTERVAL) == 0
 		if pod_baby_tick and bean_harvest_ready and Global.baby_mode:
@@ -1410,7 +1459,7 @@ func _apply_preview_bean_visual(stage_value: int) -> void:
 	sprite.texture = stage_texture
 	sprite.modulate = Color.WHITE
 	sprite.offset = _get_lifecycle_stage_sprite_offset(stage_value)
-	var stage_scale = _get_bean_stage_target_scale(stage_value) * _get_lifecycle_texture_scale_adjust(stage_texture)
+	var stage_scale = _get_bean_stage_target_scale(stage_value) * _get_stage_texture_scale_adjust(stage_texture, stage_value)
 	if stage_value == BeanGrowthStage.DEAD:
 		sprite.modulate = Color(0.92, 0.86, 0.78, 1.0)
 	sprite.scale = stage_scale
@@ -1460,6 +1509,46 @@ func _apply_crop_harvest_commit_state() -> void:
 	_begin_snap_to_nearest_tile(position)
 
 
+func begin_farmer_harvest_delivery(_target_farmer: Node = null) -> bool:
+	if not _is_bean_lifecycle_enabled():
+		return false
+	if not bean_harvest_ready or bean_stage != BeanGrowthStage.POD_READY:
+		return false
+	# Keep farmer pickup visuals in sync with click-harvest: hide ripe fruit
+	# immediately while delivery is in transit.
+	_begin_harvest_visual_detach()
+	bean_harvest_ready = false
+	bean_pod_ticks = 0
+	bean_stage_consumptions = 0
+	bean_stage_wait_ticks = 0
+	bean_respawn_requested = false
+	bean_post_harvest_senescence = false
+	bean_post_harvest_ticks = 0
+	_farmer_harvest_delivery_reserved = true
+	return true
+
+
+func finalize_farmer_harvest_delivery(_target_farmer: Node = null) -> bool:
+	if not _is_bean_lifecycle_enabled():
+		return false
+	if not _farmer_harvest_delivery_reserved:
+		return false
+	_farmer_harvest_delivery_reserved = false
+	var harvest_key = str(type)
+	_apply_crop_harvest_commit_state()
+	emit_signal("harvest_committed", harvest_key, "farmer")
+	return true
+
+
+func cancel_farmer_harvest_delivery() -> void:
+	if not _farmer_harvest_delivery_reserved:
+		return
+	_farmer_harvest_delivery_reserved = false
+	if bean_stage == BeanGrowthStage.POD_READY and not bool(dead):
+		bean_harvest_ready = true
+		_cancel_harvest_visual_detach()
+
+
 func _try_harvest_to_inventory() -> bool:
 	if not _is_bean_lifecycle_enabled():
 		return false
@@ -1476,14 +1565,9 @@ func _try_harvest_to_inventory() -> bool:
 
 
 func _try_harvest_to_farmer(_target_farmer: Node = null) -> bool:
-	if not _is_bean_lifecycle_enabled():
+	if not begin_farmer_harvest_delivery(_target_farmer):
 		return false
-	if not bean_harvest_ready or bean_stage != BeanGrowthStage.POD_READY:
-		return false
-	var harvest_key = str(type)
-	_apply_crop_harvest_commit_state()
-	emit_signal("harvest_committed", harvest_key, "farmer")
-	return true
+	return finalize_farmer_harvest_delivery(_target_farmer)
 
 
 func supports_inventory_harvest() -> bool:
@@ -1500,6 +1584,17 @@ func try_harvest_to_farmer(target_farmer: Node = null) -> bool:
 	if not _is_bean_lifecycle_enabled():
 		return false
 	return _try_harvest_to_farmer(target_farmer)
+
+
+func try_harvest_to_predator(_predator: Node = null) -> bool:
+	if not _is_bean_lifecycle_enabled():
+		return false
+	if not bean_harvest_ready or bean_stage != BeanGrowthStage.POD_READY:
+		return false
+	var harvest_key = str(type)
+	_apply_crop_harvest_commit_state()
+	emit_signal("harvest_committed", harvest_key, "predator")
+	return true
 
 
 func set_variables(a_dict) -> void:
@@ -1842,6 +1937,11 @@ func _emit_trade_with_budget(path_dict: Dictionary) -> bool:
 		return false
 	var from_agent = path_dict.get("from_agent", self)
 	var to_agent = path_dict.get("to_agent", null)
+	var trade_asset = str(path_dict.get("trade_asset", ""))
+	# Rain from ecosystem cloud should never directly feed village people.
+	if is_instance_valid(from_agent) and str(from_agent.get("type")) == "cloud" and trade_asset == "R":
+		if _is_story_village_person_node(to_agent):
+			return false
 	if not Global.allow_trade_dispatch(from_agent, to_agent):
 		return false
 	emit_signal("trade", path_dict)
@@ -1874,7 +1974,7 @@ func evaporate():
 
 
 func _input(event):
-	if not draggable:
+	if not draggable and not _global_reposition_override_enabled():
 		return
 	if event is InputEventMouseMotion:
 		_set_drag_pointer_screen_pos(event.position)
@@ -1911,6 +2011,16 @@ func _input(event):
 func _physics_process(delta):
 	#_draw()
 	if _harvest_inventory_animating:
+		return
+	if is_dragging and _is_inventory_placement_active() and not _global_reposition_override_enabled():
+		is_dragging = false
+		Global.is_dragging = false
+		if _harvest_drag_only:
+			_end_harvest_drag_proxy()
+		else:
+			_begin_snap_to_nearest_tile(position)
+		_harvest_drag_only = false
+		_clear_drag_tile_hint()
 		return
 	if is_dragging:
 		
@@ -2344,24 +2454,38 @@ func _on_evaporate_timer_timeout() -> void:
 
 
 func _on_body_entered(body: Node2D) -> void:
-	if body is Bird and str(type) == "tree":
-		# Birds never steal trees/acorns.
-		return
-	if (self.type == body.quarry_type):#"maize"):
+	var predator_quarry_type = str(body.get("quarry_type"))
+	if self.type == predator_quarry_type:#"maize"):
 		if body is Tuktuk and bool(get_meta("story_villager", false)):
 			story_predator_disrupt_timer = maxf(story_predator_disrupt_timer, STORY_PREDATOR_DISRUPT_SECONDS)
 			for res in assets.keys():
 				assets[res] = maxi(int(assets[res]) - 1, 0)
 				if bars.has(res):
 					bars[res].value = assets[res]
-			body.caught = true
-			body.speed = maxf(body.speed - 80.0, 80.0)
-			body.going = Vector2(1, randi_range(-1, 1))
+			body.set("caught", true)
+			var disrupt_speed = maxf(float(body.get("speed")) - 80.0, 80.0)
+			body.set("speed", disrupt_speed)
+			body.set("going", Vector2(1, randi_range(-1, 1)))
 			return
-		
+		if body is Bird:
+			if bool(body.get("caught")):
+				return
+			if not has_method("try_harvest_to_predator"):
+				return
+			if not bool(call("try_harvest_to_predator", body)):
+				return
+			var harvested_type = str(type)
+			if body.has_method("on_predator_harvest_success"):
+				body.call("on_predator_harvest_success", harvested_type)
+			else:
+				body.set("caught", true)
+				body.set("speed", maxf(float(body.get("speed")) - 100.0, 80.0))
+				body.set("going", Vector2(1, randf_range(-0.25, 0.25)).normalized())
+			return
+			
 		#print("bird endered: ", body)
-		if(body.caught == false and caught_by == null):
-			body.caught = true
+		if(not bool(body.get("caught")) and caught_by == null):
+			body.set("caught", true)
 			caught_by = body
 			logistics_ready = false
 			if(body is Bird):
@@ -2371,10 +2495,10 @@ func _on_body_entered(body: Node2D) -> void:
 			
 			var living = false
 			
-			body.speed -=100
+			body.set("speed", float(body.get("speed")) - 100.0)
 			
 			
-			body.going = Vector2(1,randi_range(-1,1))
+			body.set("going", Vector2(1,randi_range(-1,1)))
 			LevelHelpersRef.unregister_agent_occupancy(_get_level_root(), self)
 			var level_root = _get_level_root()
 			for child in trade_buddies:

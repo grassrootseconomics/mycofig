@@ -20,18 +20,29 @@ const MYCO_HEALTHY_ANCHOR_RADIUS_TILES := 4
 const STORY_WORLD_COLUMNS := 26
 const STORY_WORLD_ROWS := 27
 const STORY_START_TILE := Vector2i(3, 13)
-const STORY_VILLAGE_RECT := Rect2i(16, 9, 10, 10)
+const STORY_VILLAGE_OFFSET_RIGHT_TILES := 13
+const CHALLENGE_VILLAGE_OFFSET_RIGHT_TILES := 6
+const STORY_VILLAGE_RECT := Rect2i(STORY_START_TILE.x + STORY_VILLAGE_OFFSET_RIGHT_TILES, 9, 10, 10)
+const CHALLENGE_LAYOUT_CENTER_OFFSET_FROM_START_X := 6
 const STORY_BIRD_SAFE_BUFFER := 6
 const STORY_TUKTUK_START_PHASE := 5
 const STORY_TUKTUK_SPAWN_RING_MIN := 1
 const STORY_TUKTUK_SPAWN_RING_MAX := 2
 const STORY_TUKTUK_TARGET_BUFFER := 4
 const STORY_VILLAGER_COUNT_PER_ROLE := 3
+const TUKTUK_SPAWN_LEFT_MIN_OFFSET := 120.0
+const TUKTUK_SPAWN_LEFT_MAX_OFFSET := 40.0
+const TUKTUK_SPAWN_VERTICAL_MARGIN_RATIO := 0.08
+const TUKTUK_SPAWN_VERTICAL_MARGIN_MIN := 16
+const TUKTUK_SPAWN_VERTICAL_MARGIN_MAX := 96
 const STORY_PHASE_MIN := 1
 const STORY_PHASE_MAX := 6
 const STORY_PHASE3_MYCO_NEAR_VILLAGER_MIN_RADIUS := 3
 const STORY_PHASE3_MYCO_NEAR_VILLAGER_MAX_RADIUS := 7
 const STORY_PHASE4_FARMER_HARVEST_RADIUS := 8
+const STORY_FARMER_LOW_N_REHARVEST_THRESHOLD := 1.0
+const BIRD_FORWARD_TARGET_MIN_X_DELTA := 8.0
+const BASKET_NEAR_PERSON_MAX_TILES := 4
 const STORY_VILLAGE_PERMANENT_REVEAL_BUFFER := 4
 const STORY_PHASE5_OBJECTIVE_KEY := "village_everyone_trading"
 const AMBIENT_TREE_AUDIO_RADIUS_TILES := 4.0
@@ -44,6 +55,16 @@ const STORY_GUIDANCE_RING_PULSE_SPEED := 5.2
 const STORY_GUIDANCE_RING_PAD := 6.0
 const STORY_GUIDANCE_RING_REFRESH_SEC := 0.08
 const STORY_PHASE2_HARVEST_RING_NAME := "StoryPhase2HarvestRing"
+const DYNAMIC_BIRD_INTERVAL_MAX_SEC := 20.0
+const DYNAMIC_BIRD_INTERVAL_MIN_SEC := 9.0
+const DYNAMIC_BIRD_WAVE_MAX := 3
+const DYNAMIC_BIRD_ACTIVE_CAP := 5
+const DYNAMIC_PREDATOR_STAGGER_SECONDS := 2.2
+const DYNAMIC_TUKTUK_INTERVAL_MAX_SEC := 30.0
+const DYNAMIC_TUKTUK_INTERVAL_MIN_SEC := 12.0
+const DYNAMIC_TUKTUK_WAVE_MAX := 2
+const DYNAMIC_TUKTUK_ACTIVE_CAP := 3
+const DYNAMIC_TUKTUK_MIN_EXTRA_VILLAGERS := 2
 const STORY_PHASE1_REQUIRED_PLACED_TYPES := {
 	"bean": true,
 	"squash": true,
@@ -117,15 +138,22 @@ var _story_phase4_farmer_delivery_types: Dictionary = {}
 var _story_phase4_required_farmer_ids: Dictionary = {}
 var _story_phase4_completed_farmer_ids: Dictionary = {}
 var _story_phase4_reserved_crop_to_farmer_ids: Dictionary = {}
+var _bird_reserved_crop_to_bird_ids: Dictionary = {}
 var _story_phase5_target_villager_ids: Dictionary = {}
 var _story_phase5_traded_villager_ids: Dictionary = {}
 var _story_phase5_all_villagers_trading := false
 var _story_phase5_basket_placed := false
+var _story_farmer_inbound_wait_started_msec: Dictionary = {}
 var _story_guidance_pulse_time := 0.0
 var _story_guidance_refresh_accum := 0.0
 var _ambient_tree_audio_base_db := 0.0
 var _ambient_tree_audio_scan_elapsed := AMBIENT_TREE_AUDIO_SCAN_INTERVAL
 var _ambient_tree_audio_target_db := AMBIENT_TREE_AUDIO_SILENT_DB
+var _dynamic_bird_spawn_accum := 0.0
+var _dynamic_tuktuk_spawn_accum := 0.0
+var _dynamic_predator_stagger_timer := 0.0
+var _dynamic_predator_blocked_type := ""
+var _bank_hotkey_enabled := true
 @onready var _bird_sound_player: AudioStreamPlayer2D = get_node_or_null("BirdSound")
 @onready var _bird_long_player: AudioStreamPlayer = get_node_or_null("BirdLong")
 @onready var _car_sound_player: AudioStreamPlayer2D = get_node_or_null("CarSound")
@@ -235,12 +263,37 @@ func _is_story_mode() -> bool:
 	return str(Global.mode) == "story"
 
 
+func _is_challenge_dual_village_runtime() -> bool:
+	if Global.has_method("is_challenge_dual_village_mode"):
+		return bool(Global.is_challenge_dual_village_mode())
+	return str(Global.mode) == "challenge"
+
+
+func _is_parallel_village_runtime() -> bool:
+	if Global.has_method("is_parallel_village_runtime"):
+		return bool(Global.is_parallel_village_runtime())
+	return _is_story_mode() or _is_challenge_dual_village_runtime()
+
+
 func _is_story_village_item_type(spawn_name: String) -> bool:
 	return spawn_name == "farmer" or spawn_name == "vendor" or spawn_name == "cook" or spawn_name == "basket"
 
 
 func _is_crop_type(agent_type: String) -> bool:
 	return agent_type == "bean" or agent_type == "squash" or agent_type == "maize" or agent_type == "tree"
+
+
+func _is_harvestable_crop_target(candidate: Node) -> bool:
+	if not is_instance_valid(candidate):
+		return false
+	if bool(candidate.get("dead")):
+		return false
+	var crop_type = str(candidate.get("type"))
+	if not _is_crop_type(crop_type):
+		return false
+	if not candidate.has_method("can_drag_for_inventory_harvest"):
+		return false
+	return bool(candidate.call("can_drag_for_inventory_harvest"))
 
 
 func _is_story_villager(agent: Variant) -> bool:
@@ -260,7 +313,7 @@ func _is_story_village_actor(agent: Variant) -> bool:
 func _can_share_story_trade_network_nodes(node_a: Variant, node_b: Variant) -> bool:
 	if not is_instance_valid(node_a) or not is_instance_valid(node_b):
 		return false
-	if not _is_story_mode():
+	if not _is_parallel_village_runtime():
 		return true
 	var a_is_village = _is_story_village_actor(node_a)
 	var b_is_village = _is_story_village_actor(node_b)
@@ -274,15 +327,46 @@ func _is_ecology_myco_anchor(agent: Variant) -> bool:
 		return false
 	if str(agent.get("type")) != "myco":
 		return false
-	if _is_story_mode() and _is_story_village_actor(agent):
+	if _is_parallel_village_runtime() and _is_story_village_actor(agent):
 		return false
 	return true
 
 
-func _get_story_village_center_coord() -> Vector2i:
+func _get_runtime_start_tile(world: Node = null) -> Vector2i:
+	if not _is_challenge_dual_village_runtime():
+		return STORY_START_TILE
+	var columns := 48
+	var rows := 27
+	if is_instance_valid(world):
+		columns = max(int(world.get("columns")), 1)
+		rows = max(int(world.get("rows")), 1)
+	var centered_start_x = int(floor(columns * 0.5)) - CHALLENGE_LAYOUT_CENTER_OFFSET_FROM_START_X
 	return Vector2i(
-		STORY_VILLAGE_RECT.position.x + int(STORY_VILLAGE_RECT.size.x / 2),
-		STORY_VILLAGE_RECT.position.y + int(STORY_VILLAGE_RECT.size.y / 2)
+		clampi(centered_start_x, 1, max(columns - 2, 1)),
+		clampi(STORY_START_TILE.y, 1, max(rows - 2, 1))
+	)
+
+
+func _get_runtime_village_rect(world: Node = null) -> Rect2i:
+	var rect = STORY_VILLAGE_RECT
+	if _is_challenge_dual_village_runtime():
+		var start_tile = _get_runtime_start_tile(world)
+		rect.position.x = start_tile.x + CHALLENGE_VILLAGE_OFFSET_RIGHT_TILES
+	if is_instance_valid(world):
+		var columns = max(int(world.get("columns")), 1)
+		var rows = max(int(world.get("rows")), 1)
+		var max_x = max(columns - rect.size.x, 0)
+		var max_y = max(rows - rect.size.y, 0)
+		rect.position.x = clampi(rect.position.x, 0, max_x)
+		rect.position.y = clampi(rect.position.y, 0, max_y)
+	return rect
+
+
+func _get_story_village_center_coord(world: Node = null) -> Vector2i:
+	var village_rect = _get_runtime_village_rect(world)
+	return Vector2i(
+		village_rect.position.x + int(village_rect.size.x / 2),
+		village_rect.position.y + int(village_rect.size.y / 2)
 	)
 
 
@@ -293,7 +377,9 @@ func _world_to_tile_coord(world: Node, world_pos: Vector2) -> Vector2i:
 
 
 func _is_coord_in_story_village(coord: Vector2i) -> bool:
-	return STORY_VILLAGE_RECT.has_point(coord)
+	var world = _get_world_foundation()
+	var village_rect = _get_runtime_village_rect(world)
+	return village_rect.has_point(coord)
 
 
 func _tile_distance_to_rect(coord: Vector2i, rect: Rect2i) -> int:
@@ -311,7 +397,9 @@ func _tile_distance_to_rect(coord: Vector2i, rect: Rect2i) -> int:
 
 
 func _is_coord_in_story_village_buffer(coord: Vector2i, buffer_tiles: int) -> bool:
-	return _tile_distance_to_rect(coord, STORY_VILLAGE_RECT) <= maxi(buffer_tiles, 0)
+	var world = _get_world_foundation()
+	var village_rect = _get_runtime_village_rect(world)
+	return _tile_distance_to_rect(coord, village_rect) <= maxi(buffer_tiles, 0)
 
 
 func _is_story_village_spawn_allowed(spawn_pos: Vector2) -> bool:
@@ -326,24 +414,47 @@ func get_story_tuktuk_spawn_position() -> Vector2:
 	var world = _get_world_foundation()
 	if not _supports_world_tiles(world):
 		return _get_world_center()
+	var village_rect = _get_runtime_village_rect(world)
 	var candidates: Array = []
-	var min_x = STORY_VILLAGE_RECT.position.x - STORY_TUKTUK_SPAWN_RING_MAX
-	var min_y = STORY_VILLAGE_RECT.position.y - STORY_TUKTUK_SPAWN_RING_MAX
-	var max_x = STORY_VILLAGE_RECT.position.x + STORY_VILLAGE_RECT.size.x - 1 + STORY_TUKTUK_SPAWN_RING_MAX
-	var max_y = STORY_VILLAGE_RECT.position.y + STORY_VILLAGE_RECT.size.y - 1 + STORY_TUKTUK_SPAWN_RING_MAX
+	var min_x = village_rect.position.x - STORY_TUKTUK_SPAWN_RING_MAX
+	var min_y = village_rect.position.y - STORY_TUKTUK_SPAWN_RING_MAX
+	var max_x = village_rect.position.x + village_rect.size.x - 1 + STORY_TUKTUK_SPAWN_RING_MAX
+	var max_y = village_rect.position.y + village_rect.size.y - 1 + STORY_TUKTUK_SPAWN_RING_MAX
 	for y in range(min_y, max_y + 1):
 		for x in range(min_x, max_x + 1):
 			var coord = Vector2i(x, y)
 			if not world.in_bounds(coord):
 				continue
-			var dist = _tile_distance_to_rect(coord, STORY_VILLAGE_RECT)
+			var dist = _tile_distance_to_rect(coord, village_rect)
 			if dist < STORY_TUKTUK_SPAWN_RING_MIN or dist > STORY_TUKTUK_SPAWN_RING_MAX:
 				continue
 			candidates.append(coord)
 	if candidates.is_empty():
-		return world.tile_to_world_center(_clamp_tile_coord(world, _get_story_village_center_coord()))
+		return world.tile_to_world_center(_clamp_tile_coord(world, _get_story_village_center_coord(world)))
 	var choice = Vector2i(candidates[randi() % candidates.size()])
 	return world.tile_to_world_center(choice)
+
+
+func get_tuktuk_spawn_position() -> Vector2:
+	var world_rect = Global.get_world_rect(self)
+	var spawn_min_x = int(floor(world_rect.position.x - TUKTUK_SPAWN_LEFT_MIN_OFFSET))
+	var spawn_max_x = int(ceil(world_rect.position.x - TUKTUK_SPAWN_LEFT_MAX_OFFSET))
+	if spawn_max_x < spawn_min_x:
+		var swap = spawn_min_x
+		spawn_min_x = spawn_max_x
+		spawn_max_x = swap
+	var vertical_margin = clampi(
+		int(round(world_rect.size.y * TUKTUK_SPAWN_VERTICAL_MARGIN_RATIO)),
+		TUKTUK_SPAWN_VERTICAL_MARGIN_MIN,
+		TUKTUK_SPAWN_VERTICAL_MARGIN_MAX
+	)
+	var min_y = int(world_rect.position.y) + vertical_margin
+	var max_y = int(world_rect.end.y) - vertical_margin
+	var spawn_y = int(world_rect.position.y + world_rect.size.y * 0.5)
+	if max_y >= min_y:
+		spawn_y = randi_range(min_y, max_y)
+	var spawn_x = randi_range(spawn_min_x, spawn_max_x)
+	return Vector2(spawn_x, spawn_y)
 
 
 func _story_set_prompt(text: String) -> void:
@@ -361,10 +472,12 @@ func _story_reset_phase_state() -> void:
 	_story_phase4_required_farmer_ids.clear()
 	_story_phase4_completed_farmer_ids.clear()
 	_story_phase4_reserved_crop_to_farmer_ids.clear()
+	_bird_reserved_crop_to_bird_ids.clear()
 	_story_phase5_target_villager_ids.clear()
 	_story_phase5_traded_villager_ids.clear()
 	_story_phase5_all_villagers_trading = false
 	_story_phase5_basket_placed = false
+	_story_farmer_inbound_wait_started_msec.clear()
 	Global.village_objective_flags[STORY_PHASE5_OBJECTIVE_KEY] = false
 
 
@@ -602,8 +715,87 @@ func _story_find_live_agent_by_instance_id(agent_id: int) -> Node:
 	return null
 
 
+func _find_live_animal_by_instance_id(animal_id: int) -> Node:
+	for animal in $Animals.get_children():
+		if not is_instance_valid(animal):
+			continue
+		if int(animal.get_instance_id()) != animal_id:
+			continue
+		return animal
+	return null
+
+
 func _story_is_phase4_farmer_auto_harvest_crop_type(crop_type: String) -> bool:
 	return crop_type == "bean" or crop_type == "squash" or crop_type == "maize" or crop_type == "tree"
+
+
+func _bird_cleanup_harvest_reservations() -> void:
+	if _bird_reserved_crop_to_bird_ids.is_empty():
+		return
+	var stale_keys: Array = []
+	for crop_id_variant in _bird_reserved_crop_to_bird_ids.keys():
+		var crop_id = int(crop_id_variant)
+		var bird_id = int(_bird_reserved_crop_to_bird_ids[crop_id_variant])
+		var crop = _story_find_live_agent_by_instance_id(crop_id)
+		var bird = _find_live_animal_by_instance_id(bird_id)
+		if not is_instance_valid(crop) or not is_instance_valid(bird):
+			stale_keys.append(crop_id_variant)
+			continue
+		if not _is_harvestable_crop_target(crop):
+			stale_keys.append(crop_id_variant)
+	for crop_id_variant in stale_keys:
+		_bird_reserved_crop_to_bird_ids.erase(crop_id_variant)
+
+
+func bird_try_assign_harvest_target(bird: Node) -> Node:
+	if not is_instance_valid(bird):
+		return null
+	_bird_cleanup_harvest_reservations()
+	var bird_id = int(bird.get_instance_id())
+	var forward_sign := 1.0
+	var bird_going = bird.get("going")
+	if typeof(bird_going) == TYPE_VECTOR2:
+		var going_vec = Vector2(bird_going)
+		if absf(going_vec.x) > 0.001:
+			forward_sign = signf(going_vec.x)
+	var best_crop: Node = null
+	var best_world_dist := INF
+	for candidate in $Agents.get_children():
+		if not _is_harvestable_crop_target(candidate):
+			continue
+		var delta_x = candidate.global_position.x - bird.global_position.x
+		if forward_sign >= 0.0:
+			if delta_x < BIRD_FORWARD_TARGET_MIN_X_DELTA:
+				continue
+		else:
+			if delta_x > -BIRD_FORWARD_TARGET_MIN_X_DELTA:
+				continue
+		var crop_id = int(candidate.get_instance_id())
+		var reserved_bird_id = int(_bird_reserved_crop_to_bird_ids.get(crop_id, 0))
+		if reserved_bird_id > 0 and reserved_bird_id != bird_id:
+			continue
+		var world_dist = bird.global_position.distance_squared_to(candidate.global_position)
+		if world_dist < best_world_dist:
+			best_world_dist = world_dist
+			best_crop = candidate
+	if not is_instance_valid(best_crop):
+		return null
+	_bird_reserved_crop_to_bird_ids[int(best_crop.get_instance_id())] = bird_id
+	return best_crop
+
+
+func bird_release_harvest_target(bird: Node, crop: Node) -> void:
+	if not is_instance_valid(crop):
+		return
+	var crop_id = int(crop.get_instance_id())
+	if not _bird_reserved_crop_to_bird_ids.has(crop_id):
+		return
+	if not is_instance_valid(bird):
+		_bird_reserved_crop_to_bird_ids.erase(crop_id)
+		return
+	var bird_id = int(bird.get_instance_id())
+	if int(_bird_reserved_crop_to_bird_ids[crop_id]) == bird_id:
+		_bird_reserved_crop_to_bird_ids.erase(crop_id)
 
 
 func _story_phase4_release_reservations_for_farmer_id(farmer_id: int) -> void:
@@ -656,11 +848,13 @@ func _story_phase4_has_all_required_farmers_completed_harvest() -> bool:
 
 
 func _story_get_base_villager_layout() -> Array:
-	var top_people_row_y = STORY_VILLAGE_RECT.position.y + 5
+	var world = _get_world_foundation()
+	var village_rect = _get_runtime_village_rect(world)
+	var top_people_row_y = village_rect.position.y + 5
 	return [
-		{"role": "farmer", "tile": Vector2i(STORY_VILLAGE_RECT.position.x + 5, top_people_row_y)},
-		{"role": "vendor", "tile": Vector2i(STORY_VILLAGE_RECT.position.x + 6, top_people_row_y)},
-		{"role": "cook", "tile": Vector2i(STORY_VILLAGE_RECT.position.x + 7, top_people_row_y)}
+		{"role": "vendor", "tile": Vector2i(village_rect.position.x + 5, top_people_row_y)},
+		{"role": "cook", "tile": Vector2i(village_rect.position.x + 6, top_people_row_y)},
+		{"role": "farmer", "tile": Vector2i(village_rect.position.x + 7, top_people_row_y)}
 	]
 
 
@@ -669,6 +863,38 @@ func _story_get_base_villager_tiles() -> Array:
 	for villager_cfg in _story_get_base_villager_layout():
 		tiles.append(Vector2i(villager_cfg["tile"]))
 	return tiles
+
+
+func _is_story_village_person_type(agent_type: String) -> bool:
+	return agent_type == "farmer" or agent_type == "vendor" or agent_type == "cook"
+
+
+func _is_tuktuk_protected_story_villager(agent: Variant) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	return bool(agent.get_meta("story_protected_from_tuktuk", false))
+
+
+func _can_place_basket_near_person(world_pos: Vector2) -> bool:
+	var world = _get_world_foundation()
+	if not _supports_world_tiles(world):
+		return false
+	var basket_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(world_pos)))
+	for agent in $Agents.get_children():
+		if not is_instance_valid(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if not _is_story_village_actor(agent):
+			continue
+		if not _is_story_villager(agent):
+			continue
+		if not _is_story_village_person_type(str(agent.get("type"))):
+			continue
+		var person_coord = _world_to_tile_coord(world, agent.global_position)
+		if _tile_chebyshev_distance(basket_coord, person_coord) <= BASKET_NEAR_PERSON_MAX_TILES:
+			return true
+	return false
 
 
 func _story_reset_phase5_trading_progress() -> void:
@@ -821,10 +1047,6 @@ func _refill_story_farmer_n_resource(target_farmer: Node) -> void:
 func _story_farmer_is_low_n(target_farmer: Node) -> bool:
 	if not is_instance_valid(target_farmer):
 		return false
-	# Keep village economy visibly active after Phase 6 completion.
-	# Otherwise farmers can stay above-N indefinitely and never re-harvest.
-	if _story_phase_id >= 6:
-		return true
 	var needs_data = target_farmer.get("needs")
 	var assets_data = target_farmer.get("assets")
 	if typeof(needs_data) != TYPE_DICTIONARY or typeof(assets_data) != TYPE_DICTIONARY:
@@ -835,14 +1057,81 @@ func _story_farmer_is_low_n(target_farmer: Node) -> bool:
 	if n_need <= 0.0:
 		n_need = 10.0
 	var current_n = float(assets.get("N", 0.0))
-	# Trigger auto-harvest once farmer N is no longer above need (no excess N to trade).
-	return current_n <= n_need
+	var low_n_threshold = n_need
+	if story_farmer_should_trade_any_n(target_farmer):
+		low_n_threshold = minf(n_need, STORY_FARMER_LOW_N_REHARVEST_THRESHOLD)
+	# Re-harvest only when N is low enough for the current runtime/phase policy.
+	return current_n <= low_n_threshold
+
+
+func story_farmer_should_trade_any_n(farmer: Node) -> bool:
+	if not story_farmer_auto_harvest_is_enabled(farmer):
+		return false
+	if _is_challenge_dual_village_runtime():
+		return true
+	# In story mode, switch to "trade any N" once village economy is established.
+	return _is_story_mode() and _story_phase_id >= 5
+
+
+func story_farmer_has_pending_inbound_trades(farmer: Node) -> bool:
+	if not is_instance_valid(farmer):
+		return false
+	var farmer_id = int(farmer.get_instance_id())
+	var now_ms = Time.get_ticks_msec()
+	var oldest_pending_created_msec = _get_story_farmer_oldest_pending_inbound_created_msec(farmer, now_ms)
+	if oldest_pending_created_msec <= 0:
+		_story_farmer_inbound_wait_started_msec.erase(farmer_id)
+		return false
+	if not _story_farmer_inbound_wait_started_msec.has(farmer_id):
+		_story_farmer_inbound_wait_started_msec[farmer_id] = now_ms
+	var started_wait_ms = int(_story_farmer_inbound_wait_started_msec.get(farmer_id, now_ms))
+	var wait_elapsed_ms = maxi(now_ms - started_wait_ms, 0)
+	var timeout_ms = _get_story_farmer_inbound_wait_timeout_msec()
+	if timeout_ms <= 0:
+		return false
+	if wait_elapsed_ms >= timeout_ms:
+		return false
+	var oldest_trade_age_ms = maxi(now_ms - oldest_pending_created_msec, 0)
+	if oldest_trade_age_ms >= timeout_ms:
+		return false
+	return true
+
+
+func _get_story_farmer_inbound_wait_timeout_msec() -> int:
+	var timeout_seconds = float(Global.story_farmer_inbound_wait_timeout_sec)
+	if timeout_seconds <= 0.0:
+		return 0
+	return maxi(int(round(timeout_seconds * 1000.0)), 0)
+
+
+func _get_story_farmer_oldest_pending_inbound_created_msec(farmer: Node, fallback_now_msec: int = 0) -> int:
+	if not is_instance_valid(farmer):
+		return 0
+	var now_ms = fallback_now_msec
+	if now_ms <= 0:
+		now_ms = Time.get_ticks_msec()
+	var oldest_created_msec = 0
+	for trade_packet in $Trades.get_children():
+		if not is_instance_valid(trade_packet):
+			continue
+		var destination = trade_packet.get("end_agent")
+		if destination != farmer:
+			continue
+		var created_msec_value = trade_packet.get("created_at_msec")
+		var created_msec := 0
+		if created_msec_value != null:
+			created_msec = int(created_msec_value)
+		if created_msec <= 0:
+			created_msec = now_ms
+		if oldest_created_msec <= 0 or created_msec < oldest_created_msec:
+			oldest_created_msec = created_msec
+	return oldest_created_msec
 
 
 func story_farmer_auto_harvest_is_enabled(farmer: Node) -> bool:
-	if not _is_story_mode() or not _story_village_revealed:
+	if not _is_parallel_village_runtime() or not _story_village_revealed:
 		return false
-	if _story_phase_id < 4 or _story_phase_id > 6:
+	if _is_story_mode() and (_story_phase_id < 4 or _story_phase_id > 6):
 		return false
 	if not is_instance_valid(farmer):
 		return false
@@ -915,7 +1204,9 @@ func story_farmer_release_harvest_target(farmer: Node, crop: Node) -> void:
 func story_farmer_on_harvest_success(farmer: Node, harvest_type: String) -> void:
 	if not is_instance_valid(farmer):
 		return
-	if not _is_story_mode() or _story_phase_id < 4:
+	if not _is_parallel_village_runtime():
+		return
+	if _is_story_mode() and _story_phase_id < 4:
 		return
 	if not _is_story_villager(farmer) or str(farmer.get("type")) != "farmer":
 		return
@@ -923,12 +1214,13 @@ func story_farmer_on_harvest_success(farmer: Node, harvest_type: String) -> void
 	if _story_is_phase4_required_farmer_delivery_type(normalized_type):
 		_story_phase4_farmer_delivery_types[normalized_type] = true
 	_refill_story_farmer_n_resource(farmer)
-	if _story_phase_id == 4:
+	if _is_story_mode() and _story_phase_id == 4:
 		var farmer_id = int(farmer.get_instance_id())
 		if bool(_story_phase4_required_farmer_ids.get(farmer_id, false)):
 			_story_phase4_completed_farmer_ids[farmer_id] = true
 		_story_phase4_release_reservations_for_farmer_id(farmer_id)
-	_story_try_advance_phase_milestones()
+	if _is_story_mode():
+		_story_try_advance_phase_milestones()
 
 
 func can_agent_harvest_to_inventory(_agent: Node) -> bool:
@@ -936,9 +1228,9 @@ func can_agent_harvest_to_inventory(_agent: Node) -> bool:
 
 
 func try_story_harvest_drop(agent: Node, world_pos: Vector2) -> bool:
-	if not _is_story_mode() or not _story_village_revealed:
+	if not _is_parallel_village_runtime() or not _story_village_revealed:
 		return false
-	if _story_phase_id < 4:
+	if _is_story_mode() and _story_phase_id < 4:
 		return false
 	if not is_instance_valid(agent):
 		return false
@@ -953,17 +1245,23 @@ func try_story_harvest_drop(agent: Node, world_pos: Vector2) -> bool:
 	if harvested:
 		# Story farmer deliveries refill the farmer's actual N resource bar.
 		_refill_story_farmer_n_resource(target_farmer)
-		_story_try_advance_phase_milestones()
+		if _is_story_mode():
+			_story_try_advance_phase_milestones()
 	return harvested
 
 
 func try_story_inventory_delivery(item_type: String, world_pos: Vector2) -> bool:
-	if not _is_story_mode() or not _story_village_revealed:
+	if not _is_parallel_village_runtime() or not _story_village_revealed:
 		return false
-	if _story_phase_id < 4:
+	if _is_story_mode() and _story_phase_id < 4:
 		return false
 	var normalized_type = str(item_type)
-	if not _story_is_phase4_required_farmer_delivery_type(normalized_type):
+	var challenge_farmer_refill_type = normalized_type == "bean" or normalized_type == "squash" or normalized_type == "maize" or normalized_type == "tree"
+	var allow_story_delivery_type = _story_is_phase4_required_farmer_delivery_type(normalized_type)
+	if _is_challenge_dual_village_runtime():
+		if not challenge_farmer_refill_type:
+			return false
+	elif not allow_story_delivery_type:
 		return false
 	var target_farmer = _find_story_farmer_at_world_pos(world_pos)
 	if not is_instance_valid(target_farmer):
@@ -971,7 +1269,8 @@ func try_story_inventory_delivery(item_type: String, world_pos: Vector2) -> bool
 	_story_phase4_farmer_delivery_types[normalized_type] = true
 	# Story farmer deliveries refill the farmer's actual N resource bar.
 	_refill_story_farmer_n_resource(target_farmer)
-	_story_try_advance_phase_milestones()
+	if _is_story_mode():
+		_story_try_advance_phase_milestones()
 	return true
 
 
@@ -992,10 +1291,18 @@ func can_place_inventory_item_at_world_pos(item_name: String, world_pos: Vector2
 			return false
 		if not _is_story_village_spawn_allowed(target_pos):
 			return false
-	if _is_story_mode() and not story_village_item:
-		if _story_village_revealed and _story_phase_id >= 4 and _story_is_phase4_required_farmer_delivery_type(spawn_name):
-			if is_instance_valid(_find_story_farmer_at_world_pos(target_pos)):
-				return true
+	if spawn_name == "basket":
+		if not _can_place_basket_near_person(target_pos):
+			return false
+	if not story_village_item and _is_parallel_village_runtime() and _story_village_revealed:
+		var challenge_farmer_refill_type = spawn_name == "bean" or spawn_name == "squash" or spawn_name == "maize" or spawn_name == "tree"
+		var allow_farmer_drop = false
+		if _is_challenge_dual_village_runtime():
+			allow_farmer_drop = challenge_farmer_refill_type
+		elif _is_story_mode() and _story_phase_id >= 4:
+			allow_farmer_drop = _story_is_phase4_required_farmer_delivery_type(spawn_name)
+		if allow_farmer_drop and is_instance_valid(_find_story_farmer_at_world_pos(target_pos)):
+			return true
 	if world.has_method("is_world_pos_revealed") and not bool(world.is_world_pos_revealed(target_pos)):
 		return false
 	if _is_parent_bounded_spawn_type(spawn_name):
@@ -1034,23 +1341,31 @@ func is_valid_predator_target(predator: Node, candidate: Node) -> bool:
 	if bool(candidate.get("dead")):
 		return false
 	var c_type = str(candidate.get("type"))
-	if predator is Bird and c_type == "tree":
-		return false
-	if not _is_story_mode():
-		return c_type == str(predator.get("quarry_type"))
 	var world = _get_world_foundation()
 	if predator is Bird:
-		if not _is_crop_type(c_type):
+		if not _is_harvestable_crop_target(candidate):
 			return false
-		if _supports_world_tiles(world):
+		if _is_story_mode() and _supports_world_tiles(world):
 			var coord = _world_to_tile_coord(world, candidate.global_position)
 			if _is_coord_in_story_village_buffer(coord, STORY_BIRD_SAFE_BUFFER):
 				return false
 		return true
+	if _is_challenge_dual_village_runtime():
+		if predator is Tuktuk:
+			if not _is_story_villager(candidate):
+				return false
+			if not _is_story_village_person_type(c_type):
+				return false
+			return not _is_tuktuk_protected_story_villager(candidate)
+		return c_type == str(predator.get("quarry_type"))
+	if not _is_story_mode():
+		return c_type == str(predator.get("quarry_type"))
 	if predator is Tuktuk:
 		if _story_phase_id < STORY_TUKTUK_START_PHASE:
 			return false
 		if not _is_story_villager(candidate):
+			return false
+		if _is_tuktuk_protected_story_villager(candidate):
 			return false
 		if _supports_world_tiles(world):
 			var villager_coord = _world_to_tile_coord(world, candidate.global_position)
@@ -1474,7 +1789,7 @@ func _ready():
 		world.set_context(Global.mode, "plants")
 	#$BirdLong.
 	if is_instance_valid(world) and _supports_world_tiles(world):
-		_story_village_center_world = world.tile_to_world_center(_get_story_village_center_coord())
+		_story_village_center_world = world.tile_to_world_center(_get_story_village_center_coord(world))
 
 	$"UI/TutorialMarginContainer1".visible = false
 	if _is_story_mode():
@@ -1492,6 +1807,9 @@ func _ready():
 		$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
 		_set_tutorial_panel_color(Global.stage_colors[Global.stage])
 	else:
+		if _is_challenge_dual_village_runtime():
+			Global.story_chapter_id = STORY_PHASE_MAX
+			Global.village_revealed = true
 		_story_sync_phase1_inventory_sparkle_targets()
 
 	var world_center = _get_world_center()
@@ -1502,8 +1820,8 @@ func _ready():
 	var clustered_start = _is_story_mode() or Global.mode == "tutorial" or Global.mode == "challenge"
 	if clustered_start and _supports_world_tiles(world):
 		var center_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(world_center)))
-		if _is_story_mode():
-			center_coord = _clamp_tile_coord(world, STORY_START_TILE)
+		if _is_story_mode() or _is_challenge_dual_village_runtime():
+			center_coord = _clamp_tile_coord(world, _get_runtime_start_tile(world))
 		var myco_position = _tile_pos_from_center(world, center_coord, Vector2i(0, 0))
 		var bean_position = _tile_pos_from_center(world, center_coord, Vector2i(-1, 0))
 		var squash_position = _tile_pos_from_center(world, center_coord, Vector2i(0, -1))
@@ -1542,7 +1860,7 @@ func _ready():
 		myco = make_myco(myco_position)
 
 	Global.active_agent = myco
-	if _is_story_mode() and is_instance_valid(myco) and is_instance_valid(world) and world.has_method("set_camera_world_center"):
+	if (_is_story_mode() or _is_challenge_dual_village_runtime()) and is_instance_valid(myco) and is_instance_valid(world) and world.has_method("set_camera_world_center"):
 		world.set_camera_world_center(myco.global_position)
 	LevelHelpersRef.refresh_agent_bar_visibility($Agents)
 	_story_refresh_hud()
@@ -1553,6 +1871,9 @@ func _ready():
 		var cloud_position = Vector2(cloud_width,cloud_height)
 
 		make_cloud(cloud_position)
+
+	if _is_challenge_dual_village_runtime():
+		_bootstrap_challenge_dual_village()
 
 	LevelHelpersRef.rebuild_world_occupancy_cache(self, $Agents)
 	request_all_agents_dirty()
@@ -1609,6 +1930,19 @@ func _on_ui_request_back_to_menu() -> void:
 	get_tree().call_deferred("change_scene_to_file", "res://scenes/game_over.tscn")
 
 
+func toggle_bank_hotkey() -> void:
+	_bank_hotkey_enabled = not _bank_hotkey_enabled
+	for agent in $Agents.get_children():
+		if not is_instance_valid(agent):
+			continue
+		if str(agent.get("type")) != "bank":
+			continue
+		agent.set_meta("bank_disabled", not _bank_hotkey_enabled)
+		if _bank_hotkey_enabled:
+			agent.set("logistics_ready", true)
+	print("Bank trading hotkey state: ", "ON" if _bank_hotkey_enabled else "OFF")
+
+
 func _input(event):
 	if _is_keyboard_escape_input(event):
 		if $UI.has_method("show_back_to_menu_confirm"):
@@ -1625,6 +1959,7 @@ func _process(_delta: float) -> void:
 	_update_tree_ambient_audio(_delta)
 	if not Global.is_mobile_platform:
 		LevelHelpersRef.update_agent_hover_focus(self, $Agents)
+	_update_dynamic_predator_pressure(_delta)
 	_refresh_story_phase2_harvest_guidance_visuals(_delta)
 	if _is_story_mode():
 		_story_progress_accum += _delta
@@ -1669,12 +2004,30 @@ func _story_reveal_village() -> void:
 	_story_village_revealed = true
 	Global.village_revealed = true
 	var world = _get_world_foundation()
+	var village_rect = _get_runtime_village_rect(world)
 	if is_instance_valid(world) and world.has_method("reveal_rect_permanent"):
-		world.reveal_rect_permanent(STORY_VILLAGE_RECT, STORY_VILLAGE_PERMANENT_REVEAL_BUFFER)
+		world.reveal_rect_permanent(village_rect, STORY_VILLAGE_PERMANENT_REVEAL_BUFFER)
 	Global.inventory["basket"] = int(Global.inventory.get("basket", 0)) + 3
 	Global.inventory["farmer"] = int(Global.inventory.get("farmer", 0)) + 2
 	Global.inventory["vendor"] = int(Global.inventory.get("vendor", 0)) + 2
 	Global.inventory["cook"] = int(Global.inventory.get("cook", 0)) + 2
+	_story_spawn_village_cast()
+	_story_refresh_hud()
+
+
+func _bootstrap_challenge_dual_village() -> void:
+	if not _is_challenge_dual_village_runtime():
+		return
+	if _story_village_revealed:
+		return
+	_story_village_revealed = true
+	_story_phase_id = STORY_PHASE_MAX
+	Global.story_chapter_id = STORY_PHASE_MAX
+	Global.village_revealed = true
+	var world = _get_world_foundation()
+	var village_rect = _get_runtime_village_rect(world)
+	if is_instance_valid(world) and world.has_method("reveal_rect_permanent"):
+		world.reveal_rect_permanent(village_rect, STORY_VILLAGE_PERMANENT_REVEAL_BUFFER)
 	_story_spawn_village_cast()
 	_story_refresh_hud()
 
@@ -1700,14 +2053,15 @@ func _story_spawn_village_cast() -> void:
 	var world = _get_world_foundation()
 	if not _supports_world_tiles(world):
 		return
+	var village_rect = _get_runtime_village_rect(world)
 	var placed := 0
 	var spawned_village_actors: Array[Node] = []
 	# Mirror the old social-mode cluster: bank at top-right, 3 colored baskets, and 3 villagers beneath.
-	var bank_tile = Vector2i(STORY_VILLAGE_RECT.position.x + 8, STORY_VILLAGE_RECT.position.y + 1)
+	var bank_tile = Vector2i(village_rect.position.x + 8, village_rect.position.y + 1)
 	var basket_tiles = [
-		Vector2i(STORY_VILLAGE_RECT.position.x + 6, STORY_VILLAGE_RECT.position.y + 3),
-		Vector2i(STORY_VILLAGE_RECT.position.x + 7, STORY_VILLAGE_RECT.position.y + 3),
-		Vector2i(STORY_VILLAGE_RECT.position.x + 8, STORY_VILLAGE_RECT.position.y + 3)
+		Vector2i(village_rect.position.x + 6, village_rect.position.y + 3),
+		Vector2i(village_rect.position.x + 7, village_rect.position.y + 3),
+		Vector2i(village_rect.position.x + 8, village_rect.position.y + 3)
 	]
 	var basket_assets = ["N", "P", "K"]
 	for i in range(mini(basket_tiles.size(), basket_assets.size())):
@@ -1724,6 +2078,7 @@ func _story_spawn_village_cast() -> void:
 	for person_cfg in base_people:
 		var spawned_person = _spawn_story_villager_at_tile(world, person_cfg["tile"], person_cfg["role"])
 		if spawned_person != null:
+			spawned_person.set_meta("story_protected_from_tuktuk", true)
 			placed += 1
 			spawned_village_actors.append(spawned_person)
 
@@ -1735,10 +2090,10 @@ func _story_spawn_village_cast() -> void:
 	]
 	extra_roles.shuffle()
 	var candidate_tiles: Array[Vector2i] = []
-	var min_x = STORY_VILLAGE_RECT.position.x + 4
-	var max_x = STORY_VILLAGE_RECT.position.x + STORY_VILLAGE_RECT.size.x - 2
-	var min_y = STORY_VILLAGE_RECT.position.y + 7
-	var max_y = STORY_VILLAGE_RECT.position.y + STORY_VILLAGE_RECT.size.y - 1
+	var min_x = village_rect.position.x + 4
+	var max_x = village_rect.position.x + village_rect.size.x - 2
+	var min_y = village_rect.position.y + 7
+	var max_y = village_rect.position.y + village_rect.size.y - 1
 	for y in range(min_y, max_y + 1):
 		for x in range(min_x, max_x + 1):
 			candidate_tiles.append(Vector2i(x, y))
@@ -1749,6 +2104,7 @@ func _story_spawn_village_cast() -> void:
 			break
 		var spawned_extra = _spawn_story_villager_at_tile(world, tile, extra_roles[role_index])
 		if spawned_extra != null:
+			spawned_extra.set_meta("story_protected_from_tuktuk", false)
 			placed += 1
 			role_index += 1
 			spawned_village_actors.append(spawned_extra)
@@ -1817,6 +2173,8 @@ func _spawn_trade(path_dict) -> void:
 	if typeof(path_dict) != TYPE_DICTIONARY:
 		return
 	var trade_dict: Dictionary = path_dict.duplicate()
+	if int(trade_dict.get("created_at_msec", 0)) <= 0:
+		trade_dict["created_at_msec"] = Time.get_ticks_msec()
 	var trade_amount = maxi(int(trade_dict.get("trade_amount", 1)), 1)
 	trade_dict["trade_amount"] = trade_amount
 	if Global.trade_visual_hybrid_enabled:
@@ -1865,25 +2223,183 @@ func _on_agent_lifecycle_residue(coord: Vector2i, biomass: float, source_type: S
 		world.register_residue(coord, biomass, 8, source_type)
 
 
-func _play_predator_alert() -> void:
-	if _is_story_mode() and Global.enable_tuktuk_predators and _story_village_revealed and _story_phase_id >= STORY_TUKTUK_START_PHASE:
-		if is_instance_valid(_car_sound_player):
-			_car_sound_player.play()
+func _tuktuk_predator_mode_enabled() -> bool:
+	if not Global.enable_tuktuk_predators:
+		return false
+	if _is_story_mode():
+		return false
+	if _is_challenge_dual_village_runtime():
+		return _story_village_revealed
+	return false
+
+
+func _count_active_bird_predators() -> int:
+	var count := 0
+	for predator in $Animals.get_children():
+		if predator is Bird:
+			count += 1
+	return count
+
+
+func _count_active_tuktuk_predators() -> int:
+	var count := 0
+	for predator in $Animals.get_children():
+		if predator is Tuktuk:
+			count += 1
+	return count
+
+
+func _count_live_ecology_plants_for_predators() -> int:
+	var count := 0
+	for agent in $Agents.get_children():
+		if not is_instance_valid(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		var agent_type = str(agent.get("type"))
+		if agent_type == "bean" or agent_type == "squash" or agent_type == "maize" or agent_type == "tree":
+			count += 1
+	return count
+
+
+func _count_vulnerable_villagers_for_tuktuk() -> int:
+	var count := 0
+	for agent in $Agents.get_children():
+		if not _is_story_villager(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if not _is_story_village_person_type(str(agent.get("type"))):
+			continue
+		if _is_tuktuk_protected_story_villager(agent):
+			continue
+		count += 1
+	return count
+
+
+func _compute_dynamic_bird_interval_seconds(plant_count: int) -> float:
+	if plant_count <= 0:
+		return DYNAMIC_BIRD_INTERVAL_MAX_SEC
+	var pressure = clampf((float(plant_count) - 5.0) / 34.0, 0.0, 1.0)
+	return lerpf(DYNAMIC_BIRD_INTERVAL_MAX_SEC, DYNAMIC_BIRD_INTERVAL_MIN_SEC, pressure)
+
+
+func _compute_dynamic_bird_wave_count(plant_count: int) -> int:
+	if plant_count < 5:
+		return 0
+	var scaled = int((plant_count - 5) / 14)
+	return clampi(1 + scaled, 1, DYNAMIC_BIRD_WAVE_MAX)
+
+
+func _compute_dynamic_tuktuk_interval_seconds(vulnerable_villagers: int) -> float:
+	if vulnerable_villagers <= 0:
+		return DYNAMIC_TUKTUK_INTERVAL_MAX_SEC
+	var pressure = clampf(float(vulnerable_villagers - DYNAMIC_TUKTUK_MIN_EXTRA_VILLAGERS) / 12.0, 0.0, 1.0)
+	return lerpf(DYNAMIC_TUKTUK_INTERVAL_MAX_SEC, DYNAMIC_TUKTUK_INTERVAL_MIN_SEC, pressure)
+
+
+func _compute_dynamic_tuktuk_wave_count(vulnerable_villagers: int) -> int:
+	if vulnerable_villagers <= DYNAMIC_TUKTUK_MIN_EXTRA_VILLAGERS:
+		return 1
+	var scaled = int((vulnerable_villagers - DYNAMIC_TUKTUK_MIN_EXTRA_VILLAGERS) / 12)
+	return clampi(1 + scaled, 1, DYNAMIC_TUKTUK_WAVE_MAX)
+
+
+func _is_dynamic_predator_type_staggered(predator_type: String) -> bool:
+	return _dynamic_predator_stagger_timer > 0.0 and _dynamic_predator_blocked_type == predator_type
+
+
+func _mark_dynamic_predator_type_spawned(predator_type: String) -> void:
+	if predator_type == "bird":
+		_dynamic_predator_blocked_type = "tuktuk"
+	elif predator_type == "tuktuk":
+		_dynamic_predator_blocked_type = "bird"
 	else:
-		if is_instance_valid(_bird_sound_player):
-			_bird_sound_player.play()
+		_dynamic_predator_blocked_type = ""
+	_dynamic_predator_stagger_timer = DYNAMIC_PREDATOR_STAGGER_SECONDS
 
 
-func _spawn_predators(requested_count: int, play_alert: bool = false) -> void:
+func _update_dynamic_predator_pressure(delta: float) -> void:
+	if Global.mode == "tutorial":
+		return
+	if not _is_challenge_dual_village_runtime():
+		_dynamic_bird_spawn_accum = 0.0
+		_dynamic_tuktuk_spawn_accum = 0.0
+		_dynamic_predator_stagger_timer = 0.0
+		_dynamic_predator_blocked_type = ""
+		return
+	if _dynamic_predator_stagger_timer > 0.0:
+		_dynamic_predator_stagger_timer = maxf(_dynamic_predator_stagger_timer - maxf(delta, 0.0), 0.0)
+		if _dynamic_predator_stagger_timer <= 0.0:
+			_dynamic_predator_blocked_type = ""
+
+	if Global.is_birding:
+		var plant_count = _count_live_ecology_plants_for_predators()
+		var bird_interval = _compute_dynamic_bird_interval_seconds(plant_count)
+		_dynamic_bird_spawn_accum += maxf(delta, 0.0)
+		if _dynamic_bird_spawn_accum >= bird_interval:
+			if _is_dynamic_predator_type_staggered("bird"):
+				_dynamic_bird_spawn_accum = bird_interval
+			else:
+				_dynamic_bird_spawn_accum = 0.0
+				var bird_wave = _compute_dynamic_bird_wave_count(plant_count)
+				if bird_wave > 0 and _spawn_predators(bird_wave, true):
+					_mark_dynamic_predator_type_spawned("bird")
+	else:
+		_dynamic_bird_spawn_accum = 0.0
+
+	if _tuktuk_predator_mode_enabled():
+		var vulnerable_villagers = _count_vulnerable_villagers_for_tuktuk()
+		if vulnerable_villagers > DYNAMIC_TUKTUK_MIN_EXTRA_VILLAGERS:
+			var tuktuk_interval = _compute_dynamic_tuktuk_interval_seconds(vulnerable_villagers)
+			_dynamic_tuktuk_spawn_accum += maxf(delta, 0.0)
+			if _dynamic_tuktuk_spawn_accum >= tuktuk_interval:
+				if _is_dynamic_predator_type_staggered("tuktuk"):
+					_dynamic_tuktuk_spawn_accum = tuktuk_interval
+				else:
+					_dynamic_tuktuk_spawn_accum = 0.0
+					if _spawn_tuktuk_predators(_compute_dynamic_tuktuk_wave_count(vulnerable_villagers), true):
+						_mark_dynamic_predator_type_spawned("tuktuk")
+		else:
+			_dynamic_tuktuk_spawn_accum = 0.0
+	else:
+		_dynamic_tuktuk_spawn_accum = 0.0
+
+
+func _spawn_predators(requested_count: int, play_alert: bool = false) -> bool:
 	var spawn_count = max(requested_count, 0)
 	if Global.is_mobile_platform:
 		spawn_count = min(spawn_count, Global.max_predators_per_wave_mobile)
+	var active_birds = _count_active_bird_predators()
+	var remaining_slots = max(DYNAMIC_BIRD_ACTIVE_CAP - active_birds, 0)
+	spawn_count = min(spawn_count, remaining_slots)
 	if spawn_count <= 0:
-		return
+		return false
 	if play_alert:
-		_play_predator_alert()
+		if is_instance_valid(_bird_sound_player):
+			_bird_sound_player.play()
 	for _i in range(spawn_count):
 		make_bird()
+	return true
+
+
+func _spawn_tuktuk_predators(requested_count: int, play_alert: bool = false) -> bool:
+	if not _tuktuk_predator_mode_enabled():
+		return false
+	var spawn_count = max(requested_count, 0)
+	if Global.is_mobile_platform:
+		spawn_count = min(spawn_count, Global.max_predators_per_wave_mobile)
+	var active_tuktuks = _count_active_tuktuk_predators()
+	var remaining_slots = max(DYNAMIC_TUKTUK_ACTIVE_CAP - active_tuktuks, 0)
+	spawn_count = min(spawn_count, remaining_slots)
+	if spawn_count <= 0:
+		return false
+	if play_alert:
+		if is_instance_valid(_car_sound_player):
+			_car_sound_player.play()
+	for _i in range(spawn_count):
+		make_tuktuk()
+	return true
 					
 func _on_update_score() -> void:
 	var current_score_lvl := Global.get_rank_threshold(Global.score)
@@ -1893,7 +2409,7 @@ func _on_update_score() -> void:
 			return
 		score_lvl = current_score_lvl
 		#print("create birds: ", Global.birds[score_lvl])
-		if(Global.is_birding == true):
+		if(Global.is_birding == true and not _is_challenge_dual_village_runtime()):
 			Global.rand_quarry.shuffle()
 			var z_quarry = Global.rand_quarry[0]
 			Global.quarry_type = z_quarry
@@ -2016,6 +2532,10 @@ func _on_new_agent(agent_dict) -> void:
 		if from_inventory and not bool(world_for_reveal.is_world_pos_revealed(spawn_pos)):
 			_refund_inventory_item(spawn_name, 1)
 			return
+	if spawn_name == "basket" and not _can_place_basket_near_person(spawn_pos):
+		if from_inventory:
+			_refund_inventory_item("basket", 1)
+		return
 
 	if spawn_name == "myco" and not require_exact_tile:
 		spawn_pos = _resolve_tile_spawn_pos(spawn_pos)
@@ -2147,11 +2667,18 @@ func make_bird():
 
 
 func _spawn_bird():
-	var predator = null
-	if _is_story_mode() and Global.enable_tuktuk_predators and _story_village_revealed and _story_phase_id >= STORY_TUKTUK_START_PHASE and randf() < 0.42:
-		predator = tuktuk_scene.instantiate()
-	else:
-		predator = bird_scene.instantiate()
+	var predator = bird_scene.instantiate()
+	$Animals.add_child(predator)
+
+
+func make_tuktuk():
+	call_deferred("_spawn_tuktuk")
+
+
+func _spawn_tuktuk():
+	if not _tuktuk_predator_mode_enabled():
+		return
+	var predator = tuktuk_scene.instantiate()
 	$Animals.add_child(predator)
 
 	
@@ -2248,6 +2775,9 @@ func make_story_bank(pos: Vector2) -> Node:
 	bank.buddy_radius = Global.social_buddy_radius
 	bank.draggable = false
 	bank.killable = false
+	bank.set_meta("bank_disabled", not _bank_hotkey_enabled)
+	if not _bank_hotkey_enabled:
+		bank.logistics_ready = false
 	bank.set_meta("story_village_actor", true)
 	bank.set_meta("story_kind", "bank")
 	$Agents.add_child(bank)
@@ -2294,17 +2824,19 @@ func make_myco(pos, already_snapped: bool = false):
 func _setup_story_person_flags(person: Node, role: String) -> void:
 	if not is_instance_valid(person):
 		return
+	var disable_birth = _is_story_mode()
 	person.set_meta("story_villager", true)
 	person.set_meta("story_village_actor", true)
-	person.set_meta("story_disable_birth", true)
+	person.set_meta("story_disable_birth", disable_birth)
 	person.set_meta("story_disable_farmer_production", role == "farmer")
 	person.set_meta("story_home_world_pos", person.global_position)
 	person.draggable = false
 	person.killable = false
-	person.num_babies = 0
-	person.peak_maturity = 999999
-	person.current_babies = 0
-	person.current_maturity = 0
+	if disable_birth:
+		person.num_babies = 0
+		person.peak_maturity = 999999
+		person.current_babies = 0
+		person.current_maturity = 0
 
 
 func _make_story_person(role: String, texture: Texture2D, pos: Vector2, prod_res: Array) -> Node:
@@ -2366,9 +2898,22 @@ func make_story_basket(pos: Vector2, asset_key: String = "") -> Node:
 			normalized_asset: 10,
 			"R": 10
 		}
+	else:
+		basket.assets = {
+			"N": 5,
+			"P": 5,
+			"K": 5,
+			"R": 0
+		}
+		basket.needs = {
+			"N": 10,
+			"P": 10,
+			"K": 10,
+			"R": 10
+		}
 	basket.set_variables(basket_dict)
 	basket.draw_lines = true
-	basket.draggable = false
+	basket.draggable = true
 	basket.killable = false
 	if normalized_asset != "" and is_instance_valid(basket.sprite):
 		basket.sprite.modulate = Global.asset_colors.get(normalized_asset, Color.WHITE)

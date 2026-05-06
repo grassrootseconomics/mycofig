@@ -51,9 +51,9 @@ const INVENTORY_SIDE_BUTTON_BUFFER := 5.0
 const TUTORIAL_LABEL_HORIZONTAL_PADDING := 34.0
 const TUTORIAL_PANEL_TEXT_VERTICAL_PADDING := 44.0
 const TUTORIAL_PANEL_MAX_HEIGHT_FRACTION := 0.62
-const QUIT_DIALOG_PANEL_COLOR := Color(0.07, 0.11, 0.16, 0.74)
-const QUIT_DIALOG_BORDER_COLOR := Color(0.86, 0.91, 1.0, 0.38)
-const QUIT_DIALOG_SHADOW_COLOR := Color(0.01, 0.02, 0.03, 0.62)
+const QUIT_DIALOG_PANEL_COLOR := Color(0.00, 0.13, 0.47, 0.57)
+const QUIT_DIALOG_BORDER_COLOR := Color(0.035, 0.071, 0.149, 0.78)
+const QUIT_DIALOG_SHADOW_COLOR := Color(0.0, 0.0, 0.0, 0.25)
 const QUIT_DIALOG_BUTTON_BG := Color(0.17, 0.31, 0.24, 0.86)
 const QUIT_DIALOG_BUTTON_BORDER := Color(0.90, 0.97, 0.92, 0.44)
 const QUIT_DIALOG_BUTTON_BG_HOVER := Color(0.21, 0.37, 0.28, 0.92)
@@ -299,7 +299,11 @@ func _embed_pause_quit_controls_next_to_minimap() -> void:
 
 
 func _is_story_basket_slot_unlocked() -> bool:
-	return Global.mode == "story" and int(Global.story_chapter_id) >= 5
+	if Global.mode == "story":
+		return int(Global.story_chapter_id) >= 5
+	if Global.has_method("is_challenge_dual_village_mode"):
+		return bool(Global.is_challenge_dual_village_mode())
+	return false
 
 
 func _set_inventory_lock_glyph(icon: TextureRect, show_glyph: bool) -> void:
@@ -420,17 +424,17 @@ func _make_inventory_sparkle_ring_style() -> StyleBoxFlat:
 func _make_quit_dialog_panel_style() -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
 	style.bg_color = QUIT_DIALOG_PANEL_COLOR
-	style.corner_radius_top_left = 14
-	style.corner_radius_top_right = 14
-	style.corner_radius_bottom_left = 14
-	style.corner_radius_bottom_right = 14
+	style.corner_radius_top_left = 10
+	style.corner_radius_top_right = 10
+	style.corner_radius_bottom_left = 10
+	style.corner_radius_bottom_right = 10
 	style.border_width_left = 2
 	style.border_width_top = 2
 	style.border_width_right = 2
 	style.border_width_bottom = 2
 	style.border_color = QUIT_DIALOG_BORDER_COLOR
 	style.shadow_color = QUIT_DIALOG_SHADOW_COLOR
-	style.shadow_size = 8
+	style.shadow_size = 4
 	style.content_margin_left = 16
 	style.content_margin_top = 14
 	style.content_margin_right = 16
@@ -1585,6 +1589,10 @@ func _clear_inventory_selection() -> void:
 	_refresh_inventory_selection_visuals()
 	_refresh_inventory_phase1_sparkle_visuals()
 	_update_minimap_input_lock()
+
+
+func is_inventory_placement_active() -> bool:
+	return _selected_inventory_item != ""
 
 
 func _get_world_tile_drop_data(screen_pos: Vector2) -> Dictionary:

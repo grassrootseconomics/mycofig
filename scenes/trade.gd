@@ -22,6 +22,9 @@ var _drop_elapsed := 0.0
 var _pool_owner: Node = null
 var _visual_key := ""
 var _count_label: Label = null
+var created_at_msec := 0
+var liquidity_cycle_trade := false
+var liquidity_cycle_origin_id := 0
 
 const DROP_FADE_SECONDS := 0.12
 const TRADE_REFERENCE_FPS := 60.0
@@ -43,6 +46,11 @@ func set_variables(path_dict) -> void:
 	return_asset = path_dict.get("return_res")
 	return_amt = path_dict.get("return_amt")
 	_visual_key = str(path_dict.get("visual_key", ""))
+	created_at_msec = int(path_dict.get("created_at_msec", 0))
+	if created_at_msec <= 0:
+		created_at_msec = Time.get_ticks_msec()
+	liquidity_cycle_trade = bool(path_dict.get("liquidity_cycle_trade", false))
+	liquidity_cycle_origin_id = int(path_dict.get("liquidity_cycle_origin_id", 0))
 	position = start_agent.global_position
 	_refresh_trade_amount_visual()
 	#print("Created trade: ", start_agent, end_agent, trade_path)

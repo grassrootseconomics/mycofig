@@ -34,7 +34,10 @@ const DEFAULT_RESIDUE_LIFETIME_TICKS := 8
 const SOIL_INFLUENCE_RADIUS := 4
 const STORY_WORLD_COLUMNS := 26
 const STORY_WORLD_ROWS := 27
-const STORY_VILLAGE_RECT := Rect2i(16, 9, 10, 10)
+const STORY_START_TILE := Vector2i(3, 13)
+const STORY_VILLAGE_OFFSET_RIGHT_TILES := 13
+const STORY_VILLAGE_RECT := Rect2i(STORY_START_TILE.x + STORY_VILLAGE_OFFSET_RIGHT_TILES, 9, 10, 10)
+const CHALLENGE_LAYOUT_CENTER_OFFSET_FROM_START_X := 6
 const STORY_FOG_TICK_SECONDS := 0.25
 const STORY_FOG_COLOR := Color(0.02, 0.03, 0.04, 0.62)
 const HOTKEY_WORLD_DEBUG_OVERLAY := KEY_Z
@@ -853,7 +856,8 @@ func _is_live_agent_for_soil(agent: Node) -> bool:
 		return false
 	if str(agent.get("type")) == "cloud":
 		return false
-	if str(Global.mode) == "story" and bool(agent.get_meta("story_village_actor", false)):
+	# Village runtime actors (people, village baskets, bank) must never drive soil updates.
+	if bool(agent.get_meta("story_village_actor", false)):
 		return false
 	return true
 
@@ -1102,9 +1106,7 @@ func _build_test_baseline_pattern() -> void:
 
 
 func _build_gameplay_baseline_pattern() -> void:
-	var center = Vector2((columns - 1) * 0.5, (rows - 1) * 0.5)
-	if str(Global.mode) == "story":
-		center = Vector2(6.0, (rows - 1) * 0.5)
+	var center = _get_gameplay_baseline_center()
 	for y in range(rows):
 		for x in range(columns):
 			var coord_vec = Vector2(float(x), float(y))
@@ -1115,6 +1117,20 @@ func _build_gameplay_baseline_pattern() -> void:
 			elif dist <= 4.0:
 				stage = STAGE_RECOVERING
 			_baseline_stage[_index_for(Vector2i(x, y))] = stage
+
+
+func _get_gameplay_baseline_center() -> Vector2:
+	var center = Vector2((columns - 1) * 0.5, (rows - 1) * 0.5)
+	if str(Global.mode) == "story":
+		var story_x = clampi(STORY_START_TILE.x, 0, max(columns - 1, 0))
+		var story_y = clampi(STORY_START_TILE.y, 0, max(rows - 1, 0))
+		return Vector2(float(story_x), float(story_y))
+	if Global.has_method("is_challenge_dual_village_mode") and bool(Global.is_challenge_dual_village_mode()):
+		var start_x = int(floor(columns * 0.5)) - CHALLENGE_LAYOUT_CENTER_OFFSET_FROM_START_X
+		start_x = clampi(start_x, 0, max(columns - 1, 0))
+		var start_y = clampi(STORY_START_TILE.y, 0, max(rows - 1, 0))
+		return Vector2(float(start_x), float(start_y))
+	return center
 
 
 func _stage_defaults(stage: int) -> Dictionary:

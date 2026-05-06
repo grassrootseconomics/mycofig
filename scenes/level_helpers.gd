@@ -7,6 +7,7 @@ const HOTKEY_QUIT := [KEY_ESCAPE, KEY_Q]
 const HOTKEY_TOGGLE_BARS := [KEY_B]
 const HOTKEY_TOGGLE_BABY := [KEY_M]
 const HOTKEY_TOGGLE_REPOSITION := [KEY_G]
+const HOTKEY_TOGGLE_BANK := [KEY_J]
 const HOTKEY_CYCLE_ACTIVE := [KEY_TAB]
 const HOTKEY_CONNECTORS_2 := [KEY_2]
 const HOTKEY_CONNECTORS_3 := [KEY_3]
@@ -231,7 +232,14 @@ static func handle_gameplay_hotkeys(event: InputEvent, owner: Node, agents_root:
 
 	if _is_pressed_key(event, HOTKEY_QUIT):
 		if is_instance_valid(owner):
-			owner.get_tree().call_deferred("change_scene_to_file", "res://scenes/game_over.tscn")
+			var ui = owner.get_node_or_null("UI")
+			if is_instance_valid(ui) and ui.has_method("show_back_to_menu_confirm"):
+				ui.show_back_to_menu_confirm()
+			else:
+				owner.get_tree().call_deferred("change_scene_to_file", "res://scenes/game_over.tscn")
+			var viewport = owner.get_viewport()
+			if viewport != null:
+				viewport.set_input_as_handled()
 		return true
 
 	if _is_pressed_key(event, HOTKEY_TOGGLE_BARS):
@@ -245,6 +253,11 @@ static func handle_gameplay_hotkeys(event: InputEvent, owner: Node, agents_root:
 
 	if _is_pressed_key(event, HOTKEY_TOGGLE_REPOSITION):
 		Global.allow_agent_reposition = not Global.allow_agent_reposition
+		return true
+
+	if _is_pressed_key(event, HOTKEY_TOGGLE_BANK):
+		if is_instance_valid(owner) and owner.has_method("toggle_bank_hotkey"):
+			owner.toggle_bank_hotkey()
 		return true
 
 	if include_connector_keys:

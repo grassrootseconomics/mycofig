@@ -68,6 +68,12 @@ var is_raining = true
 var is_birding = true
 var is_killing = true
 var is_max_babies = true
+var challenge_dual_village_enabled = true
+var villager_r_buffer_target := 1
+var villager_surplus_dominance_margin := 1
+var villager_r_medium_only := true
+var story_farmer_inbound_wait_timeout_sec := 1.8
+var villager_max_liquidity_inflight_swaps := 2
 
 var quarry_type = "maize"
 
@@ -374,6 +380,18 @@ func get_rank_threshold(score_value: int) -> int:
 		if score_value >= threshold:
 			current = threshold
 	return current
+
+
+func is_story_mode_runtime() -> bool:
+	return str(mode) == "story"
+
+
+func is_challenge_dual_village_mode() -> bool:
+	return str(mode) == "challenge" and bool(challenge_dual_village_enabled)
+
+
+func is_parallel_village_runtime() -> bool:
+	return is_story_mode_runtime() or is_challenge_dual_village_mode()
 
 
 func get_predator_spawn_count(score_level: int) -> int:

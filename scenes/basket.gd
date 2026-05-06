@@ -291,7 +291,6 @@ func _on_area_entered(trade: Area2D) -> void:
 				assets[trade.asset]+=trade.amount
 				bars[trade.asset].value = assets[trade.asset]
 			
-			
 			if trade.type == "swap":
 				if(assets.get(trade.return_asset) != null):
 					var return_amount = trade.return_amt*Global.values[trade.asset]/Global.values[trade.return_asset]
@@ -303,6 +302,11 @@ func _on_area_entered(trade: Area2D) -> void:
 							return_amount = 1
 						else:
 							return_amount = int(return_amount)
+					if return_amount > 0:
+						var liquidity_origin_value = trade.get("liquidity_cycle_origin_id")
+						var liquidity_origin_id := 0
+						if liquidity_origin_value != null:
+							liquidity_origin_id = int(liquidity_origin_value)
 						var path_dict = {
 							"from_agent": self,
 							"to_agent": trade.start_agent,
@@ -311,7 +315,9 @@ func _on_area_entered(trade: Area2D) -> void:
 							"trade_amount": return_amount,
 							"trade_type": "send",
 							"return_res": null,
-							"return_amt": null
+							"return_amt": null,
+							"liquidity_cycle_trade": bool(trade.get("liquidity_cycle_trade")),
+							"liquidity_cycle_origin_id": liquidity_origin_id
 						}	
 						if(assets[trade.return_asset]>= return_amount):
 							if _emit_trade_with_budget(path_dict):
@@ -324,8 +330,6 @@ func _on_area_entered(trade: Area2D) -> void:
 				else:
 					print("Error basket without return asset:", trade.return_asset, assets)
 			trade.call_deferred("queue_free")
-			
-			
 		else:
 			print("Error basket without asset:", trade.asset, assets)
 	#else:

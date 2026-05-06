@@ -172,6 +172,7 @@ func _reset_run_state() -> void:
 	Global.bars_on = false
 	Global.allow_agent_reposition = false
 	Global.social_mode = false
+	Global.enable_tuktuk_predators = false
 	Global.story_chapter_id = 1
 	Global.village_revealed = false
 	Global.village_objective_flags = {}
@@ -196,6 +197,7 @@ func _on_tutorial_pressed() -> void:
 	Global.is_birding = true
 	Global.is_killing = false
 	Global.is_max_babies = true
+	Global.enable_tuktuk_predators = false
 	Global.draw_lines = true
 	Global.bars_on = false
 	Global.stage = 1
@@ -222,6 +224,7 @@ func _on_challenge_button_pressed() -> void:
 	Global.is_birding = true
 	Global.is_killing = true
 	Global.is_max_babies = true
+	Global.enable_tuktuk_predators = true
 	Global.bars_on = false
 	Global.draw_lines = true
 	Global.inventory = { #how many of each plant do we have to use
@@ -233,7 +236,7 @@ func _on_challenge_button_pressed() -> void:
 	"farmer": 0,
 	"vendor": 0,
 	"cook": 0,
-	"basket": 0
+	"basket": 3
 	}
 	get_tree().change_scene_to_file("res://scenes/level.tscn")
 

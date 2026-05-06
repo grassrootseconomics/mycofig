@@ -28,6 +28,7 @@ const MYCO_DEAD_MUSHROOM_SHRINK_LERP := 0.08
 const MYCO_DEAD_RHIZO_SHRINK_LERP := 0.07
 const MYCO_DEAD_MUSHROOM_ALPHA_STEP := 0.03
 const MYCO_MIN_ADJACENT_BUDDY_RADIUS := 72.0
+const MYCO_MAX_SENDS_PER_LOGISTICS_TICK := 2
 
 var myco_stage: int = MycoGrowthStage.SPORE
 var myco_stage_consumptions := 0
@@ -506,16 +507,16 @@ func logistics():
 			
 			if debug_mode:
 				print(" shuffle" )
-			var sent_trade := false
+			var sent_count := 0
 			for child in trade_buddies:
-				if sent_trade:
+				if sent_count >= MYCO_MAX_SENDS_PER_LOGISTICS_TICK:
 					break
 				if(is_instance_valid(child)):
 					if child.type == 'myco' and child.name != self.name:
 						if debug_mode:
 							print(" child found: ", child.name )
 						for excess in keys_e:
-							if sent_trade:
+							if sent_count >= MYCO_MAX_SENDS_PER_LOGISTICS_TICK:
 								break
 							if current_excess[excess] > 0 and assets[excess] > needs[excess] and child.assets[excess] < child.needs[excess]:
 								var path_dict = {
@@ -533,8 +534,9 @@ func logistics():
 								if _emit_trade_with_budget(path_dict):
 									assets[excess] -= 1
 									bars[excess].value = assets[excess]
-									logistics_ready = false
-									sent_trade = true
+									sent_count += 1
+			if sent_count > 0:
+				logistics_ready = false
 
 
 func draw_selected_box():

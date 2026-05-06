@@ -45,6 +45,10 @@ var trade_sender_rate_per_sec_myco := 14.0
 var trade_sender_burst_myco := 4.0
 var trade_link_rate_per_sec_myco := 10.0
 var trade_link_burst_myco := 2.0
+var trade_visual_hybrid_enabled := true
+var trade_visual_per_link_cap_t0 := 4
+var trade_visual_per_link_cap_t1 := 3
+var trade_visual_per_link_cap_t2 := 2
 var _trade_sender_buckets: Dictionary = {}
 var _trade_link_buckets: Dictionary = {}
 
@@ -415,6 +419,16 @@ func get_bar_update_interval() -> float:
 			return 0.20
 		_:
 			return 0.033
+
+
+func get_trade_visual_link_packet_cap() -> int:
+	match get_effective_perf_tier():
+		1:
+			return maxi(trade_visual_per_link_cap_t1, 1)
+		2:
+			return maxi(trade_visual_per_link_cap_t2, 1)
+		_:
+			return maxi(trade_visual_per_link_cap_t0, 1)
 
 
 func reset_trade_dispatch_budgets() -> void:

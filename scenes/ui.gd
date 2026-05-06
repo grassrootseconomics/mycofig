@@ -48,6 +48,30 @@ const TUTORIAL_PANEL_COLLAPSED_SIZE := Vector2(44, 44)
 const INVENTORY_ICON_PAD_DEFAULT := 4.0
 const INVENTORY_ICON_PAD_BASKET := 7.0
 const INVENTORY_SIDE_BUTTON_BUFFER := 5.0
+const TUTORIAL_LABEL_HORIZONTAL_PADDING := 34.0
+const TUTORIAL_PANEL_TEXT_VERTICAL_PADDING := 44.0
+const TUTORIAL_PANEL_MAX_HEIGHT_FRACTION := 0.62
+const QUIT_DIALOG_PANEL_COLOR := Color(0.07, 0.11, 0.16, 0.74)
+const QUIT_DIALOG_BORDER_COLOR := Color(0.86, 0.91, 1.0, 0.38)
+const QUIT_DIALOG_SHADOW_COLOR := Color(0.01, 0.02, 0.03, 0.62)
+const QUIT_DIALOG_BUTTON_BG := Color(0.17, 0.31, 0.24, 0.86)
+const QUIT_DIALOG_BUTTON_BORDER := Color(0.90, 0.97, 0.92, 0.44)
+const QUIT_DIALOG_BUTTON_BG_HOVER := Color(0.21, 0.37, 0.28, 0.92)
+const QUIT_DIALOG_BUTTON_BG_PRESSED := Color(0.12, 0.22, 0.17, 0.94)
+const QUIT_DIALOG_BUTTON_BG_CANCEL := Color(0.35, 0.21, 0.16, 0.86)
+const QUIT_DIALOG_BUTTON_BG_CANCEL_HOVER := Color(0.43, 0.26, 0.20, 0.92)
+const QUIT_DIALOG_BUTTON_BG_CANCEL_PRESSED := Color(0.24, 0.14, 0.11, 0.94)
+const UI_COMPACT_SHORT_EDGE := 640.0
+const UI_TINY_SHORT_EDGE := 480.0
+const INVENTORY_SLOT_SIZE_DEFAULT := 40.0
+const INVENTORY_SLOT_SIZE_COMPACT := 46.0
+const INVENTORY_SLOT_SIZE_TINY := 52.0
+const MINIMAP_SIZE_DEFAULT := Vector2(180, 120)
+const MINIMAP_SIZE_COMPACT := Vector2(152, 100)
+const MINIMAP_SIZE_TINY := Vector2(132, 88)
+const SIDE_BUTTON_SIZE_DEFAULT := Vector2(84, 38)
+const SIDE_BUTTON_SIZE_COMPACT := Vector2(98, 46)
+const SIDE_BUTTON_SIZE_TINY := Vector2(112, 52)
 
 var _slot_icons: Array = []
 var _slot_labels: Array = []
@@ -76,6 +100,13 @@ var _story_phase1_sparkle_active := false
 var _story_phase5_basket_sparkle_active := false
 var _story_phase1_pending_types: Dictionary = {}
 var _story_phase1_sparkle_time := 0.0
+var _inventory_slot_size := INVENTORY_SLOT_SIZE_DEFAULT
+var _inventory_icon_pad_default := INVENTORY_ICON_PAD_DEFAULT
+var _inventory_icon_pad_basket := INVENTORY_ICON_PAD_BASKET
+var _tutorial_expanded_size := TUTORIAL_PANEL_EXPANDED_SIZE
+var _tutorial_expanded_size_base := TUTORIAL_PANEL_EXPANDED_SIZE
+var _tutorial_collapsed_size := TUTORIAL_PANEL_COLLAPSED_SIZE
+var _inventory_side_controls_embedded := false
 
 func _ready() -> void:
 	#$PalletContainer2/HBoxContainer/ActiveTexture.texture = Global.active_agent.sprite_texture
@@ -83,6 +114,8 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	inventory_spawn_rng.randomize()
 	_ensure_drag_preview()
+	_connect_viewport_resize_signal()
+	_apply_responsive_layout()
 	set_pause_state(false)
 
 var clicked_slider = false
@@ -119,9 +152,11 @@ func setup():
 	_slot_items = INVENTORY_SLOT_ITEMS.duplicate()
 	_ensure_inventory_backplates()
 	_ensure_minimap_panel()
+	_embed_pause_quit_controls_next_to_minimap()
 	_ensure_tutorial_panel_toggle()
 	_update_minimap_input_lock()
 	_set_inventory_tab("farm")
+	_apply_responsive_layout()
 	# Legacy valuation bars are retained in scene/code but hidden from runtime.
 	$MarginContainer/VBoxContainer/HBoxContainer/ResVBoxContainer.visible = false
 	$MarginContainer/VBoxContainer/HBoxContainer/ValVBoxContainer.visible = false
@@ -139,7 +174,7 @@ func _ensure_minimap_panel() -> void:
 	inventory_vbox.add_child(host)
 	minimap_panel = MiniMapPanelRef.new()
 	minimap_panel.name = "MiniMapPanel"
-	minimap_panel.custom_minimum_size = Vector2(180, 120)
+	minimap_panel.custom_minimum_size = MINIMAP_SIZE_DEFAULT
 	minimap_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	minimap_panel.size_flags_vertical = Control.SIZE_FILL
 	host.add_child(minimap_panel)
@@ -148,6 +183,74 @@ func _ensure_minimap_panel() -> void:
 	var world = get_node_or_null("../WorldFoundation")
 	var agents = get_node_or_null("../Agents")
 	minimap_panel.configure(level_root, world, agents)
+
+
+func _get_pause_container() -> MarginContainer:
+	return find_child("MarginCMarginContainer2ontainer", true, false) as MarginContainer
+
+
+func _get_quit_container() -> MarginContainer:
+	return find_child("QuitContainer", true, false) as MarginContainer
+
+
+func _get_pause_button() -> Button:
+	return find_child("PauseButton", true, false) as Button
+
+
+func _get_quit_button() -> Button:
+	return find_child("QuitButton", true, false) as Button
+
+
+func _embed_pause_quit_controls_next_to_minimap() -> void:
+	var inventory_vbox: VBoxContainer = get_node_or_null("MarginContainer/VBoxContainer/PalletContainer/VBoxContainer")
+	if not is_instance_valid(inventory_vbox):
+		return
+	var row: HBoxContainer = inventory_vbox.get_node_or_null("MiniMapRow")
+	if not is_instance_valid(row):
+		row = HBoxContainer.new()
+		row.name = "MiniMapRow"
+		row.alignment = BoxContainer.ALIGNMENT_CENTER
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.size_flags_vertical = Control.SIZE_FILL
+		row.add_theme_constant_override("separation", 8)
+		inventory_vbox.add_child(row)
+	var minimap_host: Control = inventory_vbox.get_node_or_null("MiniMapHost")
+	var quit_container: MarginContainer = _get_quit_container()
+	var pause_container: MarginContainer = _get_pause_container()
+	var controls := [quit_container, minimap_host, pause_container]
+	for node in controls:
+		if not is_instance_valid(node):
+			continue
+		var parent = node.get_parent()
+		if is_instance_valid(parent) and parent != row:
+			parent.remove_child(node)
+		if node.get_parent() != row:
+			row.add_child(node)
+	if is_instance_valid(quit_container):
+		quit_container.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		quit_container.offset_left = 0.0
+		quit_container.offset_top = 0.0
+		quit_container.offset_right = 0.0
+		quit_container.offset_bottom = 0.0
+		quit_container.custom_minimum_size = Vector2.ZERO
+		quit_container.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		quit_container.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.move_child(quit_container, 0)
+	if is_instance_valid(minimap_host):
+		minimap_host.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		minimap_host.size_flags_vertical = Control.SIZE_FILL
+		row.move_child(minimap_host, 1 if is_instance_valid(quit_container) else 0)
+	if is_instance_valid(pause_container):
+		pause_container.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		pause_container.offset_left = 0.0
+		pause_container.offset_top = 0.0
+		pause_container.offset_right = 0.0
+		pause_container.offset_bottom = 0.0
+		pause_container.custom_minimum_size = Vector2.ZERO
+		pause_container.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		pause_container.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.move_child(pause_container, row.get_child_count() - 1)
+	_inventory_side_controls_embedded = is_instance_valid(minimap_host) and is_instance_valid(quit_container) and is_instance_valid(pause_container)
 
 
 func _is_story_basket_slot_unlocked() -> bool:
@@ -266,6 +369,48 @@ func _make_inventory_sparkle_ring_style() -> StyleBoxFlat:
 	style.expand_margin_top = 2.0
 	style.expand_margin_right = 2.0
 	style.expand_margin_bottom = 2.0
+	return style
+
+
+func _make_quit_dialog_panel_style() -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = QUIT_DIALOG_PANEL_COLOR
+	style.corner_radius_top_left = 14
+	style.corner_radius_top_right = 14
+	style.corner_radius_bottom_left = 14
+	style.corner_radius_bottom_right = 14
+	style.border_width_left = 2
+	style.border_width_top = 2
+	style.border_width_right = 2
+	style.border_width_bottom = 2
+	style.border_color = QUIT_DIALOG_BORDER_COLOR
+	style.shadow_color = QUIT_DIALOG_SHADOW_COLOR
+	style.shadow_size = 8
+	style.content_margin_left = 16
+	style.content_margin_top = 14
+	style.content_margin_right = 16
+	style.content_margin_bottom = 14
+	return style
+
+
+func _make_quit_dialog_button_style(bg_color: Color) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = bg_color
+	style.corner_radius_top_left = 10
+	style.corner_radius_top_right = 10
+	style.corner_radius_bottom_left = 10
+	style.corner_radius_bottom_right = 10
+	style.border_width_left = 2
+	style.border_width_top = 2
+	style.border_width_right = 2
+	style.border_width_bottom = 2
+	style.border_color = QUIT_DIALOG_BUTTON_BORDER
+	style.shadow_color = Color(0.0, 0.0, 0.0, 0.30)
+	style.shadow_size = 3
+	style.content_margin_left = 14
+	style.content_margin_right = 14
+	style.content_margin_top = 8
+	style.content_margin_bottom = 8
 	return style
 
 
@@ -432,9 +577,9 @@ func _ensure_inventory_backplates() -> void:
 func _apply_inventory_icon_slot_layout(icon: TextureRect, item_name: String) -> void:
 	if not is_instance_valid(icon):
 		return
-	var pad := INVENTORY_ICON_PAD_DEFAULT
+	var pad := _inventory_icon_pad_default
 	if item_name == "basket":
-		pad = INVENTORY_ICON_PAD_BASKET
+		pad = _inventory_icon_pad_basket
 		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	else:
@@ -507,6 +652,141 @@ func refresh_inventory_counts() -> void:
 		return
 	_refresh_inventory_selection_visuals()
 	_refresh_inventory_phase1_sparkle_visuals()
+
+
+func _connect_viewport_resize_signal() -> void:
+	var viewport = get_viewport()
+	if not is_instance_valid(viewport):
+		return
+	if viewport.size_changed.is_connected(_on_viewport_size_changed):
+		return
+	viewport.size_changed.connect(_on_viewport_size_changed)
+
+
+func _on_viewport_size_changed() -> void:
+	_apply_responsive_layout()
+	_layout_quit_container()
+	_layout_tutorial_container()
+	_position_tutorial_toggle()
+
+
+func _estimate_wrapped_line_count(text_value: String, approx_chars_per_line: int) -> int:
+	var safe_chars = maxi(approx_chars_per_line, 1)
+	var total_lines = 0
+	for line in text_value.split("\n", true):
+		var line_len = line.length()
+		if line_len <= 0:
+			total_lines += 1
+			continue
+		total_lines += int(ceil(float(line_len) / float(safe_chars)))
+	return maxi(total_lines, 1)
+
+
+func _update_tutorial_expanded_size_for_text() -> void:
+	var tutorial: Control = get_node_or_null("TutorialMarginContainer1")
+	var label: Label = get_node_or_null("TutorialMarginContainer1/Label")
+	if not is_instance_valid(tutorial) or not is_instance_valid(label):
+		return
+	var text_value := str(label.text)
+	if text_value.strip_edges() == "":
+		_tutorial_expanded_size = _tutorial_expanded_size_base
+		return
+	var font_size = label.get_theme_font_size("font_size")
+	if font_size <= 0:
+		font_size = 16
+	var line_height = float(font_size) * 1.25
+	if label.has_method("get_line_height"):
+		var measured_height = float(label.call("get_line_height"))
+		if measured_height > 0.0:
+			line_height = measured_height
+	var width_for_text = maxf(_tutorial_expanded_size_base.x - TUTORIAL_LABEL_HORIZONTAL_PADDING, 120.0)
+	var approx_chars_per_line = maxi(int(floor(width_for_text / maxf(float(font_size) * 0.58, 6.0))), 8)
+	var explicit_lines = maxi(text_value.count("\n") + 1, 1)
+	var measured_lines = 0
+	if label.has_method("get_line_count"):
+		measured_lines = maxi(int(label.call("get_line_count")), 0)
+	var wrapped_lines = _estimate_wrapped_line_count(text_value, approx_chars_per_line)
+	var effective_lines = maxi(maxi(explicit_lines, measured_lines), wrapped_lines)
+	var text_height = float(effective_lines) * line_height
+	var target_height = maxf(_tutorial_expanded_size_base.y, text_height + TUTORIAL_PANEL_TEXT_VERTICAL_PADDING)
+	var max_height = maxf(get_viewport().get_visible_rect().size.y * TUTORIAL_PANEL_MAX_HEIGHT_FRACTION, _tutorial_expanded_size_base.y)
+	_tutorial_expanded_size = Vector2(_tutorial_expanded_size_base.x, clampf(target_height, _tutorial_expanded_size_base.y, max_height))
+
+
+func _is_compact_ui() -> bool:
+	var view_size = get_viewport().get_visible_rect().size
+	return Global.is_mobile_platform or minf(view_size.x, view_size.y) <= UI_COMPACT_SHORT_EDGE
+
+
+func _is_tiny_ui() -> bool:
+	var view_size = get_viewport().get_visible_rect().size
+	return minf(view_size.x, view_size.y) <= UI_TINY_SHORT_EDGE
+
+
+func _apply_responsive_layout() -> void:
+	var view_rect = get_viewport().get_visible_rect()
+	var view_size = view_rect.size
+	var compact = _is_compact_ui()
+	var tiny = _is_tiny_ui()
+	var inventory: MarginContainer = get_node_or_null("MarginContainer")
+	if is_instance_valid(inventory):
+		var margin_px = 10 if compact else 14
+		inventory.add_theme_constant_override("margin_left", margin_px)
+		inventory.add_theme_constant_override("margin_top", margin_px)
+		inventory.add_theme_constant_override("margin_right", margin_px)
+		inventory.add_theme_constant_override("margin_bottom", margin_px)
+		var panel_width = clampf(view_size.x * 0.36, 200.0, 292.0)
+		inventory.offset_left = -round(panel_width * 0.5)
+		inventory.offset_right = round(panel_width * 0.5)
+		inventory.offset_top = -178.0 if compact else -159.0
+	_inventory_slot_size = INVENTORY_SLOT_SIZE_TINY if tiny else (INVENTORY_SLOT_SIZE_COMPACT if compact else INVENTORY_SLOT_SIZE_DEFAULT)
+	_inventory_icon_pad_default = 6.0 if tiny else (5.0 if compact else INVENTORY_ICON_PAD_DEFAULT)
+	_inventory_icon_pad_basket = 9.0 if tiny else (8.0 if compact else INVENTORY_ICON_PAD_BASKET)
+	for icon in _slot_icons:
+		if not is_instance_valid(icon):
+			continue
+		var host = _slot_backplates.get(icon, null)
+		if host is Panel:
+			host.custom_minimum_size = Vector2(_inventory_slot_size, _inventory_slot_size)
+		var item_name = str(icon.get_meta("item_name", ""))
+		_apply_inventory_icon_slot_layout(icon, item_name)
+	for label in _slot_labels:
+		if not is_instance_valid(label):
+			continue
+		label.add_theme_font_size_override("font_size", 19 if tiny else (17 if compact else 15))
+	for glyph in _slot_lock_glyphs.values():
+		if glyph is Label:
+			glyph.add_theme_font_size_override("font_size", 28 if tiny else (26 if compact else 24))
+	if is_instance_valid(minimap_panel):
+		minimap_panel.custom_minimum_size = MINIMAP_SIZE_TINY if tiny else (MINIMAP_SIZE_COMPACT if compact else MINIMAP_SIZE_DEFAULT)
+	var minimap_row: HBoxContainer = get_node_or_null("MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/MiniMapRow")
+	if is_instance_valid(minimap_row):
+		minimap_row.add_theme_constant_override("separation", 12 if compact else 8)
+	var tutorial_label: Label = get_node_or_null("TutorialMarginContainer1/Label")
+	if is_instance_valid(tutorial_label):
+		tutorial_label.add_theme_font_size_override("font_size", 19 if tiny else (18 if compact else 17))
+		tutorial_label.offset_left = 16.0
+		tutorial_label.offset_top = 14.0
+		tutorial_label.offset_right = -18.0
+		tutorial_label.offset_bottom = -18.0
+	var expanded_width = minf(TUTORIAL_PANEL_EXPANDED_SIZE.x, maxf(view_size.x - 24.0, 248.0))
+	var expanded_height = 188.0 if tiny else (182.0 if compact else TUTORIAL_PANEL_EXPANDED_SIZE.y)
+	_tutorial_expanded_size_base = Vector2(expanded_width, expanded_height)
+	_tutorial_expanded_size = _tutorial_expanded_size_base
+	_tutorial_collapsed_size = Vector2(52, 52) if compact else TUTORIAL_PANEL_COLLAPSED_SIZE
+	if is_instance_valid(_tutorial_toggle_button):
+		_tutorial_toggle_button.custom_minimum_size = Vector2(38, 38) if tiny else (Vector2(34, 34) if compact else Vector2(28, 28))
+		_tutorial_toggle_button.add_theme_font_size_override("font_size", 18 if compact else 14)
+	var pause_button: Button = _get_pause_button()
+	var quit_button: Button = _get_quit_button()
+	var pause_size = SIDE_BUTTON_SIZE_TINY if tiny else (SIDE_BUTTON_SIZE_COMPACT if compact else SIDE_BUTTON_SIZE_DEFAULT)
+	for button in [pause_button, quit_button]:
+		if not is_instance_valid(button):
+			continue
+		button.custom_minimum_size = pause_size
+		button.add_theme_font_size_override("font_size", 18 if compact else 14)
+	_update_tutorial_expanded_size_for_text()
+	_apply_tutorial_panel_state()
 
 
 func get_inventory_icon_center(agent_name: String) -> Vector2:
@@ -594,7 +874,9 @@ func _apply_tutorial_panel_state() -> void:
 		label.visible = content_visible
 	if is_instance_valid(helper_panel):
 		helper_panel.visible = content_visible
-	var target_size = TUTORIAL_PANEL_COLLAPSED_SIZE if _tutorial_collapsed else TUTORIAL_PANEL_EXPANDED_SIZE
+	if not _tutorial_collapsed:
+		_update_tutorial_expanded_size_for_text()
+	var target_size = _tutorial_collapsed_size if _tutorial_collapsed else _tutorial_expanded_size
 	tutorial.custom_minimum_size = target_size
 	tutorial.size = target_size
 	if is_instance_valid(_tutorial_toggle_button):
@@ -622,8 +904,10 @@ func _position_tutorial_toggle() -> void:
 
 
 func _layout_quit_container() -> void:
-	var quit_container: MarginContainer = get_node_or_null("QuitContainer")
-	var pause_container: MarginContainer = get_node_or_null("MarginCMarginContainer2ontainer")
+	if _inventory_side_controls_embedded:
+		return
+	var quit_container: MarginContainer = _get_quit_container()
+	var pause_container: MarginContainer = _get_pause_container()
 	var inventory_panel: MarginContainer = get_node_or_null("MarginContainer")
 	if not is_instance_valid(inventory_panel):
 		return
@@ -664,7 +948,7 @@ func _layout_tutorial_container() -> void:
 	if size.x <= 0.0 or size.y <= 0.0:
 		size = tutorial.custom_minimum_size
 	if size.x <= 0.0 or size.y <= 0.0:
-		size = TUTORIAL_PANEL_COLLAPSED_SIZE if _tutorial_collapsed else TUTORIAL_PANEL_EXPANDED_SIZE
+		size = _tutorial_collapsed_size if _tutorial_collapsed else _tutorial_expanded_size
 	var margin := 12.0
 	if _tutorial_collapsed:
 		tutorial.global_position = Vector2(
@@ -697,11 +981,17 @@ func _refresh_tutorial_panel_state() -> void:
 	if not _tutorial_last_visible:
 		_tutorial_last_visible = true
 		_tutorial_last_text = current_text
+		_update_tutorial_expanded_size_for_text()
+		if not _tutorial_collapsed:
+			_apply_tutorial_panel_state()
 		return
 	if current_text != _tutorial_last_text:
 		_tutorial_last_text = current_text
+		_update_tutorial_expanded_size_for_text()
 		if _tutorial_collapsed:
 			_set_tutorial_collapsed(false)
+		else:
+			_apply_tutorial_panel_state()
 
 
 func _on_tutorial_toggle_pressed() -> void:
@@ -832,22 +1122,35 @@ func _ensure_back_confirm_dialog() -> void:
 	_back_confirm_dialog.name = "BackConfirmDialog"
 	_back_confirm_dialog.title = "Quit game?"
 	_back_confirm_dialog.dialog_text = "Are you sure you want to quit?"
+	_back_confirm_dialog.add_theme_stylebox_override("panel", _make_quit_dialog_panel_style())
+	_back_confirm_dialog.add_theme_color_override("title_color", Color(1, 1, 1, 0.98))
 	if _back_confirm_dialog.has_method("get_label"):
 		var dialog_label = _back_confirm_dialog.call("get_label")
 		if dialog_label is Label:
 			var label_node: Label = dialog_label
 			label_node.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			label_node.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			label_node.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			label_node.add_theme_font_size_override("font_size", 22 if _is_compact_ui() else 19)
+			label_node.add_theme_color_override("font_color", Color(1, 1, 1, 0.97))
 	var ok_button = _back_confirm_dialog.get_ok_button()
 	if is_instance_valid(ok_button):
 		ok_button.text = "Yes"
 		ok_button.custom_minimum_size = Vector2(140, 56)
 		ok_button.add_theme_font_size_override("font_size", 18)
+		ok_button.add_theme_color_override("font_color", Color(1, 1, 1, 0.98))
+		ok_button.add_theme_stylebox_override("normal", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG))
+		ok_button.add_theme_stylebox_override("hover", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG_HOVER))
+		ok_button.add_theme_stylebox_override("pressed", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG_PRESSED))
 	var cancel_button = _back_confirm_dialog.get_cancel_button()
 	if is_instance_valid(cancel_button):
 		cancel_button.text = "No"
 		cancel_button.custom_minimum_size = Vector2(140, 56)
 		cancel_button.add_theme_font_size_override("font_size", 18)
+		cancel_button.add_theme_color_override("font_color", Color(1, 1, 1, 0.98))
+		cancel_button.add_theme_stylebox_override("normal", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG_CANCEL))
+		cancel_button.add_theme_stylebox_override("hover", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG_CANCEL_HOVER))
+		cancel_button.add_theme_stylebox_override("pressed", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG_CANCEL_PRESSED))
 	_back_confirm_dialog.confirmed.connect(_on_back_confirmed)
 	_back_confirm_dialog.canceled.connect(_on_back_confirm_canceled)
 	add_child(_back_confirm_dialog)
@@ -855,7 +1158,7 @@ func _ensure_back_confirm_dialog() -> void:
 
 func set_pause_state(paused: bool) -> void:
 	get_tree().paused = paused
-	var pause_button: Button = get_node_or_null("MarginCMarginContainer2ontainer/HBoxContainer/PauseButton")
+	var pause_button: Button = _get_pause_button()
 	if is_instance_valid(pause_button):
 		pause_button.text = "Start" if paused else "Pause"
 
@@ -864,7 +1167,11 @@ func show_back_to_menu_confirm() -> void:
 	set_pause_state(true)
 	_ensure_back_confirm_dialog()
 	if is_instance_valid(_back_confirm_dialog):
-		_back_confirm_dialog.popup_centered(Vector2i(420, 180))
+		var compact = _is_compact_ui()
+		var popup_size = Vector2i(460, 200)
+		if compact:
+			popup_size = Vector2i(520, 240)
+		_back_confirm_dialog.popup_centered(popup_size)
 
 
 func hide_back_to_menu_confirm() -> void:

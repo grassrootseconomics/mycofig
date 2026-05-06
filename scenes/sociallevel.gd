@@ -422,7 +422,54 @@ func _on_agent_trade(path_dict) -> void:
 	call_deferred("_spawn_trade", path_dict)
 
 
+func _build_trade_visual_key(path_dict: Dictionary) -> String:
+	var from_agent = path_dict.get("from_agent", null)
+	var to_agent = path_dict.get("to_agent", null)
+	var asset_key = str(path_dict.get("trade_asset", ""))
+	if asset_key == "":
+		return ""
+	if not is_instance_valid(from_agent) or not is_instance_valid(to_agent):
+		return ""
+	return str(int(from_agent.get_instance_id()), "->", int(to_agent.get_instance_id()), ":", asset_key)
+
+
+func _get_trade_visual_packets_for_key(visual_key: String) -> Array:
+	var packets: Array = []
+	if visual_key == "":
+		return packets
+	for trade in $Trades.get_children():
+		if not is_instance_valid(trade):
+			continue
+		var key_value := ""
+		if trade.has_method("get_trade_visual_key"):
+			key_value = str(trade.call("get_trade_visual_key"))
+		if key_value != visual_key:
+			continue
+		packets.append(trade)
+	return packets
+
+
 func _spawn_trade(path_dict) -> void:
+	if typeof(path_dict) != TYPE_DICTIONARY:
+		return
+	var trade_dict: Dictionary = path_dict.duplicate()
+	var trade_amount = maxi(int(trade_dict.get("trade_amount", 1)), 1)
+	trade_dict["trade_amount"] = trade_amount
+	if Global.trade_visual_hybrid_enabled:
+		var visual_key = _build_trade_visual_key(trade_dict)
+		if visual_key != "":
+			trade_dict["visual_key"] = visual_key
+			var per_link_cap = Global.get_trade_visual_link_packet_cap()
+			var packets_for_key = _get_trade_visual_packets_for_key(visual_key)
+			if packets_for_key.size() >= per_link_cap:
+				for packet in packets_for_key:
+					if not is_instance_valid(packet):
+						continue
+					if not packet.has_method("accumulate_trade_amount"):
+						continue
+					var aggregated = bool(packet.call("accumulate_trade_amount", trade_amount))
+					if aggregated:
+						return
 	var trade = null
 	if not _trade_pool.is_empty():
 		trade = _trade_pool.pop_back()
@@ -431,9 +478,9 @@ func _spawn_trade(path_dict) -> void:
 	if trade.has_method("set_pool_owner"):
 		trade.set_pool_owner(self)
 	if trade.has_method("activate_trade"):
-		trade.activate_trade(path_dict)
+		trade.activate_trade(trade_dict)
 	else:
-		trade.set_variables(path_dict)
+		trade.set_variables(trade_dict)
 	$Trades.add_child(trade)
 	
 func update_bars(path_dict)  -> void:

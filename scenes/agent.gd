@@ -394,15 +394,18 @@ func _is_tree_harvest_hotspot_hit(world_pos: Vector2) -> bool:
 
 
 func _is_press_hit(world_pos: Vector2) -> bool:
-	if _is_tree_harvest_hotspot_hit(world_pos):
-		return true
+	if _is_tree_lifecycle_type():
+		# Mature trees are intentionally strict on touch:
+		# only the acorn hotspot should trigger harvest interactions.
+		if can_drag_for_inventory_harvest():
+			return _is_tree_harvest_hotspot_hit(world_pos)
 	if is_instance_valid(sprite) and sprite.has_method("get_rect"):
 		if sprite.get_rect().has_point(to_local(world_pos)):
 			return true
 	if not Global.is_mobile_platform:
 		return false
-	# Keep mature-tree harvest strict to acorn hotspot even on touch devices.
-	if _is_tree_lifecycle_type() and can_drag_for_inventory_harvest():
+	# Trees should avoid broad tile fallback on touch to prevent overlap stealing.
+	if _is_tree_lifecycle_type():
 		return false
 	var world = _get_world_foundation_node()
 	var level_root = _get_level_root()

@@ -103,8 +103,10 @@ func _advance_drop(delta: float) -> void:
 
 func _get_axis_step(delta: float) -> float:
 	var safe_delta = maxf(delta, 0.0)
-	# Normalize legacy frame-step motion to a fixed reference FPS.
-	return maxf(float(Global.move_rate) * TRADE_REFERENCE_FPS * safe_delta, 0.0)
+	# Keep axis motion frame-rate independent while honoring the global speed cap.
+	var normalized_axis_step = maxf(float(Global.move_rate) * TRADE_REFERENCE_FPS * safe_delta, 0.0)
+	var movement_cap_step = maxf(float(Global.movement_speed) * safe_delta, 0.0)
+	return minf(normalized_axis_step, movement_cap_step)
 
 
 func _step_axis_toward(current: float, target: float, max_step: float) -> float:

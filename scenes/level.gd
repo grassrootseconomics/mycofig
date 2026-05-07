@@ -869,9 +869,9 @@ func _story_get_base_villager_layout() -> Array:
 	var village_rect = _get_runtime_village_rect(world)
 	var top_people_row_y = village_rect.position.y + 5
 	return [
-		{"role": "vendor", "tile": Vector2i(village_rect.position.x + 5, top_people_row_y)},
-		{"role": "cook", "tile": Vector2i(village_rect.position.x + 6, top_people_row_y)},
-		{"role": "farmer", "tile": Vector2i(village_rect.position.x + 7, top_people_row_y)}
+		{"role": "farmer", "tile": Vector2i(village_rect.position.x + 6, top_people_row_y)},
+		{"role": "vendor", "tile": Vector2i(village_rect.position.x + 7, top_people_row_y)},
+		{"role": "cook", "tile": Vector2i(village_rect.position.x + 8, top_people_row_y)}
 	]
 
 

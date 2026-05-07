@@ -12,6 +12,7 @@ const CARRY_TEX_BEAN := preload("res://graphics/bean.png")
 const CARRY_TEX_SQUASH := preload("res://graphics/squash_32.png")
 const CARRY_TEX_MAIZE := preload("res://graphics/maize_32.png")
 const CARRY_TEX_TREE := preload("res://graphics/acorn_32.png")
+const BANK_LIQUIDITY_SEED_AMOUNT := 1
 
 var is_trading = false
 var is_raining = true
@@ -421,6 +422,62 @@ func _can_bank_offer_r_to_target(target: Node, offered_res: String, requested_re
 	return float(target.assets[requested_res]) - float(target.needs[requested_res]) >= 1.0
 
 
+func _is_bank_liquidity_seed_target(target: Node) -> bool:
+	if str(type) != "bank":
+		return false
+	if not is_instance_valid(target):
+		return false
+	if bool(target.get("dead")):
+		return false
+	if str(target.get("type")) != "myco":
+		return false
+	if not bool(target.get_meta("story_village_actor", false)):
+		return false
+	var story_kind = str(target.get_meta("story_kind", ""))
+	if not story_kind.begins_with("basket_"):
+		return false
+	if target.assets.get("R") == null or target.needs.get("R") == null:
+		return false
+	return float(target.assets["R"]) < float(target.needs["R"])
+
+
+func _try_seed_r_to_colored_basket(debug_mode: bool = false) -> bool:
+	if str(type) != "bank":
+		return false
+	if not logistics_ready or not is_raining:
+		return false
+	if assets.get("R") == null or float(assets["R"]) < float(BANK_LIQUIDITY_SEED_AMOUNT):
+		return false
+	trade_buddies.shuffle()
+	for child in trade_buddies:
+		if not _is_bank_liquidity_seed_target(child):
+			continue
+		var target_r = float(child.assets["R"])
+		var target_r_need = float(child.needs["R"])
+		if target_r_need <= 0.0 or target_r >= target_r_need:
+			continue
+		var path_dict = {
+			"from_agent": self,
+			"to_agent": child,
+			"trade_path": [self, child],
+			"trade_asset": "R",
+			"trade_amount": BANK_LIQUIDITY_SEED_AMOUNT,
+			"trade_type": "send",
+			"return_res": null,
+			"return_amt": null,
+			"bank_liquidity_seed": true
+		}
+		if debug_mode:
+			print("bank liquidity seed: R -> ", child.name)
+		if _emit_trade_with_budget(path_dict):
+			assets["R"] -= BANK_LIQUIDITY_SEED_AMOUNT
+			bars["R"].value = assets["R"]
+			logistics_ready = false
+			is_trading = true
+			return true
+	return false
+
+
 func _try_send_liquidity_swap(offered_res: String, requested_res: String, debug_mode: bool = false) -> bool:
 	if offered_res == "" or requested_res == "":
 		return false
@@ -511,6 +568,9 @@ func logistics():
 	var high_amt_needed = 0
 	
 	var debug_mode = false
+	
+	if str(type) == "bank" and _try_seed_r_to_colored_basket(debug_mode):
+		return
 	
 	if _should_use_villager_r_liquidity_cycle():
 		_run_villager_r_liquidity_cycle(debug_mode)

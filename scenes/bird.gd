@@ -62,6 +62,33 @@ func _assign_reserved_harvest_target() -> bool:
 	return true
 
 
+func _try_switch_to_challenge_acorn() -> bool:
+	if caught:
+		return false
+	if quarry_found and is_instance_valid(the_quarry) and str(the_quarry.get("type")) == "tree":
+		return false
+	var level_root = _get_level_root()
+	if not is_instance_valid(level_root):
+		return false
+	if not level_root.has_method("bird_try_assign_acorn_target"):
+		return false
+	var acorn_target = level_root.call("bird_try_assign_acorn_target", self)
+	if not is_instance_valid(acorn_target):
+		return false
+	if not _is_target_forward(acorn_target):
+		if level_root.has_method("bird_release_harvest_target"):
+			level_root.call("bird_release_harvest_target", self, acorn_target)
+		return false
+	var previous_target = the_quarry
+	if is_instance_valid(previous_target) and previous_target != acorn_target:
+		_release_reserved_harvest_target(previous_target)
+	_reserved_harvest_target = acorn_target
+	quarry_found = true
+	the_quarry = acorn_target
+	quarry_type = str(acorn_target.get("type"))
+	return true
+
+
 func _release_reserved_harvest_target(release_target: Node = null) -> void:
 	var target_to_release = release_target
 	if not is_instance_valid(target_to_release):
@@ -238,6 +265,10 @@ func _physics_process(delta: float) -> void:
 
 	if not is_instance_valid(the_quarry) or bool(the_quarry.get("dead")):
 		_clear_quarry_target()
+
+	if str(Global.mode) == "challenge" and not caught and quarry_found and is_instance_valid(the_quarry) and _retarget_retry_cooldown <= 0.0:
+		_try_switch_to_challenge_acorn()
+		_retarget_retry_cooldown = RETARGET_RETRY_INTERVAL
 
 	if not caught and not quarry_found and _retarget_retry_cooldown <= 0.0:
 		if not _assign_reserved_harvest_target():

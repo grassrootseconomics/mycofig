@@ -17,6 +17,7 @@ var _agents_root: Node = null
 var _dragging := false
 var _touch_drag_id := -1
 var _input_enabled := true
+var _input_suppressed_until_msec := 0
 var _village_marker_world := Vector2.ZERO
 var _village_marker_visible := false
 var _redraw_elapsed := 0.0
@@ -46,6 +47,24 @@ func set_village_marker(world_pos: Vector2, visible: bool) -> void:
 	_request_redraw()
 
 
+func get_village_marker_screen_position() -> Dictionary:
+	if not _village_marker_visible:
+		return {
+			"ok": false,
+			"pos": Vector2.ZERO
+		}
+	var marker = _world_to_map(_village_marker_world)
+	if marker == Vector2.INF:
+		return {
+			"ok": false,
+			"pos": Vector2.ZERO
+		}
+	return {
+		"ok": true,
+		"pos": get_global_rect().position + marker + Vector2(0, -8)
+	}
+
+
 func set_input_enabled(enabled: bool) -> void:
 	if _input_enabled == enabled:
 		return
@@ -55,10 +74,19 @@ func set_input_enabled(enabled: bool) -> void:
 	_request_redraw()
 
 
+func suppress_input(duration_sec: float = 0.25) -> void:
+	_input_suppressed_until_msec = maxi(_input_suppressed_until_msec, Time.get_ticks_msec() + int(duration_sec * 1000.0))
+	_cancel_drag_state()
+
+
 func _cancel_drag_state() -> void:
 	_dragging = false
 	_touch_drag_id = -1
 	_request_redraw()
+
+
+func _is_input_suppressed() -> bool:
+	return Time.get_ticks_msec() < _input_suppressed_until_msec
 
 
 func _clear_mobile_selection_for_pan() -> void:
@@ -112,7 +140,8 @@ func _process(delta: float) -> void:
 
 
 func _gui_input(event: InputEvent) -> void:
-	if not _input_enabled:
+	if not _input_enabled or _is_input_suppressed():
+		accept_event()
 		return
 	if event is InputEventScreenTouch:
 		if event.pressed:

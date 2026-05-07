@@ -1,5 +1,6 @@
 extends CanvasLayer
 const MiniMapPanelRef = preload("res://scenes/minimap_panel.gd")
+const LevelHelpersRef = preload("res://scenes/level_helpers.gd")
 var time_elapsed := 0
 
 #signal sliderChanged(info_dict)
@@ -54,6 +55,10 @@ const TUTORIAL_PANEL_STORY_TEXT_VERTICAL_PADDING := 96.0
 const TUTORIAL_PANEL_MAX_HEIGHT_FRACTION := 0.62
 const STORY_TUTORIAL_PANEL_EXPANDED_SIZE := Vector2(520, 252)
 const STORY_TUTORIAL_CONTINUE_BUTTON_SIZE := Vector2(132, 40)
+const STORY_TUTORIAL_CHALLENGE_BUTTON_SIZE := Vector2(220, 42)
+const STORY_TUTORIAL_CONTINUE_TEXT := "Let's go!"
+const STORY_TUTORIAL_CHALLENGE_TEXT := "Give me a Challenge!"
+const CHALLENGE_LOSS_CONTINUE_TEXT := "View my score"
 const STORY_GUIDE_ARROW_COLOR := Color(1.0, 0.74, 0.16, 0.96)
 const STORY_GUIDE_ARROW_SHADOW_COLOR := Color(0.12, 0.05, 0.02, 0.42)
 const STORY_GUIDE_ARROW_WIDTH := 7.0
@@ -105,13 +110,21 @@ var _pointer_is_down := false
 var _pointer_is_touch := false
 var _pointer_drag_active := false
 var _pointer_press_pos := Vector2.ZERO
+var _pointer_press_tile_ok := false
+var _pointer_press_tile_pos := Vector2.ZERO
 var _pointer_press_item := ""
 var _pointer_press_selection_changed := false
 var _last_pointer_pos := Vector2.ZERO
+var _failed_placement_item := ""
+var _failed_placement_coord := Vector2i(-1, -1)
+var _failed_placement_count := 0
 var _story_phase1_sparkle_active := false
 var _story_phase5_basket_sparkle_active := false
+var _story_phase3_bar_demo_active := false
 var _story_phase1_pending_types: Dictionary = {}
+var _story_inventory_sparkle_ignore_counts := false
 var _story_phase1_sparkle_time := 0.0
+var _challenge_loss_instruction_active := false
 var _inventory_slot_size := INVENTORY_SLOT_SIZE_DEFAULT
 var _inventory_icon_pad_default := INVENTORY_ICON_PAD_DEFAULT
 var _inventory_icon_pad_basket := INVENTORY_ICON_PAD_BASKET
@@ -603,7 +616,7 @@ func _refresh_inventory_phase1_sparkle_visuals() -> void:
 		if item_name == "":
 			continue
 		var item_count = int(Global.inventory.get(item_name, 0))
-		if item_count <= 0:
+		if item_count <= 0 and not _story_inventory_sparkle_ignore_counts:
 			continue
 		var show_phase1 = _story_phase1_sparkle_active and bool(_story_phase1_pending_types.get(item_name, false))
 		var show_phase5_basket = _story_phase5_basket_sparkle_active and item_name == "basket"
@@ -626,14 +639,16 @@ func _update_inventory_phase1_sparkle_animation(delta: float) -> void:
 		ring.modulate = Color(1, 1, 1, pulse)
 
 
-func set_story_inventory_sparkle_targets(phase1_active: bool, phase1_pending_types: Dictionary, phase5_basket_active: bool) -> void:
+func set_story_inventory_sparkle_targets(phase1_active: bool, phase1_pending_types: Dictionary, phase5_basket_active: bool, ignore_counts: bool = false) -> void:
 	_story_phase1_sparkle_active = phase1_active
 	_story_phase5_basket_sparkle_active = phase5_basket_active
+	_story_inventory_sparkle_ignore_counts = ignore_counts
 	_story_phase1_pending_types.clear()
 	for key in phase1_pending_types.keys():
 		_story_phase1_pending_types[str(key)] = bool(phase1_pending_types[key])
 	if not _story_phase1_sparkle_active and not _story_phase5_basket_sparkle_active:
 		_story_phase1_sparkle_time = 0.0
+		_story_inventory_sparkle_ignore_counts = false
 	_refresh_inventory_phase1_sparkle_visuals()
 
 
@@ -762,7 +777,10 @@ func show_story_instruction(text_value: String, phase_id: int = 0) -> void:
 	_cache_layout_nodes()
 	_ensure_tutorial_panel_toggle()
 	_ensure_tutorial_continue_button()
+	_challenge_loss_instruction_active = false
 	_story_instruction_phase_id = phase_id
+	_sync_story_continue_button_text()
+	_apply_responsive_layout()
 	if is_instance_valid(_tutorial_label):
 		_tutorial_label.text = text_value
 	if is_instance_valid(_tutorial_panel):
@@ -770,6 +788,28 @@ func show_story_instruction(text_value: String, phase_id: int = 0) -> void:
 	_tutorial_collapsed = false
 	_tutorial_last_visible = false
 	_tutorial_last_text = text_value
+	_sync_story_instruction_bar_demo_state()
+	_apply_tutorial_panel_state()
+	_update_story_instruction_arrows()
+	set_pause_state(true)
+
+
+func show_challenge_loss_instruction(text_value: String) -> void:
+	_cache_layout_nodes()
+	_ensure_tutorial_panel_toggle()
+	_ensure_tutorial_continue_button()
+	_challenge_loss_instruction_active = true
+	_story_instruction_phase_id = 0
+	_sync_story_continue_button_text()
+	_apply_responsive_layout()
+	if is_instance_valid(_tutorial_label):
+		_tutorial_label.text = text_value
+	if is_instance_valid(_tutorial_panel):
+		_tutorial_panel.visible = true
+	_tutorial_collapsed = false
+	_tutorial_last_visible = false
+	_tutorial_last_text = text_value
+	_sync_story_instruction_bar_demo_state()
 	_apply_tutorial_panel_state()
 	_update_story_instruction_arrows()
 	set_pause_state(true)
@@ -924,12 +964,120 @@ func _get_phase1_inventory_arrow_target() -> Vector2:
 	return Vector2(80, 120)
 
 
-func _should_show_story_phase1_arrows() -> bool:
-	return _story_instruction_phase_id == 1 and _is_story_instruction_mode() and is_instance_valid(_tutorial_panel) and _tutorial_panel.visible and not _tutorial_collapsed
+func _get_inventory_item_arrow_target(agent_name: String, gap_px: float = 2.0) -> Vector2:
+	for icon in _slot_icons:
+		if not is_instance_valid(icon):
+			continue
+		if not icon.visible:
+			continue
+		if not icon.has_meta("item_name"):
+			continue
+		if str(icon.get_meta("item_name")) != agent_name:
+			continue
+		var icon_rect = icon.get_global_rect()
+		return Vector2(icon_rect.position.x + icon_rect.size.x * 0.5, icon_rect.position.y - gap_px)
+	return get_inventory_icon_center(agent_name)
+
+
+func _should_show_story_instruction_arrows() -> bool:
+	return (_story_instruction_phase_id == 1 or _story_instruction_phase_id == 2 or _story_instruction_phase_id == 3 or _story_instruction_phase_id == 5) and _is_story_instruction_mode() and is_instance_valid(_tutorial_panel) and _tutorial_panel.visible and not _tutorial_collapsed
+
+
+func _get_phase2_harvest_arrow_target() -> Dictionary:
+	var agents_root = _get_agents_root()
+	var screen_rect = get_viewport().get_visible_rect()
+	if is_instance_valid(agents_root):
+		for agent in agents_root.get_children():
+			if not is_instance_valid(agent):
+				continue
+			var ring = agent.get_node_or_null("StoryPhase2HarvestRing") as Line2D
+			if not is_instance_valid(ring) or not ring.visible:
+				continue
+			var screen_pos = _world_to_screen(agent.global_position)
+			if not screen_rect.has_point(screen_pos):
+				continue
+			return {
+				"ok": true,
+				"pos": screen_pos + Vector2(0, -18)
+			}
+	return {
+		"ok": false,
+		"pos": Vector2.ZERO
+	}
+
+
+func _get_phase3_minimap_arrow_target() -> Dictionary:
+	if is_instance_valid(minimap_panel) and minimap_panel.has_method("get_village_marker_screen_position"):
+		var result = minimap_panel.call("get_village_marker_screen_position")
+		if typeof(result) == TYPE_DICTIONARY:
+			return result
+	return {
+		"ok": false,
+		"pos": Vector2.ZERO
+	}
+
+
+func _get_phase3_resource_bar_arrow_target() -> Dictionary:
+	var agents_root = _get_agents_root()
+	var screen_rect = get_viewport().get_visible_rect()
+	if not is_instance_valid(agents_root):
+		return {
+			"ok": false,
+			"pos": Vector2.ZERO
+		}
+	for agent in agents_root.get_children():
+		if not is_instance_valid(agent):
+			continue
+		var agent_type = str(agent.get("type"))
+		var is_plant_bar_target = ["bean", "squash", "maize", "tree", "myco"].has(agent_type)
+		if not is_plant_bar_target:
+			continue
+		var screen_pos = _world_to_screen(agent.global_position)
+		if not screen_rect.grow(48.0).has_point(screen_pos):
+			continue
+		var canvas = agent.get("bar_canvas")
+		if not is_instance_valid(canvas) or not canvas.visible:
+			continue
+		var bars_variant = agent.get("bars")
+		if typeof(bars_variant) != TYPE_DICTIONARY:
+			continue
+		var bars: Dictionary = bars_variant
+		for resource in ["N", "P", "K", "R"]:
+			var bar = bars.get(resource, null)
+			var bar_control: Control = bar as Control
+			if is_instance_valid(bar_control) and bar_control.visible:
+				return {
+					"ok": true,
+					"pos": bar_control.get_global_rect().get_center()
+				}
+	return {
+		"ok": false,
+		"pos": Vector2.ZERO
+	}
+
+
+func _get_phase5_nontrading_villagers_arrow_target() -> Dictionary:
+	var level_root = get_parent()
+	if not is_instance_valid(level_root) or not level_root.has_method("get_story_phase5_nontrading_lower_villagers_center_world"):
+		return {
+			"ok": false,
+			"pos": Vector2.ZERO
+		}
+	var result = level_root.call("get_story_phase5_nontrading_lower_villagers_center_world")
+	if typeof(result) != TYPE_DICTIONARY or not bool(result.get("ok", false)):
+		return {
+			"ok": false,
+			"pos": Vector2.ZERO
+		}
+	var screen_pos = _world_to_screen(result.get("pos", Vector2.ZERO))
+	return {
+		"ok": true,
+		"pos": screen_pos
+	}
 
 
 func _update_story_instruction_arrows() -> void:
-	if not _should_show_story_phase1_arrows():
+	if not _should_show_story_instruction_arrows():
 		if is_instance_valid(_story_phase1_arrow_layer):
 			_set_all_story_arrows_visible(false)
 		return
@@ -939,10 +1087,55 @@ func _update_story_instruction_arrows() -> void:
 		return
 	var panel_rect = _tutorial_panel.get_global_rect()
 	var label_rect = _tutorial_label.get_global_rect() if is_instance_valid(_tutorial_label) else panel_rect
+	if _story_instruction_phase_id == 2:
+		var target_result = _get_phase2_harvest_arrow_target()
+		if not bool(target_result.get("ok", false)):
+			_set_all_story_arrows_visible(false)
+			return
+		var harvest_target = target_result.get("pos", Vector2.ZERO)
+		var harvest_start = Vector2(label_rect.position.x + label_rect.size.x + 10.0, label_rect.position.y + label_rect.size.y * 0.34)
+		var harvest_control = (harvest_start + harvest_target) * 0.5 + Vector2(116.0, 74.0)
+		_set_story_arrow_shape(0, harvest_start, harvest_control, harvest_target)
+		_set_story_arrow_visible(1, false)
+		return
+	if _story_instruction_phase_id == 3:
+		var minimap_result = _get_phase3_minimap_arrow_target()
+		if bool(minimap_result.get("ok", false)):
+			var minimap_target = minimap_result.get("pos", Vector2.ZERO)
+			var minimap_dir = (minimap_target - label_rect.get_center()).normalized()
+			var minimap_tip = minimap_target - minimap_dir * 28.0
+			var minimap_start = Vector2(label_rect.position.x + label_rect.size.x + 14.0, label_rect.position.y + label_rect.size.y * 0.36)
+			var minimap_control = (minimap_start + minimap_tip) * 0.5 + Vector2(108.0, 82.0)
+			_set_story_arrow_shape(0, minimap_start, minimap_control, minimap_tip)
+		else:
+			_set_story_arrow_visible(0, false)
+		var bar_result = _get_phase3_resource_bar_arrow_target()
+		if bool(bar_result.get("ok", false)):
+			var bar_target = bar_result.get("pos", Vector2.ZERO)
+			var bar_start = Vector2(label_rect.position.x - 14.0, label_rect.position.y + label_rect.size.y * 0.62)
+			var bar_control = (bar_start + bar_target) * 0.5 + Vector2(-96.0, -58.0)
+			_set_story_arrow_shape(1, bar_start, bar_control, bar_target)
+		else:
+			_set_story_arrow_visible(1, false)
+		return
+	if _story_instruction_phase_id == 5:
+		var basket_target = _get_inventory_item_arrow_target("basket", 18.0)
+		var basket_start = Vector2(label_rect.position.x + label_rect.size.x + 12.0, label_rect.position.y + label_rect.size.y * 0.55)
+		var basket_control = (basket_start + basket_target) * 0.5 + Vector2(96.0, 72.0)
+		_set_story_arrow_shape(0, basket_start, basket_control, basket_target)
+		var villager_result = _get_phase5_nontrading_villagers_arrow_target()
+		if bool(villager_result.get("ok", false)):
+			var villager_target = villager_result.get("pos", Vector2.ZERO)
+			var villager_start = Vector2(label_rect.position.x + label_rect.size.x * 0.54, label_rect.position.y + label_rect.size.y + 10.0)
+			var villager_control = (villager_start + villager_target) * 0.5 + Vector2(-86.0, 92.0)
+			_set_story_arrow_shape(1, villager_start, villager_control, villager_target)
+		else:
+			_set_story_arrow_visible(1, false)
+		return
 	var garden_target = _get_phase1_garden_arrow_target()
 	var inventory_target = _get_phase1_inventory_arrow_target()
 
-	var garden_start = Vector2(label_rect.position.x + label_rect.size.x - 12.0, label_rect.position.y + label_rect.size.y * 0.28)
+	var garden_start = Vector2(label_rect.position.x + label_rect.size.x + 10.0, label_rect.position.y + label_rect.size.y * 0.24)
 	var garden_control = (garden_start + garden_target) * 0.5 + Vector2(112.0, 74.0)
 	_set_story_arrow_shape(0, garden_start, garden_control, garden_target)
 
@@ -1056,7 +1249,7 @@ func _update_tutorial_expanded_size_for_text() -> void:
 	var wrapped_lines = _estimate_wrapped_line_count(text_value, approx_chars_per_line)
 	var effective_lines = maxi(maxi(explicit_lines, measured_lines), wrapped_lines)
 	var text_height = float(effective_lines) * line_height
-	var vertical_padding = TUTORIAL_PANEL_STORY_TEXT_VERTICAL_PADDING if _is_story_instruction_mode() else TUTORIAL_PANEL_TEXT_VERTICAL_PADDING
+	var vertical_padding = TUTORIAL_PANEL_STORY_TEXT_VERTICAL_PADDING if _is_guidance_instruction_mode() else TUTORIAL_PANEL_TEXT_VERTICAL_PADDING
 	var target_height = maxf(_tutorial_expanded_size_base.y, text_height + vertical_padding)
 	var max_height = maxf(get_viewport().get_visible_rect().size.y * TUTORIAL_PANEL_MAX_HEIGHT_FRACTION, _tutorial_expanded_size_base.y)
 	_tutorial_expanded_size = Vector2(_tutorial_expanded_size_base.x, clampf(target_height, _tutorial_expanded_size_base.y, max_height))
@@ -1076,12 +1269,16 @@ func _is_story_instruction_mode() -> bool:
 	return str(Global.mode) == "story"
 
 
+func _is_guidance_instruction_mode() -> bool:
+	return _is_story_instruction_mode() or _challenge_loss_instruction_active
+
+
 func _apply_responsive_layout() -> void:
 	var view_rect = get_viewport().get_visible_rect()
 	var view_size = view_rect.size
 	var compact = _is_compact_ui()
 	var tiny = _is_tiny_ui()
-	var story_instructions = _is_story_instruction_mode()
+	var story_instructions = _is_guidance_instruction_mode()
 	var inventory: MarginContainer = _inventory_panel
 	if is_instance_valid(inventory):
 		var margin_px = 10 if compact else 14
@@ -1141,6 +1338,14 @@ func _apply_responsive_layout() -> void:
 		var continue_size = Vector2(150, 44) if compact else STORY_TUTORIAL_CONTINUE_BUTTON_SIZE
 		if tiny:
 			continue_size = Vector2(154, 46)
+		if _story_instruction_phase_id == 6:
+			continue_size = Vector2(226, 48) if compact else STORY_TUTORIAL_CHALLENGE_BUTTON_SIZE
+			if tiny:
+				continue_size = Vector2(232, 50)
+		if _challenge_loss_instruction_active:
+			continue_size = Vector2(174, 46) if compact else Vector2(164, 42)
+			if tiny:
+				continue_size = Vector2(188, 48)
 		_tutorial_continue_button.custom_minimum_size = continue_size
 		_tutorial_continue_button.size = continue_size
 		_tutorial_continue_button.anchor_left = 0.5
@@ -1195,6 +1400,7 @@ func refund_inventory_item(agent_name: String, amount: int = 1) -> void:
 func _process(delta: float) -> void:
 	_update_minimap_input_lock()
 	_update_inventory_phase1_sparkle_animation(delta)
+	_update_selected_inventory_hover_hint()
 	_refresh_tutorial_panel_state()
 	_update_layout_pass(delta)
 	_update_story_instruction_arrows()
@@ -1210,6 +1416,35 @@ func _update_minimap_input_lock() -> void:
 	_minimap_drag_locked = should_lock
 	if minimap_panel.has_method("set_input_enabled"):
 		minimap_panel.call("set_input_enabled", not should_lock)
+
+
+func _refresh_agent_bar_visibility() -> void:
+	var agents_root = _get_agents_root()
+	if is_instance_valid(agents_root):
+		LevelHelpersRef.refresh_agent_bar_visibility(agents_root)
+
+
+func _sync_story_instruction_bar_demo_state() -> void:
+	var should_show = _story_instruction_phase_id == 3 and _is_story_instruction_mode() and is_instance_valid(_tutorial_panel) and _tutorial_panel.visible and not _tutorial_collapsed
+	if should_show == _story_phase3_bar_demo_active:
+		return
+	_story_phase3_bar_demo_active = should_show
+	Global.story_force_visible_plant_bars = should_show
+	if not should_show:
+		var agents_root = _get_agents_root()
+		if is_instance_valid(agents_root):
+			LevelHelpersRef.clear_selection_and_bars(get_parent(), agents_root)
+			return
+		Global.bars_on = false
+	_refresh_agent_bar_visibility()
+
+
+func _suppress_minimap_input_handoff() -> void:
+	if is_instance_valid(minimap_panel) and minimap_panel.has_method("suppress_input"):
+		minimap_panel.call("suppress_input", 0.30)
+	var world = _get_world_foundation()
+	if is_instance_valid(world) and world.has_method("suppress_camera_pan_input"):
+		world.call("suppress_camera_pan_input", 0.30)
 
 
 func _ensure_tutorial_panel_toggle() -> void:
@@ -1241,7 +1476,7 @@ func _ensure_tutorial_continue_button() -> void:
 	if not is_instance_valid(_tutorial_continue_button):
 		_tutorial_continue_button = Button.new()
 		_tutorial_continue_button.name = "ContinueButton"
-		_tutorial_continue_button.text = "Let's go!"
+		_tutorial_continue_button.text = STORY_TUTORIAL_CONTINUE_TEXT
 		_tutorial_continue_button.focus_mode = Control.FOCUS_NONE
 		_tutorial_continue_button.process_mode = Node.PROCESS_MODE_ALWAYS
 		_tutorial_continue_button.z_index = 40
@@ -1256,6 +1491,15 @@ func _ensure_tutorial_continue_button() -> void:
 	_tutorial_continue_button.add_theme_stylebox_override("pressed", _make_story_instruction_button_style(Color(0.12, 0.33, 0.15, 1.0)))
 	_tutorial_continue_button.visible = false
 	_request_layout_update()
+
+
+func _sync_story_continue_button_text() -> void:
+	if not is_instance_valid(_tutorial_continue_button):
+		return
+	if _challenge_loss_instruction_active:
+		_tutorial_continue_button.text = CHALLENGE_LOSS_CONTINUE_TEXT
+		return
+	_tutorial_continue_button.text = STORY_TUTORIAL_CHALLENGE_TEXT if _story_instruction_phase_id == 6 else STORY_TUTORIAL_CONTINUE_TEXT
 
 
 func _set_tutorial_collapsed(collapsed: bool) -> void:
@@ -1277,7 +1521,8 @@ func _apply_tutorial_panel_state() -> void:
 	if is_instance_valid(helper_panel):
 		helper_panel.visible = content_visible
 	if is_instance_valid(_tutorial_continue_button):
-		_tutorial_continue_button.visible = content_visible and _is_story_instruction_mode()
+		_sync_story_continue_button_text()
+		_tutorial_continue_button.visible = content_visible and _is_guidance_instruction_mode()
 	if not _tutorial_collapsed:
 		_update_tutorial_expanded_size_for_text()
 	var target_size = _tutorial_collapsed_size if _tutorial_collapsed else _tutorial_expanded_size
@@ -1288,6 +1533,7 @@ func _apply_tutorial_panel_state() -> void:
 		_tutorial_toggle_button.visible = tutorial.visible
 	_request_layout_update()
 	_flush_layout_updates(true)
+	_sync_story_instruction_bar_demo_state()
 	_update_story_instruction_arrows()
 
 
@@ -1384,6 +1630,7 @@ func _refresh_tutorial_panel_state() -> void:
 		return
 	if not tutorial.visible:
 		_tutorial_last_visible = false
+		_sync_story_instruction_bar_demo_state()
 		return
 	var label: Label = _tutorial_label
 	var current_text := ""
@@ -1406,16 +1653,32 @@ func _refresh_tutorial_panel_state() -> void:
 
 
 func _on_tutorial_toggle_pressed() -> void:
+	if _challenge_loss_instruction_active:
+		_on_tutorial_continue_pressed()
+		return
 	var next_collapsed = not _tutorial_collapsed
+	if next_collapsed:
+		_suppress_minimap_input_handoff()
 	_set_tutorial_collapsed(next_collapsed)
-	if _is_story_instruction_mode():
+	if _is_guidance_instruction_mode():
 		set_pause_state(not next_collapsed)
 
 
 func _on_tutorial_continue_pressed() -> void:
+	var phase_id = _story_instruction_phase_id
+	var challenge_loss_active = _challenge_loss_instruction_active
+	_suppress_minimap_input_handoff()
 	_set_tutorial_collapsed(true)
-	if _is_story_instruction_mode():
+	if _is_guidance_instruction_mode():
 		set_pause_state(false)
+	var level_root = get_parent()
+	if challenge_loss_active:
+		_challenge_loss_instruction_active = false
+		if is_instance_valid(level_root) and level_root.has_method("on_challenge_loss_score_continue"):
+			level_root.call("on_challenge_loss_score_continue")
+		return
+	if is_instance_valid(level_root) and level_root.has_method("on_story_instruction_continue"):
+		level_root.call("on_story_instruction_continue", phase_id)
 
 
 func _on_score_timer_timeout() -> void:
@@ -1952,6 +2215,7 @@ func _select_inventory_item(agent_name: String) -> void:
 		return
 	_selected_inventory_item = agent_name
 	next_agent = agent_name
+	_reset_failed_placement_attempts()
 	_refresh_inventory_selection_visuals()
 	_update_minimap_input_lock()
 
@@ -1966,9 +2230,12 @@ func _clear_inventory_selection() -> void:
 	var previous_item = _selected_inventory_item
 	_selected_inventory_item = ""
 	next_agent = null
+	_reset_failed_placement_attempts()
 	_pointer_is_down = false
 	_pointer_is_touch = false
 	_pointer_press_item = ""
+	_pointer_press_tile_ok = false
+	_pointer_press_tile_pos = Vector2.ZERO
 	_pointer_press_selection_changed = false
 	_pointer_drag_active = false
 	_end_inventory_drag()
@@ -2023,6 +2290,34 @@ func _can_place_inventory_item_at_world_pos(item_name: String, world_pos: Vector
 	return true
 
 
+func _reset_failed_placement_attempts() -> void:
+	_failed_placement_item = ""
+	_failed_placement_coord = Vector2i(-1, -1)
+	_failed_placement_count = 0
+
+
+func _register_failed_placement_attempt(item_name: String, screen_pos: Vector2) -> bool:
+	if item_name == "":
+		_reset_failed_placement_attempts()
+		return false
+	var tile_data = _get_world_tile_drop_data(screen_pos)
+	if not bool(tile_data.get("ok", false)):
+		_reset_failed_placement_attempts()
+		return false
+	var target_pos: Vector2 = tile_data["pos"]
+	if _can_place_inventory_item_at_world_pos(item_name, target_pos):
+		_reset_failed_placement_attempts()
+		return false
+	var coord: Vector2i = tile_data["coord"]
+	if _failed_placement_item == item_name and _failed_placement_coord == coord:
+		_failed_placement_count += 1
+	else:
+		_failed_placement_item = item_name
+		_failed_placement_coord = coord
+		_failed_placement_count = 1
+	return _failed_placement_count >= 2
+
+
 func _uses_two_tile_vertical_hint(item_name: String) -> bool:
 	return item_name == "tree" and not bool(Global.social_mode)
 
@@ -2072,6 +2367,14 @@ func _update_selected_tile_hint(screen_pos: Vector2) -> void:
 	_emit_inventory_drag_preview(_selected_inventory_item, screen_pos, true)
 
 
+func _update_selected_inventory_hover_hint() -> void:
+	if _selected_inventory_item == "":
+		return
+	if _pointer_drag_active:
+		return
+	_update_selected_tile_hint(_last_pointer_pos)
+
+
 func _should_begin_inventory_drag(screen_pos: Vector2) -> bool:
 	if not _pointer_is_down:
 		return false
@@ -2083,16 +2386,35 @@ func _should_begin_inventory_drag(screen_pos: Vector2) -> bool:
 	return _pointer_press_pos.distance_to(screen_pos) >= threshold
 
 
-func _try_place_selected_item_at_screen_pos(screen_pos: Vector2) -> bool:
+func _resolve_selected_item_drag_attempt() -> bool:
 	if _selected_inventory_item == "":
 		return false
-	var spawn_name = _selected_inventory_item
-	if int(Global.inventory.get(spawn_name, 0)) <= 0:
+	if not _pointer_press_tile_ok:
+		return false
+	if _try_place_selected_item_at_world_pos(_pointer_press_tile_pos):
+		_clear_inventory_selection()
+		return true
+	_flash_invalid_selected_tile_hint(_pointer_press_pos)
+	_clear_inventory_selection()
+	return true
+
+
+func _try_place_selected_item_at_screen_pos(screen_pos: Vector2) -> bool:
+	if _selected_inventory_item == "":
 		return false
 	var tile_data = _get_world_tile_drop_data(screen_pos)
 	if not bool(tile_data.get("ok", false)):
 		return false
 	var target_pos: Vector2 = tile_data["pos"]
+	return _try_place_selected_item_at_world_pos(target_pos)
+
+
+func _try_place_selected_item_at_world_pos(target_pos: Vector2) -> bool:
+	if _selected_inventory_item == "":
+		return false
+	var spawn_name = _selected_inventory_item
+	if int(Global.inventory.get(spawn_name, 0)) <= 0:
+		return false
 	if not _can_place_inventory_item_at_world_pos(spawn_name, target_pos):
 		return false
 	var constrained_type = _is_parent_bounded_inventory_type(spawn_name)
@@ -2124,6 +2446,7 @@ func _try_place_selected_item_at_screen_pos(screen_pos: Vector2) -> bool:
 	emit_signal("new_agent", new_agent_dict)
 	Global.inventory[spawn_name] = int(Global.inventory.get(spawn_name, 0)) - 1
 	refresh_inventory_counts()
+	_reset_failed_placement_attempts()
 	return true
 
 
@@ -2132,6 +2455,8 @@ func _on_inventory_pointer_moved(screen_pos: Vector2) -> void:
 	if _selected_inventory_item == "":
 		return
 	if _should_begin_inventory_drag(screen_pos):
+		if _resolve_selected_item_drag_attempt():
+			return
 		_pointer_drag_active = true
 		_start_inventory_drag(_selected_inventory_item, screen_pos)
 	if _pointer_drag_active:
@@ -2145,6 +2470,9 @@ func _on_inventory_pointer_pressed(screen_pos: Vector2, from_touch: bool = false
 	_pointer_drag_active = false
 	_pointer_press_pos = screen_pos
 	_last_pointer_pos = screen_pos
+	var press_tile_data = _get_world_tile_drop_data(screen_pos)
+	_pointer_press_tile_ok = bool(press_tile_data.get("ok", false))
+	_pointer_press_tile_pos = press_tile_data["pos"] if _pointer_press_tile_ok else Vector2.ZERO
 	_pointer_press_item = ""
 	_pointer_press_selection_changed = false
 	var selected = _get_inventory_agent_at(screen_pos)
@@ -2167,6 +2495,8 @@ func _on_inventory_pointer_released(screen_pos: Vector2, from_touch: bool = fals
 	_pointer_is_down = false
 	_pointer_is_touch = from_touch
 	_pointer_press_item = ""
+	_pointer_press_tile_ok = false
+	_pointer_press_tile_pos = Vector2.ZERO
 	_pointer_press_selection_changed = false
 	_pointer_drag_active = false
 	if active_item == "":
@@ -2181,6 +2511,9 @@ func _on_inventory_pointer_released(screen_pos: Vector2, from_touch: bool = fals
 			_end_inventory_drag()
 			emit_signal("inventory_drag_preview", active_item, Vector2.ZERO, false)
 			_flash_invalid_selected_tile_hint(screen_pos)
+			if _register_failed_placement_attempt(active_item, screen_pos):
+				_clear_inventory_selection()
+				return
 			_refresh_inventory_selection_visuals()
 			_update_minimap_input_lock()
 		return
@@ -2200,6 +2533,9 @@ func _on_inventory_pointer_released(screen_pos: Vector2, from_touch: bool = fals
 		return
 	emit_signal("inventory_drag_preview", active_item, Vector2.ZERO, false)
 	_flash_invalid_selected_tile_hint(screen_pos)
+	if _register_failed_placement_attempt(active_item, screen_pos):
+		_clear_inventory_selection()
+		return
 	_refresh_inventory_selection_visuals()
 	_update_minimap_input_lock()
 
@@ -2313,7 +2649,7 @@ func _on_quit_button_pressed() -> void:
 
 
 func _on_pause_button_pressed() -> void:
-	if _is_story_instruction_mode() and is_instance_valid(_tutorial_panel) and _tutorial_panel.visible and not _tutorial_collapsed:
+	if _is_guidance_instruction_mode() and is_instance_valid(_tutorial_panel) and _tutorial_panel.visible and not _tutorial_collapsed:
 		set_pause_state(true)
 		return
 	var next_paused = not get_tree().paused

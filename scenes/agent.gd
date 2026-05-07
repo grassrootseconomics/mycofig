@@ -42,6 +42,9 @@ const BEAN_HARVEST_YIELD := 3
 const LIFECYCLE_POD_BABY_MIN := 0
 const LIFECYCLE_POD_BABY_MAX := 3
 const TREE_STARVATION_DURATION_MULTIPLIER := 3.0
+const TREE_CHALLENGE_STARVATION_DEAD_TICKS := 180
+const LIFECYCLE_ORPHAN_STARVATION_MULTIPLIER := 4.0
+const LIFECYCLE_ORPHAN_CHALLENGE_DEAD_TICKS := 45
 const BASE_MOVE_RATE_FOR_STARVATION := 6.0
 const BASE_MOVEMENT_SPEED_FOR_STARVATION := 200.0
 const MIN_STARVATION_SPEED_SCALE := 0.2
@@ -181,6 +184,7 @@ var _drag_pointer_down := false
 var _harvest_drag_sprite: Sprite2D = null
 var bean_pod_ticks := 0
 var bean_dead_ticks := 0
+var bean_starvation_ticks := 0
 var bean_stage_consumptions := 0
 var bean_stage_wait_ticks := 0
 var bean_respawn_wait_ticks := 0
@@ -188,6 +192,9 @@ var bean_respawn_requested := false
 var bean_post_harvest_senescence := false
 var bean_post_harvest_ticks := 0
 var bean_stage: int = BeanGrowthStage.SEED
+var bean_death_preserve_stage_visual := false
+var bean_death_visual_stage: int = BeanGrowthStage.SPROUT
+var bean_death_regrowth_allowed := true
 var bean_harvest_ready := false
 var bean_pod_sparkle_played := false
 var bean_stage_textures := {}
@@ -308,6 +315,12 @@ func _should_show_resource_bars() -> bool:
 		return false
 	if dead or caught_by != null:
 		return false
+	if Global.story_force_visible_plant_bars and _is_reposition_subject():
+		var viewport = get_viewport()
+		if viewport != null:
+			var screen_rect = viewport.get_visible_rect().grow(48.0)
+			if screen_rect.has_point(Global.world_to_screen(self, position)):
+				return true
 	if Global.bars_on:
 		return true
 	if _is_selected_agent():
@@ -447,6 +460,43 @@ func _is_tree_occupied_tile_hit(world_pos: Vector2) -> bool:
 	return click_coord == base_coord or click_coord == base_coord + Vector2i(0, -1)
 
 
+func _is_tile_occupied_focus_hit(world_pos: Vector2) -> bool:
+	var world = _get_world_foundation_node()
+	var level_root = _get_level_root()
+	if not is_instance_valid(world) or not is_instance_valid(level_root):
+		return false
+	if not (world.has_method("world_to_tile") and world.has_method("in_bounds")):
+		return false
+	var coord = Vector2i(world.world_to_tile(_clamp_position_to_world_rect(world_pos)))
+	if not world.in_bounds(coord):
+		return false
+	var occupied_tiles = LevelHelpersRef.get_agent_occupied_tiles(level_root, self)
+	return occupied_tiles.has(coord)
+
+
+func _is_focus_hit(world_pos: Vector2) -> bool:
+	if _is_reposition_subject():
+		return _is_tile_occupied_focus_hit(world_pos)
+	if is_instance_valid(sprite) and sprite.has_method("get_rect"):
+		if sprite.get_rect().has_point(to_local(world_pos)):
+			return true
+	return false
+
+
+func _get_focus_distance_squared(world_pos: Vector2) -> float:
+	var world = _get_world_foundation_node()
+	var level_root = _get_level_root()
+	if not is_instance_valid(world) or not is_instance_valid(level_root):
+		return global_position.distance_squared_to(world_pos)
+	if not (world.has_method("world_to_tile") and world.has_method("tile_to_world_center")):
+		return global_position.distance_squared_to(world_pos)
+	var best_dist = global_position.distance_squared_to(world_pos)
+	for coord in LevelHelpersRef.get_agent_occupied_tiles(level_root, self):
+		var center = world.tile_to_world_center(coord)
+		best_dist = minf(best_dist, center.distance_squared_to(world_pos))
+	return best_dist
+
+
 func _is_press_hit(world_pos: Vector2) -> bool:
 	if _is_tree_lifecycle_type():
 		# Mature trees are intentionally strict on touch:
@@ -462,17 +512,7 @@ func _is_press_hit(world_pos: Vector2) -> bool:
 	# Trees should avoid broad tile fallback on touch to prevent overlap stealing.
 	if _is_tree_lifecycle_type():
 		return false
-	var world = _get_world_foundation_node()
-	var level_root = _get_level_root()
-	if not is_instance_valid(world) or not is_instance_valid(level_root):
-		return false
-	if not (world.has_method("world_to_tile") and world.has_method("in_bounds")):
-		return false
-	var coord = Vector2i(world.world_to_tile(_clamp_position_to_world_rect(world_pos)))
-	if not world.in_bounds(coord):
-		return false
-	var occupied_tiles = LevelHelpersRef.get_agent_occupied_tiles(level_root, self)
-	return occupied_tiles.has(coord)
+	return _is_tile_occupied_focus_hit(world_pos)
 
 
 func _set_drag_pointer_screen_pos(screen_pos: Vector2) -> void:
@@ -493,12 +533,23 @@ func _get_drag_pointer_world_pos() -> Vector2:
 	return Global.screen_to_world(self, _get_drag_pointer_screen_pos())
 
 
+func _is_preferred_pointer_focus(screen_pos: Vector2) -> bool:
+	var level_root = _get_level_root()
+	var agents_root = get_parent()
+	if not is_instance_valid(level_root) or not is_instance_valid(agents_root):
+		return true
+	var focus_agent = LevelHelpersRef.resolve_focus_agent_at_screen_pos(level_root, agents_root, screen_pos)
+	return not is_instance_valid(focus_agent) or focus_agent == self
+
+
 func _is_drag_pointer_held() -> bool:
 	return _drag_pointer_down or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 
 
 func _can_pointer_activate_harvest() -> bool:
 	if not can_drag_for_inventory_harvest():
+		return false
+	if not _is_press_hit(_get_drag_pointer_world_pos()):
 		return false
 	var level_root = _get_level_root()
 	if is_instance_valid(level_root) and level_root.has_method("can_agent_harvest_to_inventory"):
@@ -543,10 +594,28 @@ func _try_pointer_activate_harvest(screen_pos: Vector2) -> bool:
 	return false
 
 
+func _try_start_harvest_inventory_animation() -> bool:
+	if _harvest_inventory_animating:
+		return true
+	_cancel_tile_snap()
+	_harvest_drag_only = true
+	_start_harvest_drag_proxy()
+	if _start_harvest_inventory_fly_in():
+		return true
+	_harvest_drag_only = false
+	_end_harvest_drag_proxy()
+	if supports_inventory_harvest():
+		return try_harvest_to_inventory()
+	return false
+
+
 func _on_pointer_press(screen_pos: Vector2) -> void:
 	_set_drag_pointer_screen_pos(screen_pos)
 	var world_click_pos = Global.screen_to_world(self, screen_pos)
-	var clicked_self = _is_press_hit(world_click_pos)
+	var clicked_self = _is_focus_hit(world_click_pos)
+	var clicked_action_hit = _is_press_hit(world_click_pos)
+	if clicked_self and not _is_preferred_pointer_focus(screen_pos):
+		clicked_self = false
 	_drag_pointer_down = clicked_self
 	if clicked_self:
 		_press_started_here = true
@@ -559,7 +628,7 @@ func _on_pointer_press(screen_pos: Vector2) -> void:
 			return
 		if not reposition_override and _can_pointer_activate_harvest():
 			return
-		if Global.is_dragging == false and _can_start_user_drag():
+		if clicked_action_hit and Global.is_dragging == false and _can_start_user_drag():
 			_harvest_drag_only = false
 			is_dragging = true
 			Global.is_dragging = true
@@ -576,7 +645,7 @@ func _on_pointer_release(screen_pos: Vector2) -> void:
 	_set_drag_pointer_screen_pos(screen_pos)
 	_drag_pointer_down = false
 	var world_click_pos = Global.screen_to_world(self, screen_pos)
-	var clicked_self = _is_press_hit(world_click_pos)
+	var clicked_self = _is_focus_hit(world_click_pos)
 	var pressed_here = _press_started_here
 	_press_started_here = false
 	var reposition_override = _pointer_reposition_override_enabled()
@@ -1051,6 +1120,57 @@ func _get_starvation_alpha_step() -> float:
 	return maxf(alpha_step_down * _get_trade_speed_ratio_for_starvation(), 0.0001)
 
 
+func _get_lifecycle_spawn_anchor() -> Variant:
+	if not bool(get_meta("lifecycle_spawn_child", false)):
+		return null
+	var anchor = get_meta("lifecycle_spawn_anchor", null)
+	if not is_instance_valid(anchor):
+		return null
+	if bool(anchor.get("dead")):
+		return null
+	if str(anchor.get("type")) != "myco":
+		return null
+	if not _can_share_story_trade_network(anchor):
+		return null
+	var reach = anchor.get("buddy_radius")
+	var max_dist := 0.0
+	if typeof(reach) == TYPE_FLOAT or typeof(reach) == TYPE_INT:
+		max_dist = maxf(float(reach), 0.0)
+	if max_dist <= 0.0:
+		return null
+	if global_position.distance_to(anchor.global_position) > max_dist:
+		return null
+	return anchor
+
+
+func _has_trade_buddy_link_to(target: Variant) -> bool:
+	if not is_instance_valid(target):
+		return false
+	for buddy in trade_buddies:
+		if buddy == target:
+			return true
+	return false
+
+
+func _restore_lifecycle_spawn_anchor_buddy() -> void:
+	var anchor = _get_lifecycle_spawn_anchor()
+	if not is_instance_valid(anchor):
+		return
+	if not _has_trade_buddy_link_to(anchor):
+		trade_buddies.append(anchor)
+
+
+func _is_lifecycle_orphan_spawn_child() -> bool:
+	if not _is_bean_lifecycle_enabled():
+		return false
+	if not bool(get_meta("lifecycle_spawn_child", false)):
+		return false
+	var anchor = _get_lifecycle_spawn_anchor()
+	if not is_instance_valid(anchor):
+		return true
+	return not _has_trade_buddy_link_to(anchor)
+
+
 func _spawn_growth_sparkle() -> void:
 	var sparkle = Global.sparkle_scene.instantiate()
 	sparkle.z_as_relative = false
@@ -1292,6 +1412,10 @@ func _get_lifecycle_stage_texture_path(stage_value: int) -> String:
 	return TEX_BEAN_SPROUT_STAGE_PATH
 
 
+func _should_preserve_stage_visual_on_starvation_death(stage_value: int) -> bool:
+	return stage_value == BeanGrowthStage.SEED or stage_value == BeanGrowthStage.SPROUT
+
+
 func _load_bean_stage_texture(path: String) -> Texture2D:
 	if bean_stage_textures.has(path):
 		var cached = bean_stage_textures[path]
@@ -1314,20 +1438,31 @@ func _set_bean_stage(new_stage: int, force: bool = false) -> void:
 	if not force and bean_stage == new_stage:
 		return
 
+	var previous_stage := bean_stage
 	bean_stage = new_stage
 	bean_harvest_ready = bean_stage == BeanGrowthStage.POD_READY
 	if bean_stage != BeanGrowthStage.DEAD:
+		bean_death_preserve_stage_visual = false
+		bean_death_visual_stage = bean_stage
+		bean_death_regrowth_allowed = true
 		bean_residue_pending = false
 		bean_residue_emitted = false
 	draggable = bean_stage != BeanGrowthStage.DEAD
 	if bean_stage == BeanGrowthStage.DEAD:
+		if not bean_death_preserve_stage_visual:
+			bean_death_visual_stage = BeanGrowthStage.DEAD
+		elif bean_death_visual_stage == BeanGrowthStage.DEAD:
+			bean_death_visual_stage = previous_stage
 		_clear_active_selection_if_self()
 		if bean_respawn_wait_ticks <= 0:
 			bean_respawn_wait_ticks = BEAN_DEAD_RESPAWN_DELAY_TICKS
 		bean_respawn_requested = false
 		bean_post_harvest_senescence = false
 		bean_post_harvest_ticks = 0
-	var next_path = _get_lifecycle_stage_texture_path(bean_stage)
+	var visual_stage := bean_stage
+	if bean_stage == BeanGrowthStage.DEAD and bean_death_preserve_stage_visual:
+		visual_stage = bean_death_visual_stage
+	var next_path = _get_lifecycle_stage_texture_path(visual_stage)
 	var next_texture: Texture2D = _load_bean_stage_texture(next_path)
 	if not is_instance_valid(next_texture):
 		next_texture = sprite_texture
@@ -1335,11 +1470,12 @@ func _set_bean_stage(new_stage: int, force: bool = false) -> void:
 	if is_instance_valid(sprite):
 		sprite.texture = next_texture
 		sprite.modulate = Color.WHITE
-		sprite.offset = _get_lifecycle_stage_sprite_offset(bean_stage)
-		var stage_scale = _get_bean_stage_target_scale(bean_stage)
-		stage_scale *= _get_stage_texture_scale_adjust(next_texture, bean_stage)
+		sprite.offset = _get_lifecycle_stage_sprite_offset(visual_stage)
+		var stage_scale = _get_bean_stage_target_scale(visual_stage)
+		stage_scale *= _get_stage_texture_scale_adjust(next_texture, visual_stage)
 		if bean_stage == BeanGrowthStage.DEAD:
-			sprite.modulate = Color(0.92, 0.86, 0.78, 1.0)
+			if not bean_death_preserve_stage_visual:
+				sprite.modulate = Color(0.92, 0.86, 0.78, 1.0)
 			sprite.scale = stage_scale
 		elif not force:
 			var base_scale: Vector2 = stage_scale
@@ -1359,9 +1495,13 @@ func _set_bean_stage(new_stage: int, force: bool = false) -> void:
 func _reset_bean_lifecycle() -> void:
 	bean_pod_ticks = 0
 	bean_dead_ticks = 0
+	bean_starvation_ticks = 0
 	bean_stage_consumptions = 0
 	bean_stage_wait_ticks = 0
 	bean_respawn_wait_ticks = 0
+	bean_death_preserve_stage_visual = false
+	bean_death_visual_stage = BeanGrowthStage.SPROUT
+	bean_death_regrowth_allowed = true
 	bean_respawn_requested = false
 	bean_post_harvest_senescence = false
 	bean_post_harvest_ticks = 0
@@ -1372,6 +1512,23 @@ func _reset_bean_lifecycle() -> void:
 	_farmer_harvest_delivery_reserved = false
 	bean_stage = BeanGrowthStage.SPROUT
 	_set_bean_stage(BeanGrowthStage.SPROUT, true)
+
+
+func _enter_lifecycle_starvation_death() -> void:
+	var visual_stage := bean_stage
+	var allow_regrowth: bool = _is_tree_lifecycle_type() or bean_stage == BeanGrowthStage.POD_READY or bean_post_harvest_senescence
+	bean_harvest_ready = false
+	bean_dead_ticks = 0
+	bean_respawn_wait_ticks = BEAN_DEAD_RESPAWN_DELAY_TICKS
+	bean_respawn_requested = false
+	bean_post_harvest_senescence = false
+	bean_post_harvest_ticks = 0
+	bean_residue_pending = false
+	bean_residue_emitted = false
+	bean_death_preserve_stage_visual = _should_preserve_stage_visual_on_starvation_death(visual_stage)
+	bean_death_visual_stage = visual_stage
+	bean_death_regrowth_allowed = allow_regrowth
+	_set_bean_stage(BeanGrowthStage.DEAD)
 
 
 func _emit_death_cycle_regrowth_request() -> void:
@@ -1454,12 +1611,13 @@ func _advance_bean_lifecycle(consumed_all_nutrients: bool) -> void:
 			bean_respawn_wait_ticks -= 1
 			return
 		if not bean_respawn_requested:
-			if bean_residue_pending and not bean_residue_emitted:
+			if bean_death_regrowth_allowed and bean_residue_pending and not bean_residue_emitted:
 				_emit_lifecycle_residue_signal(1.0, str(type))
 				bean_residue_emitted = true
 			bean_respawn_requested = true
 			dead = true
-			_emit_death_cycle_regrowth_request()
+			if bean_death_regrowth_allowed:
+				_emit_death_cycle_regrowth_request()
 		if killable:
 			kill_it()
 		return
@@ -1675,6 +1833,34 @@ func try_harvest_to_inventory() -> bool:
 	return _try_harvest_to_inventory()
 
 
+func can_hover_harvest_at_screen_pos(screen_pos: Vector2) -> bool:
+	if not can_drag_for_inventory_harvest():
+		return false
+	var world_pos = Global.screen_to_world(self, screen_pos)
+	if _is_tree_lifecycle_type():
+		return _is_tree_harvest_hotspot_hit(world_pos)
+	return _is_focus_hit(world_pos)
+
+
+func try_hover_harvest_to_inventory_at_screen_pos(screen_pos: Vector2) -> bool:
+	if Global.is_mobile_platform:
+		return false
+	if Global.is_dragging or _is_drag_pointer_held():
+		return false
+	if _is_inventory_placement_active():
+		return false
+	_set_drag_pointer_screen_pos(screen_pos)
+	if not can_drag_for_inventory_harvest():
+		return false
+	var level_root = _get_level_root()
+	if is_instance_valid(level_root) and level_root.has_method("can_agent_harvest_to_inventory"):
+		if not bool(level_root.can_agent_harvest_to_inventory(self)):
+			return false
+	if not can_hover_harvest_at_screen_pos(screen_pos):
+		return false
+	return _try_start_harvest_inventory_animation()
+
+
 func try_harvest_to_farmer(target_farmer: Node = null) -> bool:
 	if not _is_bean_lifecycle_enabled():
 		return false
@@ -1689,6 +1875,8 @@ func try_harvest_to_predator(_predator: Node = null) -> bool:
 	var harvest_key = str(type)
 	_apply_crop_harvest_commit_state()
 	emit_signal("harvest_committed", harvest_key, "predator")
+	if str(Global.mode) == "challenge" and harvest_key != "tree" and killable:
+		kill_it()
 	return true
 
 
@@ -2039,7 +2227,7 @@ func _input(event):
 			if _active_touch_id != -1 and event.index != _active_touch_id:
 				return
 			var world_touch_pos = Global.screen_to_world(self, event.position)
-			if _is_press_hit(world_touch_pos):
+			if _is_focus_hit(world_touch_pos):
 				_active_touch_id = event.index
 				_on_pointer_press(event.position)
 			else:
@@ -2226,6 +2414,7 @@ func _process(delta: float) -> void:
 func generate_buddies() -> void:
 	var agents_root = get_node_or_null("../../Agents")
 	trade_buddies = LevelHelpersRef.query_trade_hubs_near_agent(_get_level_root(), agents_root, self, num_buddies, true)
+	_restore_lifecycle_spawn_anchor_buddy()
 func new_draw_line():
 	var level_root = _get_level_root()
 	var lines_root = get_node_or_null("../../Lines")
@@ -2275,10 +2464,14 @@ func _on_growth_timer_timeout() -> void:
 	var starvation_alpha_step := _get_starvation_alpha_step()
 	if _is_tree_lifecycle_type():
 		starvation_alpha_step /= TREE_STARVATION_DURATION_MULTIPLIER
+	var orphan_spawn_child: bool = _is_lifecycle_orphan_spawn_child()
+	if orphan_spawn_child:
+		starvation_alpha_step *= LIFECYCLE_ORPHAN_STARVATION_MULTIPLIER
 
 	if _is_bean_lifecycle_enabled():
 		var consumed_all_nutrients := false
 		if all_in:
+			bean_starvation_ticks = maxi(bean_starvation_ticks - 2, 0)
 			var old_modulate_up = modulate
 			var new_alpha_up = modulate.a + alpha_step_up
 			if new_alpha_up > high_alpha:
@@ -2292,33 +2485,15 @@ func _on_growth_timer_timeout() -> void:
 				bars[res].value = assets[res]
 			consumed_all_nutrients = true
 		elif bean_stage != BeanGrowthStage.DEAD:
+			bean_starvation_ticks += 1
 			var old_modulate_down = modulate
 			var new_alpha_down = modulate.a - starvation_alpha_step
-			if new_alpha_down < low_alpha:
+			var tree_challenge_starved: bool = _is_tree_lifecycle_type() and str(Global.mode) == "challenge" and bean_starvation_ticks >= TREE_CHALLENGE_STARVATION_DEAD_TICKS
+			var orphan_challenge_starved: bool = orphan_spawn_child and str(Global.mode) == "challenge" and bean_starvation_ticks >= LIFECYCLE_ORPHAN_CHALLENGE_DEAD_TICKS
+			if new_alpha_down < low_alpha or tree_challenge_starved or orphan_challenge_starved:
 				new_alpha_down = low_alpha
 				if Global.is_killing and killable:
-					if _is_tree_lifecycle_type():
-						bean_harvest_ready = false
-						bean_dead_ticks = 0
-						bean_respawn_wait_ticks = BEAN_DEAD_RESPAWN_DELAY_TICKS
-						bean_respawn_requested = false
-						bean_post_harvest_senescence = false
-						bean_post_harvest_ticks = 0
-						bean_residue_pending = false
-						bean_residue_emitted = false
-						_set_bean_stage(BeanGrowthStage.DEAD)
-					elif bean_stage == BeanGrowthStage.POD_READY or bean_post_harvest_senescence:
-						bean_harvest_ready = false
-						bean_dead_ticks = 0
-						bean_respawn_wait_ticks = BEAN_DEAD_RESPAWN_DELAY_TICKS
-						bean_respawn_requested = false
-						bean_post_harvest_senescence = false
-						bean_post_harvest_ticks = 0
-						bean_residue_pending = false
-						bean_residue_emitted = false
-						_set_bean_stage(BeanGrowthStage.DEAD)
-					else:
-						kill_it()
+					_enter_lifecycle_starvation_death()
 					return
 			self.modulate = Color(old_modulate_down, new_alpha_down)
 

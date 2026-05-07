@@ -34,16 +34,18 @@ const DEFAULT_RESIDUE_LIFETIME_TICKS := 8
 const SOIL_INFLUENCE_RADIUS := 4
 const STORY_WORLD_COLUMNS := 26
 const STORY_WORLD_ROWS := 27
-const STORY_START_TILE := Vector2i(3, 13)
-const STORY_VILLAGE_OFFSET_RIGHT_TILES := 13
+const STORY_START_TILE := Vector2i(7, 13)
+const STORY_VILLAGE_OFFSET_RIGHT_TILES := 9
 const STORY_VILLAGE_RECT := Rect2i(STORY_START_TILE.x + STORY_VILLAGE_OFFSET_RIGHT_TILES, 9, 10, 10)
-const CHALLENGE_LAYOUT_CENTER_OFFSET_FROM_START_X := 6
+const STORY_HIDDEN_VILLAGE_RECT := Rect2i(STORY_VILLAGE_RECT.position + Vector2i(3, 0), Vector2i(7, 10))
+const CHALLENGE_LAYOUT_CENTER_OFFSET_FROM_START_X := 2
 const STORY_FOG_TICK_SECONDS := 0.25
 const STORY_FOG_COLOR := Color(0.02, 0.03, 0.04, 0.62)
 const HOTKEY_WORLD_DEBUG_OVERLAY := KEY_Z
 const HOTKEY_WORLD_RESET_BASELINE := KEY_X
 const HOTKEY_WORLD_EDIT_TILES := KEY_C
 const HOTKEY_WORLD_TOGGLE_FOG := KEY_V
+const DEFAULT_CAMERA_SMOOTHING_SPEED := 8.0
 
 @export var columns: int = 48
 @export var rows: int = 27
@@ -75,6 +77,7 @@ var _desktop_drag_last := Vector2.ZERO
 var _desktop_drag_button: MouseButton = MOUSE_BUTTON_NONE
 var _touch_drag_id: int = -1
 var _touch_drag_last := Vector2.ZERO
+var _camera_pan_suppressed_until_msec := 0
 var _drag_hint_visible := false
 var _drag_hint_coord := Vector2i(-1, -1)
 var _drag_hint_secondary_visible := false
@@ -558,6 +561,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			_refresh_story_fog_map()
 			_update_debug_label()
 
+	if _is_camera_pan_input_suppressed() and _is_camera_pan_pointer_event(event):
+		_cancel_camera_pan_drag_state()
+		get_viewport().set_input_as_handled()
+		return
+
 	if event is InputEventMouseButton:
 		if event.pressed and _is_mouse_wheel_button(event.button_index):
 			_clear_selection_for_camera_move()
@@ -697,7 +705,7 @@ func _is_story_hidden_village_tile(coord: Vector2i) -> bool:
 		return false
 	if bool(Global.village_revealed):
 		return false
-	return STORY_VILLAGE_RECT.has_point(coord)
+	return STORY_HIDDEN_VILLAGE_RECT.has_point(coord)
 
 
 func _reveal_coord_radius(center: Vector2i, radius_tiles: int) -> void:
@@ -1182,9 +1190,19 @@ func _draw_stage_detail(rect: Rect2, stage: int) -> void:
 func _setup_camera() -> void:
 	camera.enabled = true
 	camera.position_smoothing_enabled = true
-	camera.position_smoothing_speed = 8.0
+	camera.position_smoothing_speed = DEFAULT_CAMERA_SMOOTHING_SPEED
 	camera.global_position = get_world_center()
 	_clamp_camera()
+
+
+func set_camera_smoothing_speed(speed: float) -> void:
+	if not is_instance_valid(camera):
+		return
+	camera.position_smoothing_speed = maxf(speed, 0.1)
+
+
+func reset_camera_smoothing_speed() -> void:
+	set_camera_smoothing_speed(DEFAULT_CAMERA_SMOOTHING_SPEED)
 
 
 func set_camera_world_center(world_pos: Vector2, immediate: bool = false) -> void:
@@ -1316,6 +1334,8 @@ func _action_has_key(action: String, keycode: int) -> bool:
 
 
 func _try_start_desktop_pan(button: MouseButton, screen_pos: Vector2) -> void:
+	if _is_camera_pan_input_suppressed():
+		return
 	if Global.is_dragging:
 		return
 	if _is_pointer_over_ui(screen_pos):
@@ -1331,6 +1351,25 @@ func _stop_desktop_pan(button: MouseButton) -> void:
 	if _desktop_dragging and _desktop_drag_button == button:
 		_desktop_dragging = false
 		_desktop_drag_button = MOUSE_BUTTON_NONE
+
+
+func suppress_camera_pan_input(duration_sec: float = 0.30) -> void:
+	_camera_pan_suppressed_until_msec = maxi(_camera_pan_suppressed_until_msec, Time.get_ticks_msec() + int(duration_sec * 1000.0))
+	_cancel_camera_pan_drag_state()
+
+
+func _cancel_camera_pan_drag_state() -> void:
+	_desktop_dragging = false
+	_desktop_drag_button = MOUSE_BUTTON_NONE
+	_touch_drag_id = -1
+
+
+func _is_camera_pan_input_suppressed() -> bool:
+	return Time.get_ticks_msec() < _camera_pan_suppressed_until_msec
+
+
+func _is_camera_pan_pointer_event(event: InputEvent) -> bool:
+	return event is InputEventMouseButton or event is InputEventMouseMotion or event is InputEventScreenTouch or event is InputEventScreenDrag or event is InputEventPanGesture
 
 
 func _sync_global_world_context() -> void:

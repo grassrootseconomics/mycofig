@@ -13,11 +13,21 @@ const CARRY_TEX_SQUASH := preload("res://graphics/squash_32.png")
 const CARRY_TEX_MAIZE := preload("res://graphics/maize_32.png")
 const CARRY_TEX_TREE := preload("res://graphics/acorn_32.png")
 const BANK_LIQUIDITY_SEED_AMOUNT := 1
+const VILLAGER_FAMILY_ENERGY_THRESHOLD := 48
+const VILLAGER_FAMILY_ENERGY_TRADE := 1
+const VILLAGER_FAMILY_ENERGY_MISSING_NUTRIENT := 2
+const VILLAGER_FAMILY_ENERGY_COMPLETE_NPK := 1
+const VILLAGER_FAMILY_RETRY_TICKS := 24
+const VILLAGER_NUTRIENTS := ["N", "P", "K"]
 
 var is_trading = false
 var is_raining = true
+var villager_family_energy := 0
+var villager_family_retry_ticks := 0
+var villager_family_reproduction_pending := false
 var _story_farmer_harvest_state := STORY_FARMER_HARVEST_IDLE
 var _story_farmer_harvest_target: Node = null
+var _story_farmer_harvest_target_pos := Vector2.ZERO
 var _story_farmer_harvest_home_pos := Vector2.ZERO
 var _story_farmer_harvest_home_set := false
 var _story_farmer_harvest_move_tween: Tween = null
@@ -55,10 +65,12 @@ func _story_farmer_stop_harvest_tween() -> void:
 func _story_farmer_release_target(level_root: Node) -> void:
 	if not is_instance_valid(_story_farmer_harvest_target):
 		_story_farmer_harvest_target = null
+		_story_farmer_harvest_target_pos = Vector2.ZERO
 		return
 	if is_instance_valid(level_root) and level_root.has_method("story_farmer_release_harvest_target"):
 		level_root.call("story_farmer_release_harvest_target", self, _story_farmer_harvest_target)
 	_story_farmer_harvest_target = null
+	_story_farmer_harvest_target_pos = Vector2.ZERO
 
 
 func _story_farmer_get_carry_texture(harvest_type: String) -> Texture2D:
@@ -129,9 +141,10 @@ func _story_farmer_reset_harvest_state(level_root: Node) -> void:
 	_story_farmer_abort_carried_harvest()
 	_story_farmer_release_target(level_root)
 	_story_farmer_harvest_state = STORY_FARMER_HARVEST_IDLE
+	is_trading = false
 
 
-func _story_farmer_is_harvest_target_valid(crop_target: Node) -> bool:
+func _story_farmer_is_harvest_target_valid(crop_target: Variant) -> bool:
 	if not is_instance_valid(crop_target):
 		return false
 	if bool(crop_target.get("dead")):
@@ -142,6 +155,12 @@ func _story_farmer_is_harvest_target_valid(crop_target: Node) -> bool:
 		if not bool(crop_target.call("can_drag_for_inventory_harvest")):
 			return false
 	return true
+
+
+func _story_farmer_harvest_target_is_still_here() -> bool:
+	if not _story_farmer_is_harvest_target_valid(_story_farmer_harvest_target):
+		return false
+	return _story_farmer_harvest_target.global_position.distance_squared_to(_story_farmer_harvest_target_pos) <= 16.0
 
 
 func _story_farmer_reacquire_harvest_target(level_root: Node) -> bool:
@@ -171,6 +190,9 @@ func _story_farmer_begin_return_home() -> void:
 	var home_pos = _story_farmer_resolve_home_pos()
 	_story_farmer_harvest_state = STORY_FARMER_HARVEST_RETURNING_HOME
 	_story_farmer_stop_harvest_tween()
+	if global_position.distance_squared_to(home_pos) <= 4.0:
+		call_deferred("_on_story_farmer_return_home_finished")
+		return
 	var tween = get_tree().create_tween()
 	_story_farmer_harvest_move_tween = tween
 	tween.tween_property(self, "global_position", home_pos, STORY_FARMER_RETURN_HOME_SECONDS)
@@ -187,6 +209,15 @@ func _story_farmer_refresh_trade_network(level_root: Node) -> void:
 		level_root.call("mark_agent_moved", self, global_position, global_position)
 	elif level_root.has_method("request_agent_dirty"):
 		level_root.call("request_agent_dirty", self, true, true, false)
+
+
+func _story_farmer_cancel_trip_and_return_home(level_root: Node) -> void:
+	_story_farmer_stop_harvest_tween()
+	_story_farmer_abort_carried_harvest()
+	_story_farmer_release_target(level_root)
+	logistics_ready = false
+	is_trading = false
+	_story_farmer_begin_return_home()
 
 
 func _on_story_farmer_return_home_finished() -> void:
@@ -206,8 +237,8 @@ func _on_story_farmer_arrived_at_crop() -> void:
 	if _story_farmer_harvest_state != STORY_FARMER_HARVEST_MOVING_TO_CROP:
 		return
 	var level_root = _story_farmer_get_level_root()
-	if not _story_farmer_is_harvest_target_valid(_story_farmer_harvest_target):
-		_story_farmer_reacquire_harvest_target(level_root)
+	if not _story_farmer_harvest_target_is_still_here():
+		_story_farmer_cancel_trip_and_return_home(level_root)
 		return
 	var harvest_source = _story_farmer_harvest_target
 	var harvest_type = str(harvest_source.get("type"))
@@ -217,7 +248,7 @@ func _on_story_farmer_arrived_at_crop() -> void:
 	elif harvest_source.has_method("try_harvest_to_farmer"):
 		harvested = bool(harvest_source.call("try_harvest_to_farmer", self))
 	if not harvested:
-		_story_farmer_reacquire_harvest_target(level_root)
+		_story_farmer_cancel_trip_and_return_home(level_root)
 		return
 	_story_farmer_carried_harvest_type = harvest_type
 	_story_farmer_carried_harvest_source = harvest_source
@@ -236,6 +267,7 @@ func _story_farmer_begin_harvest_trip(level_root: Node) -> bool:
 		return false
 	_story_farmer_resolve_home_pos()
 	_story_farmer_harvest_target = crop_target
+	_story_farmer_harvest_target_pos = crop_target.global_position
 	_story_farmer_harvest_state = STORY_FARMER_HARVEST_MOVING_TO_CROP
 	_story_farmer_stop_harvest_tween()
 	var tween = get_tree().create_tween()
@@ -249,13 +281,17 @@ func _story_farmer_tick_auto_harvest(level_root: Node) -> bool:
 	if not _is_story_farmer_actor():
 		return false
 	if _story_farmer_harvest_state == STORY_FARMER_HARVEST_MOVING_TO_CROP:
-		if not _story_farmer_is_harvest_target_valid(_story_farmer_harvest_target):
-			_story_farmer_reacquire_harvest_target(level_root)
-		if _story_farmer_harvest_state == STORY_FARMER_HARVEST_MOVING_TO_CROP:
-			logistics_ready = false
+		if not _story_farmer_auto_harvest_enabled(level_root) or not _story_farmer_harvest_target_is_still_here():
+			_story_farmer_cancel_trip_and_return_home(level_root)
 			return true
-		return false
+		if not is_instance_valid(_story_farmer_harvest_move_tween):
+			_story_farmer_cancel_trip_and_return_home(level_root)
+			return true
+		logistics_ready = false
+		return true
 	if _story_farmer_harvest_state == STORY_FARMER_HARVEST_RETURNING_HOME:
+		if not is_instance_valid(_story_farmer_harvest_move_tween):
+			_story_farmer_begin_return_home()
 		logistics_ready = false
 		return true
 	if not _story_farmer_auto_harvest_enabled(level_root):
@@ -284,6 +320,68 @@ func _should_use_villager_r_liquidity_cycle() -> bool:
 	if not bool(Global.villager_r_medium_only):
 		return false
 	return _is_story_village_person_actor()
+
+
+func _is_villager_nutrient(res: String) -> bool:
+	return VILLAGER_NUTRIENTS.has(res)
+
+
+func _villager_has_complete_nutrients() -> bool:
+	for res in VILLAGER_NUTRIENTS:
+		if float(assets.get(res, 0.0)) <= 0.0:
+			return false
+	return true
+
+
+func _can_villager_family_reproduce() -> bool:
+	if not _is_story_village_person_actor():
+		return false
+	if bool(get_meta("story_disable_birth", false)):
+		return false
+	if not Global.baby_mode:
+		return false
+	if current_babies >= num_babies:
+		return false
+	return true
+
+
+func _try_villager_family_reproduction() -> void:
+	villager_family_reproduction_pending = false
+	if villager_family_energy < VILLAGER_FAMILY_ENERGY_THRESHOLD:
+		return
+	if villager_family_retry_ticks > 0:
+		return
+	if not _can_villager_family_reproduce():
+		return
+	var babies_before: int = int(current_babies)
+	have_babies(true)
+	if current_babies > babies_before:
+		villager_family_energy = 0
+		villager_family_retry_ticks = VILLAGER_FAMILY_RETRY_TICKS
+		var sparkles_root = get_node_or_null("../../Sparkles")
+		if is_instance_valid(Global.sparkle_scene) and is_instance_valid(sparkles_root):
+			var sparkle = Global.sparkle_scene.instantiate()
+			sparkle.z_as_relative = false
+			sparkle.position = position
+			sparkle.global_position = global_position
+			sparkles_root.add_child(sparkle)
+			sparkle.start(0.75)
+	else:
+		villager_family_retry_ticks = VILLAGER_FAMILY_RETRY_TICKS
+
+
+func _add_villager_family_energy(amount: int) -> void:
+	if amount <= 0:
+		return
+	if not _can_villager_family_reproduce():
+		return
+	villager_family_energy = mini(
+		villager_family_energy + amount,
+		VILLAGER_FAMILY_ENERGY_THRESHOLD * 2
+	)
+	if villager_family_energy >= VILLAGER_FAMILY_ENERGY_THRESHOLD and villager_family_retry_ticks <= 0 and not villager_family_reproduction_pending:
+		villager_family_reproduction_pending = true
+		call_deferred("_try_villager_family_reproduction")
 
 
 func _get_villager_r_buffer_target() -> int:
@@ -722,6 +820,9 @@ func logistics():
 
 func _on_area_entered(ztrade: Area2D) -> void:
 	if ztrade.end_agent == self:
+		var received_asset := str(ztrade.asset)
+		var received_nutrient: bool = _is_villager_nutrient(received_asset)
+		var was_missing_nutrient: bool = _is_story_village_person_actor() and received_nutrient and float(assets.get(received_asset, 0.0)) <= 0.0
 		assets[ztrade.asset]+=ztrade.amount
 		is_trading = false
 		if assets[ztrade.asset]> needs[ztrade.asset] *2:
@@ -730,6 +831,12 @@ func _on_area_entered(ztrade: Area2D) -> void:
 			Global.add_score(ztrade.amount)
 			emit_signal("update_score")
 		bars[ztrade.asset].value = assets[ztrade.asset]
+		if _is_story_village_person_actor() and received_nutrient:
+			_add_villager_family_energy(VILLAGER_FAMILY_ENERGY_TRADE)
+			if was_missing_nutrient:
+				_add_villager_family_energy(VILLAGER_FAMILY_ENERGY_MISSING_NUTRIENT)
+			if _villager_has_complete_nutrients():
+				_add_villager_family_energy(VILLAGER_FAMILY_ENERGY_COMPLETE_NPK)
 		ztrade.call_deferred("queue_free")
 
 
@@ -738,6 +845,8 @@ func _on_growth_timer_timeout() -> void:
 	#production_ready = true
 	#if production_ready:		
 	#	production_ready = false
+	if villager_family_retry_ticks > 0:
+		villager_family_retry_ticks -= 1
 	var disable_story_farmer_production = bool(get_meta("story_disable_farmer_production", false))
 	if not disable_story_farmer_production and prod_res.size() > 0 and prod_res[0] != null:
 		for res in prod_res:
@@ -818,7 +927,7 @@ func _on_growth_timer_timeout() -> void:
 		$"../../Sparkles".add_child(sparkle)
 		sparkle.start(0.75)
 	
-		if(Global.baby_mode and self.type != "tree"):
+		if(Global.baby_mode and self.type != "tree" and not _is_story_village_person_actor()):
 			if(Global.is_max_babies == true):
 				if(current_babies < num_babies):
 					have_babies()

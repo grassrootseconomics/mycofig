@@ -4,18 +4,16 @@ const TITLE_COMPACT_SHORT_EDGE := 640.0
 const TITLE_TINY_SHORT_EDGE := 500.0
 const GE_LOGO_PATH := "res://graphics/ge-logo-horizontal-text.png"
 
-var _ge_logo_texture: ImageTexture = null
+var _ge_logo_texture: Texture2D = null
 
 
-func _get_ge_logo_texture() -> ImageTexture:
+func _get_ge_logo_texture() -> Texture2D:
 	if is_instance_valid(_ge_logo_texture):
 		return _ge_logo_texture
-	var image := Image.new()
-	var err := image.load(GE_LOGO_PATH)
-	if err != OK:
+	var texture: Resource = load(GE_LOGO_PATH)
+	if not texture is Texture2D:
 		return null
-	image.generate_mipmaps()
-	_ge_logo_texture = ImageTexture.create_from_image(image)
+	_ge_logo_texture = texture as Texture2D
 	return _ge_logo_texture
 
 func _make_cta_style(bg_color: Color, border_color: Color, border_width: int = 2) -> StyleBoxFlat:

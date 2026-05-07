@@ -1,7 +1,7 @@
 extends Agent
 
 const ResourceEconomyRef = preload("res://scenes/resource_economy.gd")
-const TEX_MYCO_SPORE_STAGE_PATH := "res://graphics/myco_spore_stage.png"
+const TEX_MYCO_RHIZO_STAGE_PATH := "res://graphics/rhizomorphic.png"
 
 enum MycoGrowthStage {
 	SPORE,
@@ -30,6 +30,10 @@ const MYCO_DEAD_RHIZO_SHRINK_LERP := 0.07
 const MYCO_DEAD_MUSHROOM_ALPHA_STEP := 0.03
 const MYCO_MIN_ADJACENT_BUDDY_RADIUS := 72.0
 const MYCO_MAX_SENDS_PER_LOGISTICS_TICK := 2
+const MYCO_RHIZO_SPORE_CELL_RATIO := 0.42
+const MYCO_RHIZO_GROW_CELL_RATIO := 0.78
+const MYCO_DEAD_RHIZO_BODY_CELL_RATIO := 0.16
+const MYCO_SUPPORTED_STARVATION_MULTIPLIER := 4
 
 var myco_stage: int = MycoGrowthStage.SPORE
 var myco_stage_consumptions := 0
@@ -45,7 +49,12 @@ var mushroom_base_texture: Texture2D = null
 var mushroom_base_scale := Vector2.ONE
 var rhizo_native_scale := Vector2.ONE
 var rhizo_spore_scale := Vector2.ONE
-var myco_spore_texture: Texture2D = null
+var myco_rhizo_texture: Texture2D = null
+var myco_tile_span := 64.0
+
+
+func _challenge_myco_death_enabled() -> bool:
+	return str(Global.mode) == "challenge" and bool(Global.is_killing)
 
 
 func _load_myco_texture(path: String) -> Texture2D:
@@ -71,6 +80,33 @@ func _get_mushroom_texture_scale_adjust(texture: Texture2D) -> Vector2:
 	if stage_size.x <= 0.0 or stage_size.y <= 0.0:
 		return Vector2.ONE
 	return Vector2(base_size.x / stage_size.x, base_size.y / stage_size.y)
+
+
+func _get_texture_fit_scale(texture: Texture2D, max_size_px: float) -> Vector2:
+	if not is_instance_valid(texture):
+		return Vector2.ONE
+	var texture_size = texture.get_size()
+	var max_axis = maxf(texture_size.x, texture_size.y)
+	if max_axis <= 0.001:
+		return Vector2.ONE
+	var safe_size = clampf(max_size_px, 1.0, myco_tile_span)
+	var scale = safe_size / max_axis
+	return Vector2(scale, scale)
+
+
+func _get_rhizo_body_scale(cell_ratio: float, keep_smaller_than_mushroom: bool = false) -> Vector2:
+	var target_size = myco_tile_span * cell_ratio
+	if keep_smaller_than_mushroom and is_instance_valid(mushroom_base_texture):
+		var mushroom_size = mushroom_base_texture.get_size()
+		var displayed_mushroom = Vector2(
+			mushroom_size.x * absf(mushroom_base_scale.x),
+			mushroom_size.y * absf(mushroom_base_scale.y)
+		)
+		var max_mushroom_axis = maxf(displayed_mushroom.x, displayed_mushroom.y)
+		if max_mushroom_axis > 0.001:
+			target_size = minf(target_size, max_mushroom_axis * 0.9)
+	target_size = maxf(target_size, myco_tile_span * 0.32)
+	return _get_texture_fit_scale(myco_rhizo_texture, target_size)
 
 
 func _refresh_buddy_radius_from_rhizo() -> void:
@@ -141,6 +177,7 @@ func _set_myco_stage(new_stage: int, force: bool = false) -> void:
 	if not force and myco_stage == new_stage:
 		return
 	myco_stage = new_stage
+	dead = myco_stage == MycoGrowthStage.DEAD
 	myco_harvest_ready = myco_stage == MycoGrowthStage.POD_READY
 	draggable = myco_stage != MycoGrowthStage.DEAD
 	if myco_stage == MycoGrowthStage.DEAD:
@@ -163,25 +200,27 @@ func _set_myco_stage(new_stage: int, force: bool = false) -> void:
 		sprite.visible = true
 		match myco_stage:
 			MycoGrowthStage.SPORE:
-				if is_instance_valid(myco_spore_texture):
-					sprite.texture = myco_spore_texture
-					var spore_scale = mushroom_base_scale * _get_mushroom_texture_scale_adjust(myco_spore_texture) * 0.72
-					sprite.scale = spore_scale
+				if is_instance_valid(myco_rhizo_texture):
+					sprite.texture = myco_rhizo_texture
+					sprite.scale = _get_rhizo_body_scale(MYCO_RHIZO_SPORE_CELL_RATIO, true)
 				sprite.modulate = Color(1.0, 1.0, 1.0, 1.0)
 			MycoGrowthStage.RHIZO_GROW:
-				if is_instance_valid(myco_spore_texture):
-					sprite.texture = myco_spore_texture
-					var small_spore_scale = mushroom_base_scale * _get_mushroom_texture_scale_adjust(myco_spore_texture) * 0.58
-					sprite.scale = small_spore_scale
-				sprite.modulate = Color(1.0, 1.0, 1.0, 0.58)
+				if is_instance_valid(myco_rhizo_texture):
+					sprite.texture = myco_rhizo_texture
+					sprite.scale = _get_rhizo_body_scale(MYCO_RHIZO_GROW_CELL_RATIO)
+				sprite.modulate = Color(1.0, 1.0, 1.0, 0.82)
 			MycoGrowthStage.POD_READY:
 				sprite.texture = mushroom_base_texture
 				sprite.scale = mushroom_base_scale
 				sprite.modulate = Color.WHITE
 			MycoGrowthStage.DEAD:
-				sprite.texture = mushroom_base_texture
-				sprite.scale = mushroom_base_scale * 0.82
-				sprite.modulate = Color(0.76, 0.64, 0.50, 0.95)
+				if is_instance_valid(myco_rhizo_texture):
+					sprite.texture = myco_rhizo_texture
+					sprite.scale = _get_rhizo_body_scale(MYCO_RHIZO_SPORE_CELL_RATIO, true)
+				else:
+					sprite.texture = mushroom_base_texture
+					sprite.scale = mushroom_base_scale * 0.42
+				sprite.modulate = Color(0.84, 0.73, 0.58, 0.82)
 
 	if myco_stage == MycoGrowthStage.POD_READY and not myco_pod_sparkle_played:
 		var sparkle = Global.sparkle_scene.instantiate()
@@ -274,11 +313,10 @@ func _begin_harvest_visual_detach() -> void:
 		return
 	_harvest_visual_detached = true
 	if is_instance_valid(sprite):
-		if is_instance_valid(myco_spore_texture):
-			sprite.texture = myco_spore_texture
-			var small_spore_scale = mushroom_base_scale * _get_mushroom_texture_scale_adjust(myco_spore_texture) * 0.58
-			sprite.scale = small_spore_scale
-		sprite.modulate = Color(1.0, 1.0, 1.0, 0.58)
+		if is_instance_valid(myco_rhizo_texture):
+			sprite.texture = myco_rhizo_texture
+			sprite.scale = _get_rhizo_body_scale(MYCO_RHIZO_GROW_CELL_RATIO)
+		sprite.modulate = Color(1.0, 1.0, 1.0, 0.82)
 
 
 func _cancel_harvest_visual_detach() -> void:
@@ -368,7 +406,7 @@ func set_variables(a_dict) -> void:
 	sprite_myco = $MycoSprite
 
 	mushroom_base_texture = sprite_texture
-	myco_spore_texture = _load_myco_texture(TEX_MYCO_SPORE_STAGE_PATH)
+	myco_rhizo_texture = _load_myco_texture(TEX_MYCO_RHIZO_STAGE_PATH)
 	$Sprite2D.texture = mushroom_base_texture
 
 	sprite.z_index = 9
@@ -382,6 +420,7 @@ func set_variables(a_dict) -> void:
 			world_tile_size = raw_tile_size * 1.0
 		if world_tile_size > 0.0:
 			tile_span = world_tile_size
+	myco_tile_span = tile_span
 	var base_scale = sprite_myco.scale
 	var base_rect = sprite_myco.get_rect()
 	var base_radius = (base_rect.size.x * 0.5) * absf(base_scale.x)
@@ -567,7 +606,10 @@ func _on_growth_timer_timeout() -> void:
 	if myco_stage == MycoGrowthStage.DEAD:
 		myco_dead_ticks += 1
 		if is_instance_valid(sprite):
-			sprite.scale = sprite.scale.lerp(mushroom_base_scale * 0.24, MYCO_DEAD_MUSHROOM_SHRINK_LERP)
+			var dead_body_scale = _get_texture_fit_scale(myco_rhizo_texture, myco_tile_span * MYCO_DEAD_RHIZO_BODY_CELL_RATIO)
+			if not is_instance_valid(myco_rhizo_texture):
+				dead_body_scale = mushroom_base_scale * 0.18
+			sprite.scale = sprite.scale.lerp(dead_body_scale, MYCO_DEAD_MUSHROOM_SHRINK_LERP)
 			var s_col = sprite.modulate
 			s_col.a = maxf(s_col.a - MYCO_DEAD_MUSHROOM_ALPHA_STEP, 0.0)
 			sprite.modulate = s_col
@@ -577,7 +619,10 @@ func _on_growth_timer_timeout() -> void:
 			_refresh_buddy_radius_from_rhizo()
 			_mark_network_dirty()
 		if myco_dead_ticks >= MYCO_DEAD_RECOVERY_TICKS:
-			_revert_to_spore()
+			if _challenge_myco_death_enabled():
+				kill_it()
+			else:
+				_revert_to_spore()
 		return
 
 	var consumed_all_nutrients := false
@@ -595,7 +640,8 @@ func _on_growth_timer_timeout() -> void:
 			sprite.modulate = Color(old_up, up_alpha)
 	else:
 		var has_support = _has_supporting_neighbors()
-		if has_support:
+		var starvation_limit = MYCO_STARVATION_REVERT_TICKS
+		if has_support and not _challenge_myco_death_enabled():
 			myco_starvation_ticks = max(myco_starvation_ticks - 1, 0)
 			if is_instance_valid(sprite):
 				var old_supported = sprite.modulate
@@ -604,15 +650,27 @@ func _on_growth_timer_timeout() -> void:
 			if is_instance_valid(sprite_myco) and myco_stage != MycoGrowthStage.SPORE:
 				_set_rhizo_scale(sprite_myco.scale.lerp(rhizo_native_scale, 0.03))
 		else:
+			if has_support:
+				starvation_limit *= MYCO_SUPPORTED_STARVATION_MULTIPLIER
 			myco_starvation_ticks += 1
 			if is_instance_valid(sprite):
 				var old_down = sprite.modulate
-				var down_alpha = maxf(old_down.a - (alpha_step_down * 0.5), 0.25)
+				var down_step = alpha_step_down * 0.5
+				if has_support:
+					down_step /= float(MYCO_SUPPORTED_STARVATION_MULTIPLIER)
+				var down_alpha = maxf(old_down.a - down_step, 0.25)
 				sprite.modulate = Color(old_down, down_alpha)
 			if is_instance_valid(sprite_myco) and myco_stage != MycoGrowthStage.SPORE:
-				_set_rhizo_scale(sprite_myco.scale.lerp(rhizo_spore_scale, MYCO_STARVATION_SHRINK_LERP))
-			if myco_stage != MycoGrowthStage.SPORE and myco_starvation_ticks >= MYCO_STARVATION_REVERT_TICKS:
-				_revert_to_spore()
+				var shrink_lerp = MYCO_STARVATION_SHRINK_LERP
+				if has_support:
+					shrink_lerp /= float(MYCO_SUPPORTED_STARVATION_MULTIPLIER)
+				_set_rhizo_scale(sprite_myco.scale.lerp(rhizo_spore_scale, shrink_lerp))
+			if myco_starvation_ticks >= starvation_limit:
+				if _challenge_myco_death_enabled():
+					myco_dead_ticks = 0
+					_set_myco_stage(MycoGrowthStage.DEAD)
+				elif myco_stage != MycoGrowthStage.SPORE:
+					_revert_to_spore()
 				return
 
 	if myco_stage == MycoGrowthStage.POD_READY:

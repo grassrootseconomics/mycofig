@@ -14,6 +14,8 @@ const HOTKEY_CONNECTORS_2 := [KEY_2]
 const HOTKEY_CONNECTORS_3 := [KEY_3]
 const HOTKEY_CONNECTORS_4 := [KEY_4]
 const HOTKEY_CONNECTORS_5 := [KEY_5]
+const FOCUS_NEIGHBOR_SPRITE_OVERLAP_PENALTY := 100000000.0
+const FOCUS_TILE_FALLBACK_PENALTY := 1000000000.0
 
 
 static func _is_pressed_key(event: InputEvent, keycodes: Array) -> bool:
@@ -243,12 +245,64 @@ static func _screen_over_agent(agent: Node, screen_pos: Vector2) -> bool:
 	if not is_instance_valid(agent):
 		return false
 	var world_pos = Global.screen_to_world(agent, screen_pos)
+	if agent.has_method("_is_focus_hit"):
+		return bool(agent.call("_is_focus_hit", world_pos))
 	if agent.has_method("_is_press_hit"):
 		return bool(agent.call("_is_press_hit", world_pos))
 	var sprite = agent.get("sprite")
 	if not is_instance_valid(sprite) or not sprite.has_method("get_rect"):
 		return false
 	return sprite.get_rect().has_point(agent.to_local(world_pos))
+
+
+static func _agent_focus_distance_squared(level_root: Node, agent: Node, world_pos: Vector2) -> float:
+	if not is_instance_valid(agent):
+		return INF
+	if agent.has_method("_get_focus_distance_squared"):
+		return float(agent.call("_get_focus_distance_squared", world_pos))
+	return agent.global_position.distance_squared_to(world_pos)
+
+
+static func _agent_occupies_tile(level_root: Node, agent: Node, coord: Vector2i) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	var occupied_tiles = get_agent_occupied_tiles(level_root, agent)
+	return occupied_tiles.has(coord)
+
+
+static func _resolve_focus_agent_from_exact_cell(level_root: Node, agents_root: Node, coord: Vector2i, world_pos: Vector2) -> Node:
+	var world = _get_world_foundation(level_root)
+	if not is_instance_valid(world) or not world.in_bounds(coord):
+		return null
+	var best: Node = null
+	var best_dist := INF
+	var seen := {}
+	if world.has_method("get_tile_occupants_cached"):
+		var occupants_variant = world.get_tile_occupants_cached(coord)
+		if typeof(occupants_variant) == TYPE_ARRAY:
+			for occupant in occupants_variant:
+				if not _agent_supports_hover_focus(occupant):
+					continue
+				var occupant_id = int(occupant.get_instance_id())
+				seen[occupant_id] = true
+				var dist = _agent_focus_distance_squared(level_root, occupant, world_pos)
+				if dist < best_dist:
+					best_dist = dist
+					best = occupant
+	if is_instance_valid(agents_root):
+		for agent in agents_root.get_children():
+			if not _agent_supports_hover_focus(agent):
+				continue
+			var agent_id = int(agent.get_instance_id())
+			if seen.has(agent_id):
+				continue
+			if not _agent_occupies_tile(level_root, agent, coord):
+				continue
+			var dist = _agent_focus_distance_squared(level_root, agent, world_pos)
+			if dist < best_dist:
+				best_dist = dist
+				best = agent
+	return best
 
 
 static func _resolve_hovered_agent_from_cell(level_root: Node, agents_root: Node, screen_pos: Vector2) -> Node:
@@ -261,6 +315,9 @@ static func _resolve_hovered_agent_from_cell(level_root: Node, agents_root: Node
 	var coord = Vector2i(world.world_to_tile(world_pos))
 	if not world.in_bounds(coord):
 		return null
+	var exact_cell_agent = _resolve_focus_agent_from_exact_cell(level_root, agents_root, coord, world_pos)
+	if is_instance_valid(exact_cell_agent):
+		return exact_cell_agent
 	var has_cached_occupancy = world.has_method("get_tile_occupants_cached")
 	if has_cached_occupancy:
 		var best: Node = null
@@ -286,23 +343,104 @@ static func _resolve_hovered_agent_from_cell(level_root: Node, agents_root: Node
 						continue
 					seen[occupant_id] = true
 					var hit_priority := 0.0
+					if query_coord != coord:
+						hit_priority += FOCUS_NEIGHBOR_SPRITE_OVERLAP_PENALTY
 					if not precise_hit:
-						hit_priority = 1000000000.0
-					var dist = hit_priority + occupant.global_position.distance_squared_to(world_pos)
+						hit_priority += FOCUS_TILE_FALLBACK_PENALTY
+					var dist = hit_priority + _agent_focus_distance_squared(level_root, occupant, world_pos)
 					if dist < best_dist:
 						best_dist = dist
 						best = occupant
 		return best
 	# Fallback for scenes/worlds that do not expose cached occupancy query.
 	var agents = agents_root.get_children()
+	var best_fallback: Node = null
+	var best_fallback_dist := INF
 	for idx in range(agents.size() - 1, -1, -1):
 		var agent = agents[idx]
 		if not _agent_supports_hover_focus(agent):
 			continue
 		if not _screen_over_agent(agent, screen_pos):
 			continue
-		return agent
-	return null
+		var dist = _agent_focus_distance_squared(level_root, agent, world_pos)
+		if dist < best_fallback_dist:
+			best_fallback_dist = dist
+			best_fallback = agent
+	return best_fallback
+
+
+static func resolve_focus_agent_at_screen_pos(level_root: Node, agents_root: Node, screen_pos: Vector2) -> Node:
+	return _resolve_hovered_agent_from_cell(level_root, agents_root, screen_pos)
+
+
+static func _try_hover_harvest_agent(agent: Variant, screen_pos: Vector2) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	if not agent.has_method("can_drag_for_inventory_harvest"):
+		return false
+	if agent.call("can_drag_for_inventory_harvest") != true:
+		return false
+	if agent.has_method("can_hover_harvest_at_screen_pos"):
+		if agent.call("can_hover_harvest_at_screen_pos", screen_pos) != true:
+			return false
+	if not agent.has_method("try_hover_harvest_to_inventory_at_screen_pos"):
+		return false
+	return agent.call("try_hover_harvest_to_inventory_at_screen_pos", screen_pos) == true
+
+
+static func _try_hover_harvest_from_all_agents(agents_root: Node, screen_pos: Vector2, preferred_agent: Node = null) -> bool:
+	if not is_instance_valid(agents_root):
+		return false
+	if _try_hover_harvest_agent(preferred_agent, screen_pos):
+		return true
+	for agent in agents_root.get_children():
+		if agent == preferred_agent:
+			continue
+		if _try_hover_harvest_agent(agent, screen_pos):
+			return true
+	return false
+
+
+static func _try_hover_harvest_from_cell(level_root: Node, agents_root: Node, screen_pos: Vector2, preferred_agent: Node = null) -> bool:
+	if _try_hover_harvest_agent(preferred_agent, screen_pos):
+		return true
+	var world = _get_world_foundation(level_root)
+	if is_instance_valid(world) and world.has_method("world_to_tile") and world.has_method("in_bounds") and world.has_method("get_tile_occupants_cached"):
+		var world_pos = Global.screen_to_world(level_root, screen_pos)
+		var coord = Vector2i(world.world_to_tile(world_pos))
+		if not world.in_bounds(coord):
+			return false
+		var seen := {}
+		if is_instance_valid(preferred_agent):
+			seen[int(preferred_agent.get_instance_id())] = true
+		for y in range(coord.y - 1, coord.y + 2):
+			for x in range(coord.x - 1, coord.x + 2):
+				var query_coord = Vector2i(x, y)
+				if not world.in_bounds(query_coord):
+					continue
+				var occupants_variant = world.get_tile_occupants_cached(query_coord)
+				if typeof(occupants_variant) != TYPE_ARRAY:
+					continue
+				for occupant in occupants_variant:
+					if not is_instance_valid(occupant):
+						continue
+					var occupant_id = int(occupant.get_instance_id())
+					if seen.has(occupant_id):
+						continue
+					seen[occupant_id] = true
+					if query_coord != coord and not _screen_over_agent(occupant, screen_pos):
+						continue
+					if _try_hover_harvest_agent(occupant, screen_pos):
+						return true
+		return _try_hover_harvest_from_all_agents(agents_root, screen_pos, preferred_agent)
+	for agent in agents_root.get_children():
+		if agent == preferred_agent:
+			continue
+		if not _screen_over_agent(agent, screen_pos):
+			continue
+		if _try_hover_harvest_agent(agent, screen_pos):
+			return true
+	return false
 
 
 static func _get_hover_focus_agent(level_root: Node) -> Node:
@@ -380,11 +518,15 @@ static func update_agent_hover_focus(level_root: Node, agents_root: Node) -> voi
 	var screen_pos = viewport.get_mouse_position()
 	if _is_hover_focus_suppressed(level_root, screen_pos):
 		_set_hover_focus_agent(level_root, null)
+		if not _pointer_over_core_ui(level_root, screen_pos):
+			_try_hover_harvest_from_cell(level_root, agents_root, screen_pos, null)
 		return
 	var hovered_agent: Node = null
 	if not _pointer_over_core_ui(level_root, screen_pos):
 		hovered_agent = _resolve_hovered_agent_from_cell(level_root, agents_root, screen_pos)
 	_set_hover_focus_agent(level_root, hovered_agent)
+	if not _pointer_over_core_ui(level_root, screen_pos):
+		_try_hover_harvest_from_cell(level_root, agents_root, screen_pos, hovered_agent)
 
 
 static func handle_gameplay_hotkeys(event: InputEvent, owner: Node, agents_root: Node, include_connector_keys: bool = false) -> bool:
@@ -918,12 +1060,20 @@ static func _append_unique_buddy(agent: Node, buddy: Node) -> void:
 	agent.set("trade_buddies", buddies)
 
 
+static func _is_within_anchor_radius(spawned_agent: Node, anchor: Node) -> bool:
+	if not is_instance_valid(spawned_agent) or not is_instance_valid(anchor):
+		return false
+	return spawned_agent.global_position.distance_to(anchor.global_position) <= _get_agent_interaction_radius(anchor)
+
+
 static func ensure_spawn_buddy_link(spawned_agent: Node, anchor: Variant) -> void:
 	if not is_instance_valid(spawned_agent) or not is_instance_valid(anchor):
 		return
 	if anchor.get("dead") == true:
 		return
 	if anchor.get("type") != "myco":
+		return
+	if not _is_within_anchor_radius(spawned_agent, anchor):
 		return
 	_append_unique_buddy(spawned_agent, anchor)
 	if spawned_agent.get("type") == "myco":

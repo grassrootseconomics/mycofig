@@ -43,6 +43,10 @@ var trade_sender_rate_per_sec := 6.0
 var trade_sender_burst := 2.0
 var trade_link_rate_per_sec := 4.0
 var trade_link_burst := 1.0
+var trade_sender_rate_per_sec_village := 14.0
+var trade_sender_burst_village := 4.0
+var trade_link_rate_per_sec_village := 10.0
+var trade_link_burst_village := 2.0
 var trade_sender_rate_per_sec_myco := 14.0
 var trade_sender_burst_myco := 4.0
 var trade_link_rate_per_sec_myco := 10.0
@@ -61,6 +65,7 @@ var sparkle_scene: PackedScene = load("res://scenes/sparkle.tscn")
 var growth_time = 0.4
 var decay_time = 1110.6
 var action_time = 0.3
+var village_action_time := 0.2
 var evap_time = 1
 var mode = "challenge"
 var stage = 1
@@ -471,6 +476,20 @@ func get_ui_layout_refresh_interval() -> float:
 			return 0.066667
 
 
+func get_village_action_time() -> float:
+	return maxf(village_action_time, 0.01)
+
+
+func get_agent_action_time(agent: Variant) -> float:
+	var default_action_time = maxf(action_time, 0.01)
+	if not is_instance_valid(agent):
+		return default_action_time
+	var agent_type = str(agent.get("type"))
+	if agent_type == "farmer" or agent_type == "vendor" or agent_type == "cook" or agent_type == "bank":
+		return get_village_action_time()
+	return default_action_time
+
+
 func get_trade_visual_link_packet_cap() -> int:
 	match get_effective_perf_tier():
 		1:
@@ -531,6 +550,25 @@ func _consume_trade_bucket(store: Dictionary, key: String, rate_per_sec: float, 
 	return true
 
 
+func _is_village_dispatch_actor(agent: Variant) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	var agent_type = str(agent.get("type"))
+	if agent_type == "farmer" or agent_type == "vendor" or agent_type == "cook" or agent_type == "bank":
+		return true
+	if agent_type == "myco":
+		if bool(agent.get_meta("story_village_actor", false)):
+			var story_kind = str(agent.get_meta("story_kind", ""))
+			if story_kind.begins_with("basket"):
+				return true
+		var script_ref = agent.get_script()
+		if script_ref != null:
+			var script_path = str(script_ref.resource_path)
+			if script_path.ends_with("basket.gd"):
+				return true
+	return false
+
+
 func _get_trade_dispatch_profile(from_agent: Variant) -> Dictionary:
 	var sender_rate = trade_sender_rate_per_sec
 	var sender_burst = trade_sender_burst
@@ -544,6 +582,11 @@ func _get_trade_dispatch_profile(from_agent: Variant) -> Dictionary:
 			sender_burst = trade_sender_burst_myco
 			link_rate = trade_link_rate_per_sec_myco
 			link_burst = trade_link_burst_myco
+		elif _is_village_dispatch_actor(from_agent):
+			sender_rate = trade_sender_rate_per_sec_village
+			sender_burst = trade_sender_burst_village
+			link_rate = trade_link_rate_per_sec_village
+			link_burst = trade_link_burst_village
 	return {
 		"sender_rate": sender_rate,
 		"sender_burst": sender_burst,

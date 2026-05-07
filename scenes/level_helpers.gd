@@ -8,6 +8,7 @@ const HOTKEY_TOGGLE_BARS := [KEY_B]
 const HOTKEY_TOGGLE_BABY := [KEY_M]
 const HOTKEY_TOGGLE_REPOSITION := [KEY_G]
 const HOTKEY_TOGGLE_BANK := [KEY_J]
+const HOTKEY_TOGGLE_FARMER_N_AUTOFILL := [KEY_F]
 const HOTKEY_CYCLE_ACTIVE := [KEY_TAB]
 const HOTKEY_CONNECTORS_2 := [KEY_2]
 const HOTKEY_CONNECTORS_3 := [KEY_3]
@@ -259,6 +260,11 @@ static func handle_gameplay_hotkeys(event: InputEvent, owner: Node, agents_root:
 		if is_instance_valid(owner) and owner.has_method("toggle_bank_hotkey"):
 			owner.toggle_bank_hotkey()
 		return true
+
+	if _is_pressed_key(event, HOTKEY_TOGGLE_FARMER_N_AUTOFILL):
+		if is_instance_valid(owner) and owner.has_method("toggle_challenge_farmer_n_autofill"):
+			owner.toggle_challenge_farmer_n_autofill()
+			return true
 
 	if include_connector_keys:
 		if _is_pressed_key(event, HOTKEY_CONNECTORS_2):

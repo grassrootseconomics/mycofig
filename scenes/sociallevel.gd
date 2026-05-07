@@ -816,8 +816,8 @@ func _make_bi_myco(pos: Vector2, asset_key: String):
 	
 	var basket = basket_scene.instantiate()
 	basket.assets = {
-	asset_key: 5,
-	"R": 0
+		asset_key: 5,
+		"R": 5
 	}
 	basket.needs = {
 	asset_key: 10,

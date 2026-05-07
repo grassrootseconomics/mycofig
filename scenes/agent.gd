@@ -1683,7 +1683,7 @@ func set_variables(a_dict) -> void:
 	$GrowthTimer.wait_time = Global.growth_time
 	$EvaporateTimer.wait_time = Global.evap_time
 	$DecayTimer.wait_time = Global.decay_time
-	$ActionTimer.wait_time = Global.action_time
+	$ActionTimer.wait_time = Global.get_agent_action_time(self)
 	bars = { #list of needed assets with need level
 		"N": $CanvasLayer/Nbar,
 		"P": $CanvasLayer/Pbar,

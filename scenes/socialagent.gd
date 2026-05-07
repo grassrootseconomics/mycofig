@@ -404,7 +404,7 @@ func _get_liquidity_r_fill_target() -> float:
 	return maxf(need_r, float(_get_villager_r_buffer_target()))
 
 
-func _can_bank_offer_r_to_target(target: Node, offered_res: String) -> bool:
+func _can_bank_offer_r_to_target(target: Node, offered_res: String, requested_res: String = "") -> bool:
 	if str(type) != "bank" or offered_res != "R":
 		return true
 	if not is_instance_valid(target):
@@ -412,7 +412,13 @@ func _can_bank_offer_r_to_target(target: Node, offered_res: String) -> bool:
 	if target.assets.get("R") == null or target.needs.get("R") == null:
 		return true
 	# Basket/target max is needs["R"] * 2, so half capacity is needs["R"].
-	return float(target.assets["R"]) < float(target.needs["R"])
+	if float(target.assets["R"]) >= float(target.needs["R"]):
+		return false
+	if requested_res == "":
+		return true
+	if target.assets.get(requested_res) == null or target.needs.get(requested_res) == null:
+		return false
+	return float(target.assets[requested_res]) - float(target.needs[requested_res]) >= 1.0
 
 
 func _try_send_liquidity_swap(offered_res: String, requested_res: String, debug_mode: bool = false) -> bool:
@@ -595,7 +601,7 @@ func logistics():
 										if child.assets.get(excess) != null and child.assets.get(need) != null:
 											if debug_mode:
 												print( " ... myco assets: " , child.assets)
-											if(child.assets[excess] < child.needs[excess] *2 and _can_bank_offer_r_to_target(child, excess)):
+											if(child.assets[excess] < child.needs[excess] *2 and _can_bank_offer_r_to_target(child, excess, need)):
 												var path_dict = {
 													"from_agent": self,
 													"to_agent": child,
@@ -615,7 +621,7 @@ func logistics():
 													is_trading = true
 													break
 												#trade.emit(path_dict)
-												#send what is in excess. 
+												#send what is in excess.
 											
 					
 									#Attempt to push out what you have in abundance

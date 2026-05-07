@@ -41,6 +41,7 @@ const STORY_PHASE3_MYCO_NEAR_VILLAGER_MIN_RADIUS := 3
 const STORY_PHASE3_MYCO_NEAR_VILLAGER_MAX_RADIUS := 7
 const STORY_PHASE4_FARMER_HARVEST_RADIUS := 8
 const STORY_FARMER_LOW_N_REHARVEST_THRESHOLD := 1.0
+const CHALLENGE_FARMER_N_AUTOFILL_INTERVAL := 0.20
 const BIRD_FORWARD_TARGET_MIN_X_DELTA := 8.0
 const BASKET_NEAR_PERSON_MAX_TILES := 4
 const STORY_VILLAGE_PERMANENT_REVEAL_BUFFER := 4
@@ -154,6 +155,8 @@ var _dynamic_tuktuk_spawn_accum := 0.0
 var _dynamic_predator_stagger_timer := 0.0
 var _dynamic_predator_blocked_type := ""
 var _bank_hotkey_enabled := true
+var _challenge_farmer_n_autofill_enabled := false
+var _challenge_farmer_n_autofill_accum := 0.0
 @onready var _bird_sound_player: AudioStreamPlayer2D = get_node_or_null("BirdSound")
 @onready var _bird_long_player: AudioStreamPlayer = get_node_or_null("BirdLong")
 @onready var _car_sound_player: AudioStreamPlayer2D = get_node_or_null("CarSound")
@@ -1044,6 +1047,40 @@ func _refill_story_farmer_n_resource(target_farmer: Node) -> void:
 		n_bar.value = n_cap
 
 
+func _is_challenge_farmer_n_autofill_allowed() -> bool:
+	return _is_challenge_dual_village_runtime() and _story_village_revealed
+
+
+func _refill_challenge_farmers_n() -> int:
+	if not _is_challenge_farmer_n_autofill_allowed():
+		return 0
+	var refill_count := 0
+	for agent in $Agents.get_children():
+		if not is_instance_valid(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if not _is_story_villager(agent):
+			continue
+		if str(agent.get("type")) != "farmer":
+			continue
+		_refill_story_farmer_n_resource(agent)
+		refill_count += 1
+	return refill_count
+
+
+func _update_challenge_farmer_n_autofill(delta: float) -> void:
+	if not _challenge_farmer_n_autofill_enabled:
+		return
+	if not _is_challenge_farmer_n_autofill_allowed():
+		return
+	_challenge_farmer_n_autofill_accum += maxf(delta, 0.0)
+	if _challenge_farmer_n_autofill_accum < CHALLENGE_FARMER_N_AUTOFILL_INTERVAL:
+		return
+	_challenge_farmer_n_autofill_accum = 0.0
+	_refill_challenge_farmers_n()
+
+
 func _story_farmer_is_low_n(target_farmer: Node) -> bool:
 	if not is_instance_valid(target_farmer):
 		return false
@@ -1130,6 +1167,8 @@ func _get_story_farmer_oldest_pending_inbound_created_msec(farmer: Node, fallbac
 
 func story_farmer_auto_harvest_is_enabled(farmer: Node) -> bool:
 	if not _is_parallel_village_runtime() or not _story_village_revealed:
+		return false
+	if _is_challenge_dual_village_runtime() and _challenge_farmer_n_autofill_enabled:
 		return false
 	if _is_story_mode() and (_story_phase_id < 4 or _story_phase_id > 6):
 		return false
@@ -1943,6 +1982,18 @@ func toggle_bank_hotkey() -> void:
 	print("Bank trading hotkey state: ", "ON" if _bank_hotkey_enabled else "OFF")
 
 
+func toggle_challenge_farmer_n_autofill() -> void:
+	if not _is_challenge_dual_village_runtime():
+		print("Challenge farmer N autofill is only available in challenge mode.")
+		return
+	_challenge_farmer_n_autofill_enabled = not _challenge_farmer_n_autofill_enabled
+	_challenge_farmer_n_autofill_accum = CHALLENGE_FARMER_N_AUTOFILL_INTERVAL
+	var refill_count := 0
+	if _challenge_farmer_n_autofill_enabled:
+		refill_count = _refill_challenge_farmers_n()
+	print("Challenge farmer N autofill hotkey state: ", "ON" if _challenge_farmer_n_autofill_enabled else "OFF", " farmers: ", refill_count)
+
+
 func _input(event):
 	if _is_keyboard_escape_input(event):
 		if $UI.has_method("show_back_to_menu_confirm"):
@@ -1957,6 +2008,7 @@ func _input(event):
 
 func _process(_delta: float) -> void:
 	_update_tree_ambient_audio(_delta)
+	_update_challenge_farmer_n_autofill(_delta)
 	if not Global.is_mobile_platform:
 		LevelHelpersRef.update_agent_hover_focus(self, $Agents)
 	_update_dynamic_predator_pressure(_delta)
@@ -2892,7 +2944,7 @@ func make_story_basket(pos: Vector2, asset_key: String = "") -> Node:
 	if normalized_asset != "":
 		basket.assets = {
 			normalized_asset: 5,
-			"R": 0
+			"R": 5
 		}
 		basket.needs = {
 			normalized_asset: 10,

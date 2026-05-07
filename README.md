@@ -91,6 +91,7 @@ Choose mode from title screen:
 - `M`: toggle baby/spawn behavior.
 - `G`: toggle repositioning of already-placed plants/fungi (default `OFF`).
 - `B`: toggle resource bars (bars start OFF by default).
+- `F`: challenge-mode farmer `N` autofill test toggle.
 - `+` / `-`: change movement speed.
 - `Esc` or `Q`: end run / go to game-over screen.
 - `Android Back`: first press pauses, next press opens exit-to-menu confirmation.

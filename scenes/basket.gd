@@ -1,5 +1,7 @@
 extends Agent
 
+const BASKET_MAX_SENDS_PER_LOGISTICS_TICK := 2
+
 var trade_queue = []
 func set_variables(a_dict) -> void:
 	name = a_dict.get("name")
@@ -18,7 +20,7 @@ func set_variables(a_dict) -> void:
 	#print("start radius: ", buddy_radius)
 	$Sprite2D.texture = sprite_texture
 	$GrowthTimer.wait_time = Global.growth_time
-	$ActionTimer.wait_time = Global.action_time
+	$ActionTimer.wait_time = Global.get_village_action_time()
 	
 	$CanvasLayer/Nbar.visible = false
 	$CanvasLayer/Pbar.visible = false
@@ -83,6 +85,11 @@ func generate_buddies() -> void:
 func logistics():
 	var new_trade_queue = []
 	for trade in trade_queue:
+		var queued_asset = str(trade.get("trade_asset", ""))
+		var queued_amount = int(trade.get("trade_amount", 0))
+		if bool(trade.get("bank_reserve_protected", false)) and not _bank_trade_has_return_surplus(queued_asset, queued_amount):
+			new_trade_queue.append(trade)
+			continue
 		if(assets[trade.trade_asset]>= trade.trade_amount):
 			if _emit_trade_with_budget(trade):
 				assets[trade.trade_asset]-=trade.trade_amount
@@ -151,16 +158,16 @@ func logistics():
 			if debug_mode:
 				print(" shuffle" )
 			var need_itter = 0
-			var sent_trade := false
+			var sent_count := 0
 			for child in trade_buddies: #children:
-				if sent_trade:
+				if sent_count >= BASKET_MAX_SENDS_PER_LOGISTICS_TICK:
 					break
 				if(is_instance_valid(child)):
 					if child.type == 'myco' and child.name != self.name:
 						if debug_mode:
 							print(" child found: ", child.name )
 						for excess in keys_e:
-							if sent_trade:
+							if sent_count >= BASKET_MAX_SENDS_PER_LOGISTICS_TICK:
 								break
 							if(child.assets.get(excess) != null):
 								if current_excess[excess] > 0 and assets[excess] > needs[excess] and child.assets[excess]<child.needs[excess]:
@@ -179,11 +186,12 @@ func logistics():
 									if _emit_trade_with_budget(path_dict):
 										assets[excess] -= 1#amt_needed
 										bars[excess].value = assets[excess]
-										logistics_ready = false
-										sent_trade = true
+										sent_count += 1
 									#break
 									#trade.emit(path_dict)
 									#send what is in excess. 
+			if sent_count > 0:
+				logistics_ready = false
 								
 
 func draw_selected_box():
@@ -277,7 +285,44 @@ func _input(event):
 			_on_pointer_press(event.position)
 		else:
 			_on_pointer_release(event.position)
-				
+
+
+
+func _calculate_swap_return_amount(trade: Area2D) -> int:
+	var trade_asset = str(trade.asset)
+	var return_asset = str(trade.return_asset)
+	var trade_value = float(Global.values.get(trade_asset, 1))
+	var return_value = float(Global.values.get(return_asset, 1))
+	if return_value <= 0.0:
+		return 0
+	var return_amount = float(trade.return_amt) * trade_value / return_value
+	if return_amount < 0.5:
+		return 0
+	if return_amount < 1.0:
+		return 1
+	return int(return_amount)
+
+
+func _bank_trade_has_return_surplus(return_asset: String, return_amount: int) -> bool:
+	if return_asset == "" or return_amount <= 0:
+		return true
+	if assets.get(return_asset) == null or needs.get(return_asset) == null:
+		return false
+	return float(assets[return_asset]) - float(needs[return_asset]) >= float(return_amount)
+
+
+func _is_bank_reserve_protected_swap(trade: Area2D, return_amount: int) -> bool:
+	if str(trade.type) != "swap":
+		return false
+	if return_amount <= 0:
+		return false
+	if str(trade.asset) != "R":
+		return false
+	if not is_instance_valid(trade.start_agent):
+		return false
+	if str(trade.start_agent.get("type")) != "bank":
+		return false
+	return true
 
 
 func _on_area_entered(trade: Area2D) -> void:
@@ -287,21 +332,20 @@ func _on_area_entered(trade: Area2D) -> void:
 		#trade.start_agent.assets[trade.asset]-=trade.amount
 		
 		if assets.get(trade.asset) != null:
+			var return_amount := 0
+			var bank_reserve_protected := false
+			if trade.type == "swap" and assets.get(trade.return_asset) != null:
+				return_amount = _calculate_swap_return_amount(trade)
+				bank_reserve_protected = _is_bank_reserve_protected_swap(trade, return_amount)
+				if bank_reserve_protected and not _bank_trade_has_return_surplus(str(trade.return_asset), return_amount):
+					trade.call_deferred("queue_free")
+					return
 			if(assets[trade.asset] < (needs[trade.asset]*2)):
 				assets[trade.asset]+=trade.amount
 				bars[trade.asset].value = assets[trade.asset]
 			
 			if trade.type == "swap":
 				if(assets.get(trade.return_asset) != null):
-					var return_amount = trade.return_amt*Global.values[trade.asset]/Global.values[trade.return_asset]
-					if return_amount < 0.5:
-						#print("return amount:", return_amount, trade)
-						return_amount = 0
-					else:
-						if return_amount < 1:
-							return_amount = 1
-						else:
-							return_amount = int(return_amount)
 					if return_amount > 0:
 						var liquidity_origin_value = trade.get("liquidity_cycle_origin_id")
 						var liquidity_origin_id := 0
@@ -317,9 +361,12 @@ func _on_area_entered(trade: Area2D) -> void:
 							"return_res": null,
 							"return_amt": null,
 							"liquidity_cycle_trade": bool(trade.get("liquidity_cycle_trade")),
-							"liquidity_cycle_origin_id": liquidity_origin_id
-						}	
-						if(assets[trade.return_asset]>= return_amount):
+							"liquidity_cycle_origin_id": liquidity_origin_id,
+							"bank_reserve_protected": bank_reserve_protected
+						}
+						if bank_reserve_protected and not _bank_trade_has_return_surplus(str(trade.return_asset), return_amount):
+							trade_queue.append(path_dict)
+						elif(assets[trade.return_asset]>= return_amount):
 							if _emit_trade_with_budget(path_dict):
 								assets[trade.return_asset]-=return_amount
 								bars[trade.return_asset].value = assets[trade.return_asset]

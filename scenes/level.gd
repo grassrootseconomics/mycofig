@@ -1352,7 +1352,7 @@ func can_place_inventory_item_at_world_pos(item_name: String, world_pos: Vector2
 		var parent_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(parent_anchor.global_position)))
 		if _tile_chebyshev_distance(coord, parent_coord) > DEFAULT_PARENT_BOUND_RADIUS_TILES:
 			return false
-		if LevelHelpersRef.is_tile_occupied(self, $Agents, coord):
+		if LevelHelpersRef.is_tile_occupied(self, $Agents, coord, null, true):
 			return false
 	elif spawn_name == "tree":
 		# Acorn/tree footprint in plants mode is two vertical tiles:
@@ -1360,9 +1360,9 @@ func can_place_inventory_item_at_world_pos(item_name: String, world_pos: Vector2
 		var upper_coord = coord + Vector2i(0, -1)
 		if not world.in_bounds(upper_coord):
 			return false
-		if LevelHelpersRef.is_tile_occupied(self, $Agents, coord):
+		if LevelHelpersRef.is_tile_occupied(self, $Agents, coord, null, true):
 			return false
-		if LevelHelpersRef.is_tile_occupied(self, $Agents, upper_coord):
+		if LevelHelpersRef.is_tile_occupied(self, $Agents, upper_coord, null, true):
 			return false
 	else:
 		var exact_spawn = _resolve_exact_tile_spawn_pos(target_pos)
@@ -1433,7 +1433,7 @@ func _resolve_exact_tile_spawn_pos(pos: Vector2, ignore_agent: Variant = null) -
 	if not world.in_bounds(coord):
 		result["ok"] = false
 		return result
-	if LevelHelpersRef.is_tile_occupied(self, $Agents, coord, ignore_agent):
+	if LevelHelpersRef.is_tile_occupied(self, $Agents, coord, ignore_agent, true):
 		result["ok"] = false
 		return result
 	result["pos"] = world.tile_to_world_center(coord)
@@ -1544,7 +1544,7 @@ func _find_parent_bounded_open_tile(world: Node, start_coord: Vector2i, parent_c
 					continue
 				if _tile_chebyshev_distance(coord, parent_coord) > safe_max:
 					continue
-				if LevelHelpersRef.is_tile_occupied(self, $Agents, coord, ignore_agent):
+				if LevelHelpersRef.is_tile_occupied(self, $Agents, coord, ignore_agent, true):
 					continue
 				return coord
 	return Vector2i(-1, -1)
@@ -1575,10 +1575,10 @@ func _resolve_parent_bounded_spawn_pos(spawn_pos: Vector2, parent_anchor: Varian
 
 	if desired_in_range:
 		if require_exact_tile:
-			if not LevelHelpersRef.is_tile_occupied(self, $Agents, desired_coord, ignore_agent):
+			if not LevelHelpersRef.is_tile_occupied(self, $Agents, desired_coord, ignore_agent, true):
 				resolved_coord = desired_coord
 		else:
-			if not LevelHelpersRef.is_tile_occupied(self, $Agents, desired_coord, ignore_agent):
+			if not LevelHelpersRef.is_tile_occupied(self, $Agents, desired_coord, ignore_agent, true):
 				resolved_coord = desired_coord
 			else:
 				resolved_coord = _find_parent_bounded_open_tile(world, desired_coord, parent_coord, safe_max, ignore_agent)
@@ -1695,7 +1695,7 @@ func _validate_myco_spawn(spawn_pos: Vector2, ignore_agent: Variant = null) -> D
 	result["coord"] = coord
 	if not world.in_bounds(coord):
 		return result
-	if LevelHelpersRef.is_tile_occupied(self, $Agents, coord, ignore_agent):
+	if LevelHelpersRef.is_tile_occupied(self, $Agents, coord, ignore_agent, true):
 		return result
 	if world.has_method("can_place_myco_on_tile"):
 		if not bool(world.call("can_place_myco_on_tile", coord)):
@@ -1848,12 +1848,15 @@ func _ready():
 		world.set_camera_world_center(myco.global_position)
 	LevelHelpersRef.refresh_agent_bar_visibility($Agents)
 	_story_refresh_hud()
-	
+
 	if(Global.is_raining == true):
 		var cloud_width = mid_width + 250
 		var cloud_height = mid_height - 300
 		var cloud_position = Vector2(cloud_width,cloud_height)
-
+		if Global.mode == "challenge" and is_instance_valid(myco) and _supports_world_tiles(world):
+			var myco_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(myco.global_position)))
+			cloud_position = _tile_pos_from_center(world, myco_coord, Vector2i(4, -4))
+	
 		make_cloud(cloud_position)
 
 	if _is_challenge_dual_village_runtime():
@@ -2462,6 +2465,7 @@ func _on_new_agent(agent_dict) -> void:
 					if replace_target.has_method("kill_it"):
 						replace_target.kill_it()
 					else:
+						LevelHelpersRef.unregister_agent_occupancy(self, replace_target)
 						replace_target.call_deferred("queue_free")
 					require_exact_tile = true
 					spawn_pos = replace_pos

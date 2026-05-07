@@ -107,7 +107,7 @@ func _resolve_exact_tile_spawn_pos(pos: Vector2, ignore_agent: Variant = null) -
 	if not world.in_bounds(coord):
 		result["ok"] = false
 		return result
-	if LevelHelpersRef.is_tile_occupied(self, $Agents, coord, ignore_agent):
+	if LevelHelpersRef.is_tile_occupied(self, $Agents, coord, ignore_agent, true):
 		result["ok"] = false
 		return result
 	result["pos"] = world.tile_to_world_center(coord)
@@ -514,6 +514,7 @@ func _on_new_agent(agent_dict) -> void:
 			if replace_target.has_method("kill_it"):
 				replace_target.kill_it()
 			else:
+				LevelHelpersRef.unregister_agent_occupancy(self, replace_target)
 				replace_target.call_deferred("queue_free")
 			require_exact_tile = true
 	if require_exact_tile:

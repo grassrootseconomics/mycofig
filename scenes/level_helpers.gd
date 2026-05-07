@@ -678,7 +678,7 @@ static func _agent_covers_tile(level_root: Node, agent: Node, coord: Vector2i) -
 	return false
 
 
-static func can_place_agent_on_tile(level_root: Node, agents_root: Node, candidate_agent: Node, target_tile: Vector2i, ignore: Node = null, sprite_scale_override: Variant = null) -> bool:
+static func can_place_agent_on_tile(level_root: Node, agents_root: Node, candidate_agent: Node, target_tile: Vector2i, ignore: Node = null, sprite_scale_override: Variant = null, verify_cached_miss: bool = false) -> bool:
 	if not _supports_tile_world(level_root):
 		return true
 	var world = _get_world_foundation(level_root)
@@ -687,7 +687,7 @@ static func can_place_agent_on_tile(level_root: Node, agents_root: Node, candida
 	if not is_instance_valid(agents_root):
 		return true
 	if not is_instance_valid(candidate_agent):
-		return not is_tile_occupied(level_root, agents_root, target_tile, ignore)
+		return not is_tile_occupied(level_root, agents_root, target_tile, ignore, verify_cached_miss)
 
 	var target_center = world.tile_to_world_center(target_tile)
 	if _agent_uses_multi_tile_occupancy(candidate_agent) and not _is_two_tile_vertical_tree(candidate_agent):
@@ -718,7 +718,8 @@ static func can_place_agent_on_tile(level_root: Node, agents_root: Node, candida
 		for coord in candidate_tiles:
 			if world.is_tile_occupied_cached(coord, ignore_agent):
 				return false
-		return true
+		if not verify_cached_miss:
+			return true
 
 	for agent in agents_root.get_children():
 		if not _is_tile_blocking_agent(agent):
@@ -736,14 +737,17 @@ static func can_place_agent_on_tile(level_root: Node, agents_root: Node, candida
 	return true
 
 
-static func is_tile_occupied(level_root: Node, agents_root: Node, coord: Vector2i, ignore: Node = null) -> bool:
+static func is_tile_occupied(level_root: Node, agents_root: Node, coord: Vector2i, ignore: Node = null, verify_cached_miss: bool = false) -> bool:
 	if not _supports_tile_world(level_root):
 		return false
 	if not is_instance_valid(agents_root):
 		return false
 	var world = _get_world_foundation(level_root)
 	if is_instance_valid(world) and world.has_method("is_tile_occupied_cached"):
-		return world.is_tile_occupied_cached(coord, ignore)
+		if world.is_tile_occupied_cached(coord, ignore):
+			return true
+		if not verify_cached_miss:
+			return false
 	for agent in agents_root.get_children():
 		if not _is_tile_blocking_agent(agent):
 			continue
@@ -841,9 +845,9 @@ static func _find_free_tile(level_root: Node, agents_root: Node, start_coord: Ve
 		return Vector2i(-1, -1)
 	if world.in_bounds(start_coord):
 		if is_instance_valid(candidate_agent):
-			if can_place_agent_on_tile(level_root, agents_root, candidate_agent, start_coord, candidate_agent, candidate_scale_override):
+			if can_place_agent_on_tile(level_root, agents_root, candidate_agent, start_coord, candidate_agent, candidate_scale_override, true):
 				return start_coord
-		elif not is_tile_occupied(level_root, agents_root, start_coord):
+		elif not is_tile_occupied(level_root, agents_root, start_coord, null, true):
 			return start_coord
 
 	for radius in range(1, max(search_radius, 1) + 1):
@@ -855,9 +859,9 @@ static func _find_free_tile(level_root: Node, agents_root: Node, start_coord: Ve
 				if not world.in_bounds(coord):
 					continue
 				if is_instance_valid(candidate_agent):
-					if can_place_agent_on_tile(level_root, agents_root, candidate_agent, coord, candidate_agent, candidate_scale_override):
+					if can_place_agent_on_tile(level_root, agents_root, candidate_agent, coord, candidate_agent, candidate_scale_override, true):
 						return coord
-				elif not is_tile_occupied(level_root, agents_root, coord):
+				elif not is_tile_occupied(level_root, agents_root, coord, null, true):
 					return coord
 
 	var limits = _get_world_limits(world)
@@ -865,9 +869,9 @@ static func _find_free_tile(level_root: Node, agents_root: Node, start_coord: Ve
 		for x in range(limits.x):
 			var coord = Vector2i(x, y)
 			if is_instance_valid(candidate_agent):
-				if can_place_agent_on_tile(level_root, agents_root, candidate_agent, coord, candidate_agent, candidate_scale_override):
+				if can_place_agent_on_tile(level_root, agents_root, candidate_agent, coord, candidate_agent, candidate_scale_override, true):
 					return coord
-			elif not is_tile_occupied(level_root, agents_root, coord):
+			elif not is_tile_occupied(level_root, agents_root, coord, null, true):
 				return coord
 	return Vector2i(-1, -1)
 

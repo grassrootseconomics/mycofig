@@ -10,7 +10,7 @@ var quarry_type = "maize"
 var caught = false
 var _captured_target: Node = null
 var _capture_cleanup_done := false
-var _captured_target_offset := Vector2(0, -8)
+var _captured_target_offset := Vector2(-20, -8)
 
 
 func _ready():

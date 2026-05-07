@@ -55,6 +55,16 @@ func _setup_primary_buttons() -> void:
 	_style_cta_button(challenge_button, Color(0.78, 0.34, 0.10, 0.95), Color(1.0, 0.80, 0.52, 1.0))
 
 
+func _setup_version_label() -> void:
+	var version_label: Label = $VersionLabel
+	if not is_instance_valid(version_label):
+		return
+	var version_text = str(ProjectSettings.get_setting("application/config/version", "1.0.2"))
+	if not version_text.begins_with("v"):
+		version_text = "v" + version_text
+	version_label.text = version_text
+
+
 func _connect_viewport_resize_signal() -> void:
 	var viewport = get_viewport()
 	if not is_instance_valid(viewport):
@@ -157,6 +167,20 @@ func _apply_responsive_layout() -> void:
 		else:
 			title.offset_top = fallback_top + vertical_bias
 		title.offset_bottom = title.offset_top + title_height
+	var version_label: Label = $VersionLabel
+	if is_instance_valid(version_label):
+		version_label.add_theme_font_size_override("font_size", 13 if compact else 16)
+		version_label.custom_minimum_size = Vector2(112.0, 24.0)
+		var label_size = version_label.size
+		if label_size.x <= 1.0 or label_size.y <= 1.0:
+			label_size = version_label.custom_minimum_size
+		var version_gap = 24.0 if tiny else (28.0 if compact else 32.0)
+		if is_instance_valid(basket):
+			var basket_local_pos = basket.global_position - global_position
+			version_label.position = Vector2(
+				round(basket_local_pos.x - label_size.x * 0.5),
+				round(basket_local_pos.y + version_gap)
+			)
 
 
 func _reset_run_state() -> void:
@@ -186,6 +210,7 @@ func _ready():
 	$CenterContainer/BG2.modulate.a = 0
 	$CenterContainer/VBoxContainer/HBoxContainer.visible = false
 	_setup_primary_buttons()
+	_setup_version_label()
 	_connect_viewport_resize_signal()
 	_apply_responsive_layout()
 	Global.social_mode = false

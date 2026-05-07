@@ -242,10 +242,12 @@ static func _agent_supports_hover_focus(agent: Variant) -> bool:
 static func _screen_over_agent(agent: Node, screen_pos: Vector2) -> bool:
 	if not is_instance_valid(agent):
 		return false
+	var world_pos = Global.screen_to_world(agent, screen_pos)
+	if agent.has_method("_is_press_hit"):
+		return bool(agent.call("_is_press_hit", world_pos))
 	var sprite = agent.get("sprite")
 	if not is_instance_valid(sprite) or not sprite.has_method("get_rect"):
 		return false
-	var world_pos = Global.screen_to_world(agent, screen_pos)
 	return sprite.get_rect().has_point(agent.to_local(world_pos))
 
 
@@ -279,10 +281,14 @@ static func _resolve_hovered_agent_from_cell(level_root: Node, agents_root: Node
 					var occupant_id = int(occupant.get_instance_id())
 					if seen.has(occupant_id):
 						continue
-					if query_coord != coord and not _screen_over_agent(occupant, screen_pos):
+					var precise_hit = _screen_over_agent(occupant, screen_pos)
+					if query_coord != coord and not precise_hit:
 						continue
 					seen[occupant_id] = true
-					var dist = occupant.global_position.distance_squared_to(world_pos)
+					var hit_priority := 0.0
+					if not precise_hit:
+						hit_priority = 1000000000.0
+					var dist = hit_priority + occupant.global_position.distance_squared_to(world_pos)
 					if dist < best_dist:
 						best_dist = dist
 						best = occupant

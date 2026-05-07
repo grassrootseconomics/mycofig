@@ -195,6 +195,19 @@ func _get_world_foundation() -> Node:
 	return get_node_or_null("WorldFoundation")
 
 
+func _get_world_float_property(world: Node, property_name: String, fallback: float) -> float:
+	if not is_instance_valid(world):
+		return fallback
+	var raw_value = world.get(property_name)
+	if typeof(raw_value) == TYPE_INT or typeof(raw_value) == TYPE_FLOAT:
+		return raw_value * 1.0
+	return fallback
+
+
+func _get_world_int_property(world: Node, property_name: String, fallback: int) -> int:
+	return maxi(roundi(_get_world_float_property(world, property_name, fallback * 1.0)), 1)
+
+
 func _get_world_center() -> Vector2:
 	var world = _get_world_foundation()
 	if is_instance_valid(world) and world.has_method("get_world_center"):
@@ -227,7 +240,7 @@ func _compute_tree_ambient_target_db() -> float:
 	var world = _get_world_foundation()
 	var tile_size_world := 64.0
 	if is_instance_valid(world):
-		var raw_tile_size = float(world.get("tile_size"))
+		var raw_tile_size = _get_world_float_property(world, "tile_size", tile_size_world)
 		if raw_tile_size > 0.0:
 			tile_size_world = raw_tile_size
 	var radius_world = maxf(tile_size_world * AMBIENT_TREE_AUDIO_RADIUS_TILES, 1.0)
@@ -342,9 +355,9 @@ func _get_runtime_start_tile(world: Node = null) -> Vector2i:
 	var columns := 48
 	var rows := 27
 	if is_instance_valid(world):
-		columns = max(int(world.get("columns")), 1)
-		rows = max(int(world.get("rows")), 1)
-	var centered_start_x = int(floor(columns * 0.5)) - CHALLENGE_LAYOUT_CENTER_OFFSET_FROM_START_X
+		columns = _get_world_int_property(world, "columns", columns)
+		rows = _get_world_int_property(world, "rows", rows)
+	var centered_start_x = floori(columns * 0.5) - CHALLENGE_LAYOUT_CENTER_OFFSET_FROM_START_X
 	return Vector2i(
 		clampi(centered_start_x, 1, max(columns - 2, 1)),
 		clampi(STORY_START_TILE.y, 1, max(rows - 2, 1))
@@ -357,8 +370,8 @@ func _get_runtime_village_rect(world: Node = null) -> Rect2i:
 		var start_tile = _get_runtime_start_tile(world)
 		rect.position.x = start_tile.x + CHALLENGE_VILLAGE_OFFSET_RIGHT_TILES
 	if is_instance_valid(world):
-		var columns = max(int(world.get("columns")), 1)
-		var rows = max(int(world.get("rows")), 1)
+		var columns = _get_world_int_property(world, "columns", 48)
+		var rows = _get_world_int_property(world, "rows", 27)
 		var max_x = max(columns - rect.size.x, 0)
 		var max_y = max(rows - rect.size.y, 0)
 		rect.position.x = clampi(rect.position.x, 0, max_x)
@@ -441,7 +454,7 @@ func get_story_tuktuk_spawn_position() -> Vector2:
 
 func get_tuktuk_spawn_position() -> Vector2:
 	var world_rect = Global.get_world_rect(self)
-	var spawn_min_x = int(floor(world_rect.position.x - TUKTUK_SPAWN_LEFT_MIN_OFFSET))
+	var spawn_min_x = floori(world_rect.position.x - TUKTUK_SPAWN_LEFT_MIN_OFFSET)
 	var spawn_max_x = int(ceil(world_rect.position.x - TUKTUK_SPAWN_LEFT_MAX_OFFSET))
 	if spawn_max_x < spawn_min_x:
 		var swap = spawn_min_x
@@ -1473,8 +1486,8 @@ func _supports_world_tiles(world: Node) -> bool:
 
 
 func _clamp_tile_coord(world: Node, coord: Vector2i) -> Vector2i:
-	var columns = max(int(world.get("columns")), 1)
-	var rows = max(int(world.get("rows")), 1)
+	var columns = _get_world_int_property(world, "columns", 48)
+	var rows = _get_world_int_property(world, "rows", 27)
 	return Vector2i(
 		clampi(coord.x, 0, columns - 1),
 		clampi(coord.y, 0, rows - 1)
@@ -1531,8 +1544,8 @@ func _find_parent_bounded_open_tile(world: Node, start_coord: Vector2i, parent_c
 	var safe_max = maxi(max_parent_tiles, 0)
 	if safe_max <= 0:
 		return Vector2i(-1, -1)
-	var columns = max(int(world.get("columns")), 1)
-	var rows = max(int(world.get("rows")), 1)
+	var columns = _get_world_int_property(world, "columns", 48)
+	var rows = _get_world_int_property(world, "rows", 27)
 	var max_search = maxi(columns, rows)
 	for radius in range(0, max_search + 1):
 		for dy in range(-radius, radius + 1):

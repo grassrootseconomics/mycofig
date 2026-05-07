@@ -131,6 +131,19 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 32
 text = "cofi"
 
+[node name="VersionLabel" type="Label" parent="."]
+layout_mode = 1
+offset_left = 213.0
+offset_top = 568.0
+offset_right = 325.0
+offset_bottom = 592.0
+custom_minimum_size = Vector2(112, 24)
+theme_override_colors/font_color = Color(1, 1, 1, 0.72)
+theme_override_font_sizes/font_size = 16
+text = "v1.0.2"
+horizontal_alignment = 1
+vertical_alignment = 1
+
 [connection signal="toggled" from="CenterContainer/VBoxContainer/HBoxContainer/CheckButton" to="." method="_on_check_button_toggled"]
 [connection signal="toggled" from="CenterContainer/VBoxContainer/HBoxContainer/CheckButton2" to="." method="_on_check_button_2_toggled"]
 [connection signal="pressed" from="CenterContainer/VBoxContainer/Tutorial" to="." method="_on_tutorial_pressed"]

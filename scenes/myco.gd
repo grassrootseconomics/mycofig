@@ -82,7 +82,9 @@ func _refresh_buddy_radius_from_rhizo() -> void:
 	var world = get_node_or_null("../../WorldFoundation")
 	var tile_span := 64.0
 	if is_instance_valid(world):
-		tile_span = float(world.get("tile_size"))
+		var raw_tile_span = world.get("tile_size")
+		if typeof(raw_tile_span) == TYPE_INT or typeof(raw_tile_span) == TYPE_FLOAT:
+			tile_span = raw_tile_span * 1.0
 		if tile_span > 0.0:
 			min_reach = max(min_reach, tile_span * 1.05)
 	if myco_stage == MycoGrowthStage.POD_READY:
@@ -374,7 +376,10 @@ func set_variables(a_dict) -> void:
 	var world = get_node_or_null("../../WorldFoundation")
 	var tile_span := 64.0
 	if is_instance_valid(world):
-		var world_tile_size = float(world.get("tile_size"))
+		var world_tile_size := 64.0
+		var raw_tile_size = world.get("tile_size")
+		if typeof(raw_tile_size) == TYPE_INT or typeof(raw_tile_size) == TYPE_FLOAT:
+			world_tile_size = raw_tile_size * 1.0
 		if world_tile_size > 0.0:
 			tile_span = world_tile_size
 	var base_scale = sprite_myco.scale

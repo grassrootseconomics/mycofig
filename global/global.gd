@@ -175,17 +175,14 @@ var asset_colors_social = {
 	
 var ranks = {
 	0: "Sporeling",
-	1000: "Mycelium Weaver",
-	2000: "Mycorrhizal Guardian",
-	5000: "Myceliator",
-	10000: "Shroom Architect",
-	50000: "Nutrient Flow Oracle",
-	100000: "Fungal Network Shepherd",
-	500000: "Mycorrhizal Visionary",
-	1000000: "Soil Web Custodian 1",
-	2000000: "Soil Web Custodian 2",
-	3000000: "Soil Web Custodian 3",
-	4000000: "Soil Web Custodian 4",
+	20000: "Mycelium Weaver",
+	50000: "Mycorrhizal Guardian",
+	200000: "Myceliator",
+	500000: "Shroom Architect",
+	1000000: "Nutrient Flow Oracle",
+	2000000: "Fungal Network Shepherd",
+	3000000: "Mycorrhizal Visionary",
+	4000000: "Soil Web Custodian 1",
 	5000000: "Grassroots Economist"
 }
 

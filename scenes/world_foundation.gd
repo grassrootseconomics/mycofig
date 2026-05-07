@@ -1135,7 +1135,7 @@ func _get_gameplay_baseline_center() -> Vector2:
 		var story_y = clampi(STORY_START_TILE.y, 0, max(rows - 1, 0))
 		return Vector2(float(story_x), float(story_y))
 	if Global.has_method("is_challenge_dual_village_mode") and bool(Global.is_challenge_dual_village_mode()):
-		var start_x = int(floor(columns * 0.5)) - CHALLENGE_LAYOUT_CENTER_OFFSET_FROM_START_X
+		var start_x = floori(columns * 0.5) - CHALLENGE_LAYOUT_CENTER_OFFSET_FROM_START_X
 		start_x = clampi(start_x, 0, max(columns - 1, 0))
 		var start_y = clampi(STORY_START_TILE.y, 0, max(rows - 1, 0))
 		return Vector2(float(start_x), float(start_y))

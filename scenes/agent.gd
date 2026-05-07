@@ -21,6 +21,7 @@ const TEX_ACORN_TREE_SPROUT_STAGE_PATH := "res://graphics/acorn_tree_sprout_stag
 const TEX_ACORN_TREE_VINE_STAGE_PATH := "res://graphics/acorn_tree_vine_stage.png"
 const TEX_ACORN_TREE_POD_STAGE_PATH := "res://graphics/acorn_tree_pod_stage.png"
 const TEX_ACORN_TREE_DEAD_STAGE_PATH := "res://graphics/acorn_tree_dead_stage.png"
+const TEX_ACORN_HARVEST_PATH := "res://graphics/acorn_32.png"
 
 enum BeanGrowthStage {
 	SEED,
@@ -50,6 +51,8 @@ const HARVEST_GUIDE_BEAN_RECT := Rect2(0.04, 0.26, 0.50, 0.56)
 const HARVEST_GUIDE_SQUASH_RECT := Rect2(0.02, 0.30, 0.42, 0.52)
 const HARVEST_GUIDE_MAIZE_RECT := Rect2(0.28, 0.20, 0.42, 0.66)
 const HARVEST_GUIDE_MYCO_RECT := Rect2(0.08, 0.08, 0.84, 0.84)
+const TREE_HARVEST_ACORN_LOCAL_POS := Vector2(0.0, -64.0)
+const TREE_HARVEST_ACORN_HOTSPOT_RADIUS := 24.0
 
 signal trade(pos)
 signal clicked
@@ -199,6 +202,7 @@ var _hover_visual_focus := false
 var _harvest_visual_detached := false
 var _harvest_inventory_animating := false
 var _harvest_drag_proxy_in_ui := false
+var tree_harvest_sprite: Sprite2D = null
 
 
 func _get_sprite_half_extents() -> Vector2:
@@ -383,10 +387,18 @@ func _rect_from_normalized(source: Rect2, normalized: Rect2) -> Rect2:
 
 
 func _get_tree_harvest_hotspot_rect() -> Rect2:
-	if not is_instance_valid(sprite) or not sprite.has_method("get_rect"):
+	if not is_instance_valid(sprite):
 		return Rect2()
-	var rect: Rect2 = sprite.get_rect()
-	return _rect_from_normalized(rect, Rect2(0.06, 0.44, 0.40, 0.34))
+	var scale_x = maxf(absf(sprite.scale.x), 0.001)
+	var scale_y = maxf(absf(sprite.scale.y), 0.001)
+	var radius = TREE_HARVEST_ACORN_HOTSPOT_RADIUS
+	return Rect2(
+		Vector2(
+			(TREE_HARVEST_ACORN_LOCAL_POS.x - radius) / scale_x,
+			(TREE_HARVEST_ACORN_LOCAL_POS.y - radius) / scale_y
+		),
+		Vector2((radius * 2.0) / scale_x, (radius * 2.0) / scale_y)
+	)
 
 
 func get_story_harvest_guidance_rect_local() -> Rect2:
@@ -412,23 +424,27 @@ func _is_tree_harvest_hotspot_hit(world_pos: Vector2) -> bool:
 		return false
 	if not can_drag_for_inventory_harvest():
 		return false
-	if not is_instance_valid(sprite) or not sprite.has_method("get_rect"):
-		return false
 
-	# Acorn-only harvest hotspot: left/lower pocket of the mature tree sprite.
-	var hotspot = _get_tree_harvest_hotspot_rect()
-	var sprite_local_click = sprite.to_local(world_pos)
-	if not hotspot.has_point(sprite_local_click):
-		return false
-
-	# Explicitly block overlap into the top-left neighboring tile.
 	var world = _get_world_foundation_node()
 	if is_instance_valid(world) and world.has_method("world_to_tile"):
 		var click_coord = Vector2i(world.world_to_tile(_clamp_position_to_world_rect(world_pos)))
 		var base_coord = Vector2i(world.world_to_tile(_clamp_position_to_world_rect(global_position)))
-		if click_coord.x < base_coord.x and click_coord.y < base_coord.y:
+		if click_coord != base_coord + Vector2i(0, -1):
 			return false
-	return true
+
+	var acorn_center = global_position + TREE_HARVEST_ACORN_LOCAL_POS
+	return world_pos.distance_squared_to(acorn_center) <= TREE_HARVEST_ACORN_HOTSPOT_RADIUS * TREE_HARVEST_ACORN_HOTSPOT_RADIUS
+
+
+func _is_tree_occupied_tile_hit(world_pos: Vector2) -> bool:
+	if not _is_tree_lifecycle_type():
+		return false
+	var world = _get_world_foundation_node()
+	if not is_instance_valid(world) or not world.has_method("world_to_tile"):
+		return false
+	var click_coord = Vector2i(world.world_to_tile(_clamp_position_to_world_rect(world_pos)))
+	var base_coord = Vector2i(world.world_to_tile(_clamp_position_to_world_rect(global_position)))
+	return click_coord == base_coord or click_coord == base_coord + Vector2i(0, -1)
 
 
 func _is_press_hit(world_pos: Vector2) -> bool:
@@ -437,6 +453,7 @@ func _is_press_hit(world_pos: Vector2) -> bool:
 		# only the acorn hotspot should trigger harvest interactions.
 		if can_drag_for_inventory_harvest():
 			return _is_tree_harvest_hotspot_hit(world_pos)
+		return _is_tree_occupied_tile_hit(world_pos)
 	if is_instance_valid(sprite) and sprite.has_method("get_rect"):
 		if sprite.get_rect().has_point(to_local(world_pos)):
 			return true
@@ -1158,6 +1175,37 @@ func _get_lifecycle_stage_sprite_offset(stage_value: int) -> Vector2:
 			return Vector2.ZERO
 
 
+func _ensure_tree_harvest_sprite() -> void:
+	if not _is_tree_lifecycle_type():
+		return
+	if is_instance_valid(tree_harvest_sprite):
+		return
+	var acorn_sprite := Sprite2D.new()
+	acorn_sprite.name = "HarvestAcorn"
+	var loaded_texture = ResourceLoader.load(TEX_ACORN_HARVEST_PATH)
+	if loaded_texture is Texture2D:
+		acorn_sprite.texture = loaded_texture
+	acorn_sprite.position = TREE_HARVEST_ACORN_LOCAL_POS
+	acorn_sprite.z_as_relative = false
+	acorn_sprite.z_index = 115
+	acorn_sprite.visible = false
+	add_child(acorn_sprite)
+	tree_harvest_sprite = acorn_sprite
+
+
+func _refresh_tree_harvest_acorn_visual() -> void:
+	if not _is_tree_lifecycle_type():
+		if is_instance_valid(tree_harvest_sprite):
+			tree_harvest_sprite.visible = false
+		return
+	var should_show = bean_stage == BeanGrowthStage.POD_READY and bean_harvest_ready and not _harvest_visual_detached and not bool(dead)
+	if should_show:
+		_ensure_tree_harvest_sprite()
+	if is_instance_valid(tree_harvest_sprite):
+		tree_harvest_sprite.position = TREE_HARVEST_ACORN_LOCAL_POS
+		tree_harvest_sprite.visible = should_show
+
+
 func _get_lifecycle_texture_scale_adjust(texture: Texture2D) -> Vector2:
 	if not is_instance_valid(texture):
 		return Vector2.ONE
@@ -1197,7 +1245,7 @@ func _get_lifecycle_stage_texture_path(stage_value: int) -> String:
 			BeanGrowthStage.VINE:
 				return TEX_ACORN_TREE_VINE_STAGE_PATH
 			BeanGrowthStage.POD_READY:
-				return TEX_ACORN_TREE_POD_STAGE_PATH
+				return TEX_ACORN_TREE_VINE_STAGE_PATH
 			BeanGrowthStage.DEAD:
 				return TEX_ACORN_TREE_DEAD_STAGE_PATH
 		return TEX_ACORN_TREE_SPROUT_STAGE_PATH
@@ -1305,6 +1353,7 @@ func _set_bean_stage(new_stage: int, force: bool = false) -> void:
 	if bean_stage == BeanGrowthStage.POD_READY and not bean_pod_sparkle_played:
 		_spawn_growth_sparkle()
 		bean_pod_sparkle_played = true
+	_refresh_tree_harvest_acorn_visual()
 
 
 func _reset_bean_lifecycle() -> void:
@@ -1516,6 +1565,7 @@ func _begin_harvest_visual_detach() -> void:
 	if bean_stage != BeanGrowthStage.POD_READY or not bean_harvest_ready:
 		return
 	_harvest_visual_detached = true
+	_refresh_tree_harvest_acorn_visual()
 	_apply_preview_bean_visual(BeanGrowthStage.VINE)
 
 
@@ -1525,10 +1575,12 @@ func _cancel_harvest_visual_detach() -> void:
 	_harvest_visual_detached = false
 	if _is_bean_lifecycle_enabled() and bean_stage == BeanGrowthStage.POD_READY and bean_harvest_ready:
 		_apply_preview_bean_visual(BeanGrowthStage.POD_READY)
+	_refresh_tree_harvest_acorn_visual()
 
 
 func _commit_harvest_visual_detach() -> void:
 	_harvest_visual_detached = false
+	_refresh_tree_harvest_acorn_visual()
 
 
 func _apply_crop_harvest_commit_state() -> void:
@@ -1895,6 +1947,7 @@ func kill_it():
 	LevelHelpersRef.unregister_agent_occupancy(_get_level_root(), self)
 	self.call_deferred("queue_free")
 	self.dead = true
+	_refresh_tree_harvest_acorn_visual()
 	set_hover_focus(false)
 	var level_root = _get_level_root()
 	if is_instance_valid(level_root):

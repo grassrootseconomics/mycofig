@@ -50,7 +50,16 @@ const INVENTORY_ICON_PAD_BASKET := 7.0
 const INVENTORY_SIDE_BUTTON_BUFFER := 5.0
 const TUTORIAL_LABEL_HORIZONTAL_PADDING := 34.0
 const TUTORIAL_PANEL_TEXT_VERTICAL_PADDING := 44.0
+const TUTORIAL_PANEL_STORY_TEXT_VERTICAL_PADDING := 96.0
 const TUTORIAL_PANEL_MAX_HEIGHT_FRACTION := 0.62
+const STORY_TUTORIAL_PANEL_EXPANDED_SIZE := Vector2(520, 252)
+const STORY_TUTORIAL_CONTINUE_BUTTON_SIZE := Vector2(132, 40)
+const STORY_GUIDE_ARROW_COLOR := Color(1.0, 0.74, 0.16, 0.96)
+const STORY_GUIDE_ARROW_SHADOW_COLOR := Color(0.12, 0.05, 0.02, 0.42)
+const STORY_GUIDE_ARROW_WIDTH := 7.0
+const STORY_GUIDE_ARROW_SHADOW_WIDTH := 12.0
+const STORY_GUIDE_ARROW_HEAD_LENGTH := 32.0
+const STORY_GUIDE_ARROW_HEAD_WIDTH := 30.0
 const QUIT_DIALOG_PANEL_COLOR := Color(0.00, 0.13, 0.47, 0.57)
 const QUIT_DIALOG_BORDER_COLOR := Color(0.035, 0.071, 0.149, 0.78)
 const QUIT_DIALOG_SHADOW_COLOR := Color(0.0, 0.0, 0.0, 0.25)
@@ -87,6 +96,7 @@ var _slot_sparkle_rings: Dictionary = {}
 var _back_confirm_dialog: ConfirmationDialog = null
 var _minimap_drag_locked := false
 var _tutorial_toggle_button: Button = null
+var _tutorial_continue_button: Button = null
 var _tutorial_collapsed := false
 var _tutorial_last_visible := false
 var _tutorial_last_text := ""
@@ -108,6 +118,12 @@ var _inventory_icon_pad_basket := INVENTORY_ICON_PAD_BASKET
 var _tutorial_expanded_size := TUTORIAL_PANEL_EXPANDED_SIZE
 var _tutorial_expanded_size_base := TUTORIAL_PANEL_EXPANDED_SIZE
 var _tutorial_collapsed_size := TUTORIAL_PANEL_COLLAPSED_SIZE
+var _story_instruction_phase_id := 0
+var _story_phase1_arrow_layer: Node2D = null
+var _story_phase1_arrow_lines: Array = []
+var _story_phase1_arrow_shadows: Array = []
+var _story_phase1_arrow_heads: Array = []
+var _story_phase1_arrow_head_shadows: Array = []
 var _inventory_side_controls_embedded := false
 var _inventory_panel: MarginContainer = null
 var _tutorial_panel: Control = null
@@ -181,6 +197,7 @@ func setup():
 	_ensure_minimap_panel()
 	_embed_pause_quit_controls_next_to_minimap()
 	_ensure_tutorial_panel_toggle()
+	_ensure_tutorial_continue_button()
 	_update_minimap_input_lock()
 	_set_inventory_tab("farm")
 	_apply_responsive_layout()
@@ -479,6 +496,27 @@ func _make_quit_dialog_button_style(bg_color: Color) -> StyleBoxFlat:
 	return style
 
 
+func _make_story_instruction_button_style(bg_color: Color) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = bg_color
+	style.corner_radius_top_left = 10
+	style.corner_radius_top_right = 10
+	style.corner_radius_bottom_left = 10
+	style.corner_radius_bottom_right = 10
+	style.border_width_left = 2
+	style.border_width_top = 2
+	style.border_width_right = 2
+	style.border_width_bottom = 2
+	style.border_color = Color(0.92, 0.98, 0.74, 0.76)
+	style.shadow_color = Color(0.0, 0.0, 0.0, 0.28)
+	style.shadow_size = 3
+	style.content_margin_left = 16
+	style.content_margin_right = 16
+	style.content_margin_top = 8
+	style.content_margin_bottom = 8
+	return style
+
+
 func _ensure_slot_sparkle_ring(icon: TextureRect, host: Panel) -> void:
 	if not is_instance_valid(icon) or not is_instance_valid(host):
 		return
@@ -720,6 +758,199 @@ func refresh_inventory_counts() -> void:
 	_request_layout_update()
 
 
+func show_story_instruction(text_value: String, phase_id: int = 0) -> void:
+	_cache_layout_nodes()
+	_ensure_tutorial_panel_toggle()
+	_ensure_tutorial_continue_button()
+	_story_instruction_phase_id = phase_id
+	if is_instance_valid(_tutorial_label):
+		_tutorial_label.text = text_value
+	if is_instance_valid(_tutorial_panel):
+		_tutorial_panel.visible = true
+	_tutorial_collapsed = false
+	_tutorial_last_visible = false
+	_tutorial_last_text = text_value
+	_apply_tutorial_panel_state()
+	_update_story_instruction_arrows()
+	set_pause_state(true)
+
+
+func _ensure_story_phase1_arrow_overlay() -> void:
+	if is_instance_valid(_story_phase1_arrow_layer):
+		return
+	_story_phase1_arrow_layer = Node2D.new()
+	_story_phase1_arrow_layer.name = "StoryPhase1GuideArrows"
+	_story_phase1_arrow_layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	_story_phase1_arrow_layer.z_as_relative = false
+	_story_phase1_arrow_layer.z_index = 85
+	add_child(_story_phase1_arrow_layer)
+	for idx in range(2):
+		var shadow := Line2D.new()
+		shadow.name = str("ArrowShadow", idx)
+		shadow.width = STORY_GUIDE_ARROW_SHADOW_WIDTH
+		shadow.default_color = STORY_GUIDE_ARROW_SHADOW_COLOR
+		shadow.antialiased = true
+		shadow.round_precision = 12
+		shadow.visible = false
+		_story_phase1_arrow_layer.add_child(shadow)
+		_story_phase1_arrow_shadows.append(shadow)
+
+		var line := Line2D.new()
+		line.name = str("ArrowLine", idx)
+		line.width = STORY_GUIDE_ARROW_WIDTH
+		line.default_color = STORY_GUIDE_ARROW_COLOR
+		line.antialiased = true
+		line.round_precision = 12
+		line.visible = false
+		_story_phase1_arrow_layer.add_child(line)
+		_story_phase1_arrow_lines.append(line)
+
+		var head_shadow := Line2D.new()
+		head_shadow.name = str("ArrowHeadShadow", idx)
+		head_shadow.width = STORY_GUIDE_ARROW_SHADOW_WIDTH
+		head_shadow.default_color = STORY_GUIDE_ARROW_SHADOW_COLOR
+		head_shadow.antialiased = true
+		head_shadow.round_precision = 12
+		head_shadow.visible = false
+		_story_phase1_arrow_layer.add_child(head_shadow)
+		_story_phase1_arrow_head_shadows.append(head_shadow)
+
+		var head := Line2D.new()
+		head.name = str("ArrowHead", idx)
+		head.width = STORY_GUIDE_ARROW_WIDTH
+		head.default_color = STORY_GUIDE_ARROW_COLOR
+		head.antialiased = true
+		head.round_precision = 12
+		head.visible = false
+		_story_phase1_arrow_layer.add_child(head)
+		_story_phase1_arrow_heads.append(head)
+
+
+func _set_story_arrow_visible(index: int, visible: bool) -> void:
+	if index < 0 or index >= _story_phase1_arrow_lines.size():
+		return
+	var line = _story_phase1_arrow_lines[index] as Line2D
+	var shadow = _story_phase1_arrow_shadows[index] as Line2D
+	var head = _story_phase1_arrow_heads[index] as Line2D
+	var head_shadow = _story_phase1_arrow_head_shadows[index] as Line2D
+	if is_instance_valid(line):
+		line.visible = visible
+	if is_instance_valid(shadow):
+		shadow.visible = visible
+	if is_instance_valid(head):
+		head.visible = visible
+	if is_instance_valid(head_shadow):
+		head_shadow.visible = visible
+
+
+func _set_all_story_arrows_visible(visible: bool) -> void:
+	for idx in range(_story_phase1_arrow_lines.size()):
+		_set_story_arrow_visible(idx, visible)
+
+
+func _sample_story_arrow_curve(start_pos: Vector2, control_pos: Vector2, end_pos: Vector2) -> PackedVector2Array:
+	var points := PackedVector2Array()
+	var segments := 48
+	for idx in range(segments + 1):
+		var t = (idx * 1.0) / (segments * 1.0)
+		var a = start_pos.lerp(control_pos, t)
+		var b = control_pos.lerp(end_pos, t)
+		points.append(a.lerp(b, t))
+	return points
+
+
+func _make_story_arrow_head_points(tip: Vector2, tail: Vector2, length: float, width: float) -> PackedVector2Array:
+	var dir = tip - tail
+	if dir.length_squared() <= 0.01:
+		dir = Vector2.DOWN
+	else:
+		dir = dir.normalized()
+	var normal = Vector2(-dir.y, dir.x)
+	var base = tip - dir * length
+	var half_width = width * 0.5
+	var points := PackedVector2Array()
+	points.append(base + normal * half_width)
+	points.append(tip)
+	points.append(base - normal * half_width)
+	return points
+
+
+func _set_story_arrow_shape(index: int, start_pos: Vector2, control_pos: Vector2, end_pos: Vector2) -> void:
+	if index < 0 or index >= _story_phase1_arrow_lines.size():
+		return
+	var points = _sample_story_arrow_curve(start_pos, control_pos, end_pos)
+	if points.size() < 2:
+		_set_story_arrow_visible(index, false)
+		return
+	var line = _story_phase1_arrow_lines[index] as Line2D
+	var shadow = _story_phase1_arrow_shadows[index] as Line2D
+	var head = _story_phase1_arrow_heads[index] as Line2D
+	var head_shadow = _story_phase1_arrow_head_shadows[index] as Line2D
+	var tip = points[points.size() - 1]
+	var tail = points[maxi(points.size() - 5, 0)]
+	var dir = tip - tail
+	if dir.length_squared() <= 0.01:
+		dir = Vector2.DOWN
+	else:
+		dir = dir.normalized()
+	var body_points = points.duplicate()
+	body_points[body_points.size() - 1] = tip - dir * (STORY_GUIDE_ARROW_HEAD_LENGTH * 0.58)
+	if is_instance_valid(line):
+		line.points = body_points
+	if is_instance_valid(shadow):
+		var shadow_points = body_points.duplicate()
+		for point_idx in range(shadow_points.size()):
+			shadow_points[point_idx] += Vector2(2, 2)
+		shadow.points = shadow_points
+	if is_instance_valid(head):
+		head.points = _make_story_arrow_head_points(tip, tail, STORY_GUIDE_ARROW_HEAD_LENGTH, STORY_GUIDE_ARROW_HEAD_WIDTH)
+	if is_instance_valid(head_shadow):
+		head_shadow.points = _make_story_arrow_head_points(tip + Vector2(2, 2), tail + Vector2(2, 2), STORY_GUIDE_ARROW_HEAD_LENGTH + 4.0, STORY_GUIDE_ARROW_HEAD_WIDTH + 5.0)
+	_set_story_arrow_visible(index, true)
+
+
+func _get_phase1_garden_arrow_target() -> Vector2:
+	var garden_agent = Global.active_agent
+	if is_instance_valid(garden_agent):
+		return _world_to_screen(garden_agent.global_position) + Vector2(0, -18)
+	var view_size = get_viewport().get_visible_rect().size
+	return view_size * 0.5
+
+
+func _get_phase1_inventory_arrow_target() -> Vector2:
+	if is_instance_valid(_inventory_panel):
+		var inventory_rect = _inventory_panel.get_global_rect()
+		return Vector2(inventory_rect.position.x + inventory_rect.size.x * 0.5, inventory_rect.position.y - 2.0)
+	return Vector2(80, 120)
+
+
+func _should_show_story_phase1_arrows() -> bool:
+	return _story_instruction_phase_id == 1 and _is_story_instruction_mode() and is_instance_valid(_tutorial_panel) and _tutorial_panel.visible and not _tutorial_collapsed
+
+
+func _update_story_instruction_arrows() -> void:
+	if not _should_show_story_phase1_arrows():
+		if is_instance_valid(_story_phase1_arrow_layer):
+			_set_all_story_arrows_visible(false)
+		return
+	_ensure_story_phase1_arrow_overlay()
+	if not is_instance_valid(_tutorial_panel):
+		_set_all_story_arrows_visible(false)
+		return
+	var panel_rect = _tutorial_panel.get_global_rect()
+	var label_rect = _tutorial_label.get_global_rect() if is_instance_valid(_tutorial_label) else panel_rect
+	var garden_target = _get_phase1_garden_arrow_target()
+	var inventory_target = _get_phase1_inventory_arrow_target()
+
+	var garden_start = Vector2(label_rect.position.x + label_rect.size.x - 12.0, label_rect.position.y + label_rect.size.y * 0.28)
+	var garden_control = (garden_start + garden_target) * 0.5 + Vector2(112.0, 74.0)
+	_set_story_arrow_shape(0, garden_start, garden_control, garden_target)
+
+	var inventory_start = Vector2(label_rect.position.x + 12.0, label_rect.position.y + label_rect.size.y * 0.50)
+	var inventory_control = (inventory_start + inventory_target) * 0.5 + Vector2(-126.0, 82.0)
+	_set_story_arrow_shape(1, inventory_start, inventory_control, inventory_target)
+
+
 func _connect_viewport_resize_signal() -> void:
 	var viewport = get_viewport()
 	if not is_instance_valid(viewport):
@@ -825,7 +1056,8 @@ func _update_tutorial_expanded_size_for_text() -> void:
 	var wrapped_lines = _estimate_wrapped_line_count(text_value, approx_chars_per_line)
 	var effective_lines = maxi(maxi(explicit_lines, measured_lines), wrapped_lines)
 	var text_height = float(effective_lines) * line_height
-	var target_height = maxf(_tutorial_expanded_size_base.y, text_height + TUTORIAL_PANEL_TEXT_VERTICAL_PADDING)
+	var vertical_padding = TUTORIAL_PANEL_STORY_TEXT_VERTICAL_PADDING if _is_story_instruction_mode() else TUTORIAL_PANEL_TEXT_VERTICAL_PADDING
+	var target_height = maxf(_tutorial_expanded_size_base.y, text_height + vertical_padding)
 	var max_height = maxf(get_viewport().get_visible_rect().size.y * TUTORIAL_PANEL_MAX_HEIGHT_FRACTION, _tutorial_expanded_size_base.y)
 	_tutorial_expanded_size = Vector2(_tutorial_expanded_size_base.x, clampf(target_height, _tutorial_expanded_size_base.y, max_height))
 
@@ -840,11 +1072,16 @@ func _is_tiny_ui() -> bool:
 	return minf(view_size.x, view_size.y) <= UI_TINY_SHORT_EDGE
 
 
+func _is_story_instruction_mode() -> bool:
+	return str(Global.mode) == "story"
+
+
 func _apply_responsive_layout() -> void:
 	var view_rect = get_viewport().get_visible_rect()
 	var view_size = view_rect.size
 	var compact = _is_compact_ui()
 	var tiny = _is_tiny_ui()
+	var story_instructions = _is_story_instruction_mode()
 	var inventory: MarginContainer = _inventory_panel
 	if is_instance_valid(inventory):
 		var margin_px = 10 if compact else 14
@@ -882,18 +1119,39 @@ func _apply_responsive_layout() -> void:
 	var tutorial_label: Label = _tutorial_label
 	if is_instance_valid(tutorial_label):
 		tutorial_label.add_theme_font_size_override("font_size", 19 if tiny else (18 if compact else 17))
-		tutorial_label.offset_left = 16.0
-		tutorial_label.offset_top = 14.0
-		tutorial_label.offset_right = -18.0
-		tutorial_label.offset_bottom = -18.0
-	var expanded_width = minf(TUTORIAL_PANEL_EXPANDED_SIZE.x, maxf(view_size.x - 24.0, 248.0))
+		tutorial_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		tutorial_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		tutorial_label.offset_left = 24.0 if story_instructions else 16.0
+		tutorial_label.offset_top = 20.0 if story_instructions else 14.0
+		tutorial_label.offset_right = -24.0 if story_instructions else -18.0
+		tutorial_label.offset_bottom = -66.0 if story_instructions else -18.0
+	var max_expanded_width = STORY_TUTORIAL_PANEL_EXPANDED_SIZE.x if story_instructions else TUTORIAL_PANEL_EXPANDED_SIZE.x
+	var min_expanded_width = 300.0 if story_instructions else 248.0
+	var expanded_width = minf(max_expanded_width, maxf(view_size.x - 24.0, min_expanded_width))
 	var expanded_height = 188.0 if tiny else (182.0 if compact else TUTORIAL_PANEL_EXPANDED_SIZE.y)
+	if story_instructions:
+		expanded_height = 226.0 if tiny else (238.0 if compact else STORY_TUTORIAL_PANEL_EXPANDED_SIZE.y)
 	_tutorial_expanded_size_base = Vector2(expanded_width, expanded_height)
 	_tutorial_expanded_size = _tutorial_expanded_size_base
 	_tutorial_collapsed_size = Vector2(52, 52) if compact else TUTORIAL_PANEL_COLLAPSED_SIZE
 	if is_instance_valid(_tutorial_toggle_button):
 		_tutorial_toggle_button.custom_minimum_size = Vector2(38, 38) if tiny else (Vector2(34, 34) if compact else Vector2(28, 28))
 		_tutorial_toggle_button.add_theme_font_size_override("font_size", 18 if compact else 14)
+	if is_instance_valid(_tutorial_continue_button):
+		var continue_size = Vector2(150, 44) if compact else STORY_TUTORIAL_CONTINUE_BUTTON_SIZE
+		if tiny:
+			continue_size = Vector2(154, 46)
+		_tutorial_continue_button.custom_minimum_size = continue_size
+		_tutorial_continue_button.size = continue_size
+		_tutorial_continue_button.anchor_left = 0.5
+		_tutorial_continue_button.anchor_right = 0.5
+		_tutorial_continue_button.anchor_top = 1.0
+		_tutorial_continue_button.anchor_bottom = 1.0
+		_tutorial_continue_button.offset_left = -continue_size.x * 0.5
+		_tutorial_continue_button.offset_right = continue_size.x * 0.5
+		_tutorial_continue_button.offset_top = -continue_size.y - 12.0
+		_tutorial_continue_button.offset_bottom = -12.0
+		_tutorial_continue_button.add_theme_font_size_override("font_size", 18 if compact else 16)
 	var pause_button: Button = _get_pause_button()
 	var quit_button: Button = _get_quit_button()
 	var pause_size = SIDE_BUTTON_SIZE_TINY if tiny else (SIDE_BUTTON_SIZE_COMPACT if compact else SIDE_BUTTON_SIZE_DEFAULT)
@@ -939,6 +1197,7 @@ func _process(delta: float) -> void:
 	_update_inventory_phase1_sparkle_animation(delta)
 	_refresh_tutorial_panel_state()
 	_update_layout_pass(delta)
+	_update_story_instruction_arrows()
 
 
 func _update_minimap_input_lock() -> void:
@@ -958,12 +1217,14 @@ func _ensure_tutorial_panel_toggle() -> void:
 	if not is_instance_valid(tutorial):
 		return
 	tutorial.clip_contents = true
+	tutorial.process_mode = Node.PROCESS_MODE_ALWAYS
 	if not is_instance_valid(_tutorial_toggle_button):
 		_tutorial_toggle_button = Button.new()
 		_tutorial_toggle_button.name = "ToggleButton"
 		_tutorial_toggle_button.text = "X"
 		_tutorial_toggle_button.custom_minimum_size = Vector2(28, 28)
 		_tutorial_toggle_button.focus_mode = Control.FOCUS_NONE
+		_tutorial_toggle_button.process_mode = Node.PROCESS_MODE_ALWAYS
 		_tutorial_toggle_button.z_as_relative = false
 		_tutorial_toggle_button.z_index = 120
 		_tutorial_toggle_button.add_theme_font_size_override("font_size", 14)
@@ -971,6 +1232,30 @@ func _ensure_tutorial_panel_toggle() -> void:
 		add_child(_tutorial_toggle_button)
 		_request_layout_update()
 	_apply_tutorial_panel_state()
+
+
+func _ensure_tutorial_continue_button() -> void:
+	var tutorial = _tutorial_panel
+	if not is_instance_valid(tutorial):
+		return
+	if not is_instance_valid(_tutorial_continue_button):
+		_tutorial_continue_button = Button.new()
+		_tutorial_continue_button.name = "ContinueButton"
+		_tutorial_continue_button.text = "Let's go!"
+		_tutorial_continue_button.focus_mode = Control.FOCUS_NONE
+		_tutorial_continue_button.process_mode = Node.PROCESS_MODE_ALWAYS
+		_tutorial_continue_button.z_index = 40
+		_tutorial_continue_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		_tutorial_continue_button.pressed.connect(_on_tutorial_continue_pressed)
+		tutorial.add_child(_tutorial_continue_button)
+	_tutorial_continue_button.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+	_tutorial_continue_button.add_theme_color_override("font_hover_color", Color(1, 1, 1, 1))
+	_tutorial_continue_button.add_theme_color_override("font_pressed_color", Color(1, 1, 1, 1))
+	_tutorial_continue_button.add_theme_stylebox_override("normal", _make_story_instruction_button_style(Color(0.18, 0.45, 0.20, 0.96)))
+	_tutorial_continue_button.add_theme_stylebox_override("hover", _make_story_instruction_button_style(Color(0.24, 0.55, 0.24, 0.98)))
+	_tutorial_continue_button.add_theme_stylebox_override("pressed", _make_story_instruction_button_style(Color(0.12, 0.33, 0.15, 1.0)))
+	_tutorial_continue_button.visible = false
+	_request_layout_update()
 
 
 func _set_tutorial_collapsed(collapsed: bool) -> void:
@@ -991,6 +1276,8 @@ func _apply_tutorial_panel_state() -> void:
 		label.visible = content_visible
 	if is_instance_valid(helper_panel):
 		helper_panel.visible = content_visible
+	if is_instance_valid(_tutorial_continue_button):
+		_tutorial_continue_button.visible = content_visible and _is_story_instruction_mode()
 	if not _tutorial_collapsed:
 		_update_tutorial_expanded_size_for_text()
 	var target_size = _tutorial_collapsed_size if _tutorial_collapsed else _tutorial_expanded_size
@@ -1001,6 +1288,7 @@ func _apply_tutorial_panel_state() -> void:
 		_tutorial_toggle_button.visible = tutorial.visible
 	_request_layout_update()
 	_flush_layout_updates(true)
+	_update_story_instruction_arrows()
 
 
 func _position_tutorial_toggle() -> void:
@@ -1118,7 +1406,16 @@ func _refresh_tutorial_panel_state() -> void:
 
 
 func _on_tutorial_toggle_pressed() -> void:
-	_set_tutorial_collapsed(not _tutorial_collapsed)
+	var next_collapsed = not _tutorial_collapsed
+	_set_tutorial_collapsed(next_collapsed)
+	if _is_story_instruction_mode():
+		set_pause_state(not next_collapsed)
+
+
+func _on_tutorial_continue_pressed() -> void:
+	_set_tutorial_collapsed(true)
+	if _is_story_instruction_mode():
+		set_pause_state(false)
 
 
 func _on_score_timer_timeout() -> void:
@@ -2016,6 +2313,9 @@ func _on_quit_button_pressed() -> void:
 
 
 func _on_pause_button_pressed() -> void:
+	if _is_story_instruction_mode() and is_instance_valid(_tutorial_panel) and _tutorial_panel.visible and not _tutorial_collapsed:
+		set_pause_state(true)
+		return
 	var next_paused = not get_tree().paused
 	set_pause_state(next_paused)
 	if not next_paused:

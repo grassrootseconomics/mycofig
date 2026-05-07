@@ -284,8 +284,8 @@ grow_vertical = 2
 theme_override_colors/font_color = Color(1, 1, 1, 1)
 text = "Stage1: Each plant is rich 
 in minerals:"
-horizontal_alignment = 0
-vertical_alignment = 0
+horizontal_alignment = 1
+vertical_alignment = 1
 autowrap_mode = 2
 
 [node name="RestartContainer" type="MarginContainer" parent="."]

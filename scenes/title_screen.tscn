@@ -34,24 +34,28 @@ grow_vertical = 2
 [node name="BG" type="Sprite2D" parent="CenterContainer"]
 position = Vector2(306.5, 233.5)
 scale = Vector2(2.48807, 2.48807)
-texture = ExtResource("2_8cwuh")
+texture = ExtResource("3_tenq1")
 
 [node name="BG2" type="Sprite2D" parent="CenterContainer"]
+visible = false
 position = Vector2(306.5, 233.5)
 scale = Vector2(2.48807, 2.48807)
 texture = ExtResource("3_tenq1")
 
 [node name="shroom" type="Sprite2D" parent="CenterContainer"]
+visible = false
 position = Vector2(88.5, -73.4999)
 scale = Vector2(0.30561, 0.30561)
 texture = ExtResource("3_vd4ur")
 
 [node name="farmer" type="Sprite2D" parent="CenterContainer"]
+visible = false
 position = Vector2(449.5, -84.5)
 scale = Vector2(2.03894, 2.03894)
 texture = ExtResource("4_1n8o6")
 
 [node name="SmallShroom" type="Sprite2D" parent="CenterContainer"]
+visible = false
 position = Vector2(269.5, 541.5)
 scale = Vector2(0.629555, 0.629555)
 texture = ExtResource("4_knllo")
@@ -66,6 +70,7 @@ theme_override_constants/separation = 11
 alignment = 1
 
 [node name="TopLabel" type="Label" parent="."]
+visible = false
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
@@ -73,7 +78,7 @@ offset_top = 68.0
 offset_bottom = 228.0
 grow_horizontal = 2
 theme_override_font_sizes/font_size = 56
-text = "Social\nSoil"
+text = "Social Soil"
 horizontal_alignment = 1
 vertical_alignment = 1
 
@@ -92,15 +97,19 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 37
 text = "People"
 
-[node name="RegenerationLabel" type="RichTextLabel" parent="CenterContainer/VBoxContainer"]
+[node name="RegenerationLabel" type="Label" parent="CenterContainer/VBoxContainer"]
 layout_mode = 2
-size_flags_horizontal = 8
-bbcode_enabled = true
-fit_content = true
-scroll_active = false
-autowrap_mode = 0
-text = "[i]Regeneration[/i]"
+size_flags_horizontal = 4
+custom_minimum_size = Vector2(680, 124)
+theme_override_colors/font_color = Color(1, 0.84, 0.24, 1)
+theme_override_colors/font_outline_color = Color(0.035, 0.18, 0.075, 1)
+theme_override_colors/font_shadow_color = Color(0.23, 0.09, 0.02, 0.68)
+theme_override_constants/outline_size = 8
+theme_override_constants/shadow_offset_x = 4
+theme_override_constants/shadow_offset_y = 7
+text = "Social Soil"
 horizontal_alignment = 1
+vertical_alignment = 1
 
 [node name="Tutorial" type="Button" parent="CenterContainer/VBoxContainer"]
 layout_mode = 2
@@ -121,9 +130,35 @@ text = "Challenge"
 [node name="LinkButton" type="LinkButton" parent="CenterContainer/VBoxContainer"]
 layout_mode = 2
 size_flags_horizontal = 4
+custom_minimum_size = Vector2(340, 44)
+theme_override_colors/font_color = Color(0.08, 0.16, 0.1, 1)
+theme_override_colors/font_hover_color = Color(0.18, 0.33, 0.19, 1)
+theme_override_colors/font_pressed_color = Color(0.04, 0.09, 0.06, 1)
+theme_override_colors/font_outline_color = Color(1, 0.98, 0.84, 0.78)
+theme_override_constants/outline_size = 2
 theme_override_font_sizes/font_size = 30
-text = "Grassroots Economics"
+text = ""
 uri = "https://grassrootseconomics.org/book"
+
+[node name="GEPanel" type="Panel" parent="CenterContainer/VBoxContainer/LinkButton"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="GELogo" type="TextureRect" parent="CenterContainer/VBoxContainer/LinkButton"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
 
 [node name="CofiButton" type="Button" parent="CenterContainer/VBoxContainer"]
 visible = false
@@ -138,7 +173,9 @@ offset_top = 568.0
 offset_right = 325.0
 offset_bottom = 592.0
 custom_minimum_size = Vector2(112, 24)
-theme_override_colors/font_color = Color(1, 1, 1, 0.72)
+theme_override_colors/font_color = Color(0.08, 0.16, 0.1, 0.86)
+theme_override_colors/font_outline_color = Color(1, 0.98, 0.84, 0.7)
+theme_override_constants/outline_size = 2
 theme_override_font_sizes/font_size = 16
 text = "v1.0.2"
 horizontal_alignment = 1

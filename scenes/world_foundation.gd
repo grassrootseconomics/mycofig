@@ -1187,11 +1187,13 @@ func _setup_camera() -> void:
 	_clamp_camera()
 
 
-func set_camera_world_center(world_pos: Vector2) -> void:
+func set_camera_world_center(world_pos: Vector2, immediate: bool = false) -> void:
 	if not is_instance_valid(camera):
 		return
 	camera.global_position = world_pos
 	_clamp_camera()
+	if immediate:
+		camera.reset_smoothing()
 
 
 func _on_viewport_size_changed() -> void:

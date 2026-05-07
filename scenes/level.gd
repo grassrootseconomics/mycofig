@@ -313,6 +313,41 @@ func _is_harvestable_crop_target(candidate: Node) -> bool:
 	return bool(candidate.call("can_drag_for_inventory_harvest"))
 
 
+func _get_camera_visible_world_rect() -> Rect2:
+	var camera = get_viewport().get_camera_2d()
+	if not is_instance_valid(camera):
+		return Rect2(Vector2.ZERO, Vector2.ZERO)
+	var view_size = get_viewport().get_visible_rect().size
+	var zoom = camera.zoom
+	var safe_zoom = Vector2(maxf(zoom.x, 0.001), maxf(zoom.y, 0.001))
+	var world_size = Vector2(view_size.x / safe_zoom.x, view_size.y / safe_zoom.y)
+	return Rect2(camera.get_screen_center_position() - world_size * 0.5, world_size)
+
+
+func _story_has_visible_phase2_harvest_target() -> bool:
+	if not _is_story_mode():
+		return false
+	var visible_rect = _get_camera_visible_world_rect()
+	if visible_rect.size.x <= 0.0 or visible_rect.size.y <= 0.0:
+		return false
+	visible_rect = visible_rect.grow(48.0)
+	for candidate in $Agents.get_children():
+		if not is_instance_valid(candidate):
+			continue
+		if bool(candidate.get("dead")):
+			continue
+		var harvest_type = str(candidate.get("type"))
+		if not _story_is_phase2_required_inventory_harvest_type(harvest_type):
+			continue
+		if not candidate.has_method("can_drag_for_inventory_harvest"):
+			continue
+		if not bool(candidate.call("can_drag_for_inventory_harvest")):
+			continue
+		if visible_rect.has_point(candidate.global_position):
+			return true
+	return false
+
+
 func _is_story_villager(agent: Variant) -> bool:
 	if not is_instance_valid(agent):
 		return false
@@ -474,10 +509,22 @@ func get_tuktuk_spawn_position() -> Vector2:
 	return Vector2(spawn_x, spawn_y)
 
 
-func _story_set_prompt(text: String) -> void:
-	$"UI/TutorialMarginContainer1".visible = true
-	$"UI/TutorialMarginContainer1/Label".text = text
+func _story_set_prompt(text: String, phase_id: int = 0) -> void:
+	var ui_node = get_node_or_null("UI")
+	if is_instance_valid(ui_node) and ui_node.has_method("show_story_instruction"):
+		ui_node.show_story_instruction(text, phase_id)
+	else:
+		$"UI/TutorialMarginContainer1".visible = true
+		$"UI/TutorialMarginContainer1/Label".text = text
 	_set_tutorial_panel_color(Global.stage_colors.get(1, Color(0.2, 0.4, 0.2, 0.8)))
+
+
+func _story_show_initial_prompt_after_camera_centered() -> void:
+	await get_tree().process_frame
+	await get_tree().create_timer(1.0, true, false, true).timeout
+	if not _is_story_mode() or _story_phase_id != STORY_PHASE_MIN:
+		return
+	_story_set_prompt(Global.story_stage_text.get(1, "Place crops and myco from inventory to start restoring soil."), STORY_PHASE_MIN)
 
 
 func _story_reset_phase_state() -> void:
@@ -508,7 +555,7 @@ func _set_story_phase(phase_id: int) -> void:
 	_story_phase_id = safe_phase
 	Global.story_chapter_id = maxi(Global.story_chapter_id, safe_phase)
 	var fallback = str("Phase ", safe_phase, ": Continue restoring the village ecosystem.")
-	_story_set_prompt(Global.story_stage_text.get(safe_phase, fallback))
+	_story_set_prompt(Global.story_stage_text.get(safe_phase, fallback), safe_phase)
 	if previous_phase < 2 and _story_phase_id >= 2:
 		# Birds are intentionally deferred until Phase 2 in story mode.
 		_on_update_score()
@@ -974,7 +1021,7 @@ func _story_try_advance_phase_milestones() -> void:
 	if not _is_story_mode():
 		return
 	if _story_phase_id == 1:
-		if _story_has_all_required_types(_story_phase1_placed_types, STORY_PHASE1_REQUIRED_PLACED_TYPES):
+		if _story_has_all_required_types(_story_phase1_placed_types, STORY_PHASE1_REQUIRED_PLACED_TYPES) and _story_has_visible_phase2_harvest_target():
 			_set_story_phase(2)
 	if _story_phase_id == 2:
 		if _story_has_all_required_types(_story_phase2_inventory_harvested_types, STORY_PHASE2_REQUIRED_INVENTORY_HARVEST_TYPES):
@@ -1277,6 +1324,8 @@ func story_farmer_on_harvest_success(farmer: Node, harvest_type: String) -> void
 
 
 func can_agent_harvest_to_inventory(_agent: Node) -> bool:
+	if _is_story_mode() and _story_phase_id < 2:
+		return false
 	return true
 
 
@@ -1789,9 +1838,10 @@ func _ready():
 		_story_village_center_world = world.tile_to_world_center(_get_story_village_center_coord(world))
 
 	$"UI/TutorialMarginContainer1".visible = false
+	var show_initial_story_prompt := false
 	if _is_story_mode():
 		_story_reset_phase_state()
-		_story_set_prompt(Global.story_stage_text.get(1, "Place crops and myco from inventory to start restoring soil."))
+		show_initial_story_prompt = true
 		Global.story_chapter_id = STORY_PHASE_MIN
 		Global.village_revealed = false
 		_story_village_revealed = false
@@ -1858,7 +1908,9 @@ func _ready():
 
 	Global.active_agent = myco
 	if (_is_story_mode() or _is_challenge_dual_village_runtime()) and is_instance_valid(myco) and is_instance_valid(world) and world.has_method("set_camera_world_center"):
-		world.set_camera_world_center(myco.global_position)
+		world.set_camera_world_center(myco.global_position, _is_story_mode())
+	if show_initial_story_prompt:
+		_story_show_initial_prompt_after_camera_centered()
 	LevelHelpersRef.refresh_agent_bar_visibility($Agents)
 	_story_refresh_hud()
 

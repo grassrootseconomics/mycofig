@@ -126,12 +126,20 @@ var assets_social = { #list of assets -
 	}
 
 var story_stage_text = {
-	1: "Phase 1: Plant one of each of your crops.
-	Each one provides different nutrients. Mushrooms transport nutrients and help create healthy soil. 
-	Tap on your crops to check what nutrients they need.",
-	2: "Phase 2: Harvest each type of crop in your inventory by double clicking. 
+	1: "Phase 1 - This is your Garden! 
+	
+	Below: your inventory of crops you can plant.
+	
+	Plant one of each of your crops.",
+	2: "Phase 2: Harvest each type of crop in your inventory by clicking on ripe crops. 
 	Birds are hungry, so grow more crops.",
-	3: "Phase 3: Keep planting and grow a larger garden toward the ? on the map.",
+	3: "Phase 3: 
+	Tap on your crops to check what nutrients they need.
+	Each plant provides different nutrients. (arrow from inentory to the resource bars)
+	
+	Mushrooms transport nutrients and help create healthy soil. (arrow to the white lines)
+	
+	Keep planting and grow a larger garden toward the ? on the map.",
 	4: "Phase 4: You reached a village! Looks like they need food. 
 	Grow more crops they can harvest.",
 	5: "Phase 5: Put a basket from your inventory near the villagers who are not trading so they can share with eachother.",

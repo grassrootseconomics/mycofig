@@ -10,6 +10,8 @@ var spawn_interval := 0.2
 var seed_value := 1337
 var write_traces := true
 var trace_prefix := "/tmp/mycofig_trace"
+var benchmark_draw_lines := true
+var benchmark_bars_on := false
 
 var interaction_interval := 0.35
 var interaction_burst_actions := 8
@@ -37,8 +39,8 @@ func _ready() -> void:
 	Global.mode = "challenge"
 	Global.stage = 1
 	Global.social_mode = false
-	Global.draw_lines = true
-	Global.bars_on = true
+	Global.draw_lines = benchmark_draw_lines
+	Global.bars_on = benchmark_bars_on
 	Global.perf_metrics_enabled = true
 	Global.perf_quality_override = -1
 	Global.perf_adaptive_enabled = true
@@ -300,5 +302,13 @@ func _parse_args() -> void:
 			endurance_churn_batch = maxi(int(arg.trim_prefix("--endurance-batch=")), 1)
 		elif arg.begins_with("--trace-prefix="):
 			trace_prefix = arg.trim_prefix("--trace-prefix=")
+		elif arg == "--lines":
+			benchmark_draw_lines = true
+		elif arg == "--no-lines":
+			benchmark_draw_lines = false
+		elif arg == "--bars":
+			benchmark_bars_on = true
+		elif arg == "--no-bars":
+			benchmark_bars_on = false
 		elif arg == "--no-trace":
 			write_traces = false

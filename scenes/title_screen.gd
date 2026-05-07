@@ -180,6 +180,7 @@ func _reset_run_state() -> void:
 
 func _ready():
 	DisplayServer.window_set_title("Social Soil Gardening")
+	Global.update_high_score()
 	Global.score = 0
 	$CenterContainer/BG.modulate.a = 1
 	$CenterContainer/BG2.modulate.a = 0

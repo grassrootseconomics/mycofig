@@ -28,6 +28,65 @@ static func _is_pressed_key(event: InputEvent, keycodes: Array) -> bool:
 	return false
 
 
+static func is_android_back_input(event: InputEvent) -> bool:
+	if not Global.is_mobile_platform:
+		return false
+	if event.is_action_pressed("ui_cancel"):
+		return true
+	if event is InputEventKey:
+		var key_event := event as InputEventKey
+		return key_event.pressed and not key_event.echo and key_event.keycode == KEY_ESCAPE
+	return false
+
+
+static func is_keyboard_escape_input(event: InputEvent) -> bool:
+	if Global.is_mobile_platform:
+		return false
+	if event is InputEventKey:
+		var key_event := event as InputEventKey
+		return key_event.pressed and not key_event.echo and key_event.keycode == KEY_ESCAPE
+	return false
+
+
+static func _show_back_confirm(owner: Node) -> void:
+	if not is_instance_valid(owner):
+		return
+	var ui = owner.get_node_or_null("UI")
+	if is_instance_valid(ui) and ui.has_method("show_back_to_menu_confirm"):
+		ui.show_back_to_menu_confirm()
+	else:
+		owner.get_tree().call_deferred("change_scene_to_file", "res://scenes/game_over.tscn")
+
+
+static func handle_android_back_request(owner: Node, event: InputEvent) -> bool:
+	if not is_android_back_input(event):
+		return false
+	if not is_instance_valid(owner):
+		return true
+	var ui = owner.get_node_or_null("UI")
+	if owner.get_tree().paused:
+		_show_back_confirm(owner)
+	elif is_instance_valid(ui) and ui.has_method("set_pause_state"):
+		ui.set_pause_state(true)
+	else:
+		owner.get_tree().paused = true
+	var viewport = owner.get_viewport()
+	if viewport != null:
+		viewport.set_input_as_handled()
+	return true
+
+
+static func handle_level_back_or_escape_input(owner: Node, event: InputEvent) -> bool:
+	if is_keyboard_escape_input(event):
+		_show_back_confirm(owner)
+		if is_instance_valid(owner):
+			var viewport = owner.get_viewport()
+			if viewport != null:
+				viewport.set_input_as_handled()
+		return true
+	return handle_android_back_request(owner, event)
+
+
 static func _cycle_active_agent(agents_root: Node) -> void:
 	if not is_instance_valid(agents_root):
 		return
@@ -77,6 +136,37 @@ static func clear_selection_boxes(level_root: Node) -> void:
 	level_root.set_meta("focus_outline_agent_id", -1)
 
 
+static func draw_agent_selection_box(level_root: Node, focus_agent: Variant, clear_existing: bool = true) -> void:
+	if not is_instance_valid(level_root) or not is_instance_valid(focus_agent):
+		return
+	var boxes = level_root.get_node_or_null("Boxes")
+	if not is_instance_valid(boxes):
+		return
+	if clear_existing:
+		clear_selection_boxes(level_root)
+	var sprite = focus_agent.get_node_or_null("Sprite2D")
+	if not is_instance_valid(sprite) or not sprite.has_method("get_rect"):
+		return
+	var rect: Rect2 = sprite.get_rect()
+	var sprite_scale := Vector2.ONE
+	if sprite is Node2D:
+		sprite_scale = sprite.scale
+	var rects = rect * Transform2D(0, sprite_scale, 0, Vector2())
+	var agent_pos = focus_agent.position
+	var outline := Line2D.new()
+	outline.width = 2
+	outline.z_as_relative = false
+	outline.antialiased = true
+	outline.global_rotation = 0
+	outline.modulate = Color.GREEN_YELLOW
+	outline.add_point(Vector2(agent_pos.x + rects.position.x, agent_pos.y + rects.position.y))
+	outline.add_point(Vector2(agent_pos.x + rects.position.x + rects.size.x, agent_pos.y + rects.position.y))
+	outline.add_point(Vector2(agent_pos.x + rects.position.x + rects.size.x, agent_pos.y + rects.position.y + rects.size.y))
+	outline.add_point(Vector2(agent_pos.x + rects.position.x, agent_pos.y + rects.position.y + rects.size.y))
+	outline.add_point(Vector2(agent_pos.x + rects.position.x, agent_pos.y + rects.position.y))
+	boxes.add_child(outline)
+
+
 static func set_agent_focus_outline(level_root: Node, focus_agent: Variant) -> void:
 	if not is_instance_valid(level_root):
 		return
@@ -91,8 +181,7 @@ static func set_agent_focus_outline(level_root: Node, focus_agent: Variant) -> v
 	clear_selection_boxes(level_root)
 	if not is_instance_valid(focus_agent):
 		return
-	if focus_agent.has_method("draw_selected_box"):
-		focus_agent.draw_selected_box()
+	draw_agent_selection_box(level_root, focus_agent, false)
 	level_root.set_meta("focus_outline_agent_id", next_id)
 
 
@@ -110,10 +199,15 @@ static func clear_focus_outline_if_owner(level_root: Node, owner_agent: Variant)
 static func clear_mobile_selection_and_bars(level_root: Node, agents_root: Node) -> void:
 	if not Global.is_mobile_platform:
 		return
+	clear_selection_and_bars(level_root, agents_root)
+
+
+static func clear_selection_and_bars(level_root: Node, agents_root: Node) -> void:
 	Global.active_agent = null
 	Global.bars_on = false
 	Global.prevent_auto_select = true
 	clear_selection_boxes(level_root)
+	_set_hover_focus_agent(level_root, null)
 	refresh_agent_bar_visibility(agents_root)
 
 
@@ -167,22 +261,32 @@ static func _resolve_hovered_agent_from_cell(level_root: Node, agents_root: Node
 		return null
 	var has_cached_occupancy = world.has_method("get_tile_occupants_cached")
 	if has_cached_occupancy:
-		var occupants_variant = world.get_tile_occupants_cached(coord)
-		if typeof(occupants_variant) == TYPE_ARRAY:
-			var occupants: Array = occupants_variant
-			var best: Node = null
-			var best_dist := INF
-			for occupant in occupants:
-				if not _agent_supports_hover_focus(occupant):
+		var best: Node = null
+		var best_dist := INF
+		var seen := {}
+		for y in range(coord.y - 1, coord.y + 2):
+			for x in range(coord.x - 1, coord.x + 2):
+				var query_coord = Vector2i(x, y)
+				if not world.in_bounds(query_coord):
 					continue
-				var dist = occupant.global_position.distance_squared_to(world_pos)
-				if dist < best_dist:
-					best_dist = dist
-					best = occupant
-			return best
-		# Tile-world hover should remain cell-based; if cached occupancy exists but no
-		# valid array/occupant is found, do not fall back to sprite bounds.
-		return null
+				var occupants_variant = world.get_tile_occupants_cached(query_coord)
+				if typeof(occupants_variant) != TYPE_ARRAY:
+					continue
+				var occupants: Array = occupants_variant
+				for occupant in occupants:
+					if not _agent_supports_hover_focus(occupant):
+						continue
+					var occupant_id = int(occupant.get_instance_id())
+					if seen.has(occupant_id):
+						continue
+					if query_coord != coord and not _screen_over_agent(occupant, screen_pos):
+						continue
+					seen[occupant_id] = true
+					var dist = occupant.global_position.distance_squared_to(world_pos)
+					if dist < best_dist:
+						best_dist = dist
+						best = occupant
+		return best
 	# Fallback for scenes/worlds that do not expose cached occupancy query.
 	var agents = agents_root.get_children()
 	for idx in range(agents.size() - 1, -1, -1):
@@ -195,29 +299,86 @@ static func _resolve_hovered_agent_from_cell(level_root: Node, agents_root: Node
 	return null
 
 
+static func _get_hover_focus_agent(level_root: Node) -> Node:
+	if not is_instance_valid(level_root):
+		return null
+	if not level_root.has_meta("hover_focus_agent"):
+		return null
+	var focus_variant = level_root.get_meta("hover_focus_agent")
+	if is_instance_valid(focus_variant) and focus_variant is Node:
+		return focus_variant
+	return null
+
+
+static func _set_hover_focus_agent(level_root: Node, focus_agent: Node) -> void:
+	if not is_instance_valid(level_root):
+		return
+	var previous = _get_hover_focus_agent(level_root)
+	if previous == focus_agent:
+		return
+	if is_instance_valid(previous) and _agent_supports_hover_focus(previous):
+		previous.set_hover_focus(false)
+	if is_instance_valid(focus_agent) and _agent_supports_hover_focus(focus_agent):
+		focus_agent.set_hover_focus(true)
+		level_root.set_meta("hover_focus_agent", focus_agent)
+	elif level_root.has_meta("hover_focus_agent"):
+		level_root.remove_meta("hover_focus_agent")
+
+
+static func set_hover_focus_agent(level_root: Node, focus_agent: Node) -> void:
+	_set_hover_focus_agent(level_root, focus_agent)
+
+
+static func suppress_hover_focus_until_pointer_moves(level_root: Node) -> void:
+	if not is_instance_valid(level_root):
+		return
+	var viewport = level_root.get_viewport()
+	if viewport == null:
+		return
+	level_root.set_meta("hover_focus_suppressed_screen_pos", viewport.get_mouse_position())
+
+
+static func _is_hover_focus_suppressed(level_root: Node, screen_pos: Vector2) -> bool:
+	if not is_instance_valid(level_root):
+		return false
+	if not level_root.has_meta("hover_focus_suppressed_screen_pos"):
+		return false
+	var pos_variant = level_root.get_meta("hover_focus_suppressed_screen_pos")
+	if typeof(pos_variant) != TYPE_VECTOR2:
+		level_root.remove_meta("hover_focus_suppressed_screen_pos")
+		return false
+	var suppressed_pos: Vector2 = pos_variant
+	if suppressed_pos.distance_squared_to(screen_pos) <= 16.0:
+		return true
+	level_root.remove_meta("hover_focus_suppressed_screen_pos")
+	return false
+
+
 static func update_agent_hover_focus(level_root: Node, agents_root: Node) -> void:
 	if not is_instance_valid(level_root) or not is_instance_valid(agents_root):
 		return
 	if Global.is_dragging:
+		var dragging_agent: Node = null
 		for agent in agents_root.get_children():
-			if _agent_supports_hover_focus(agent):
-				agent.set_hover_focus(bool(agent.get("is_dragging")))
+			if _agent_supports_hover_focus(agent) and bool(agent.get("is_dragging")):
+				dragging_agent = agent
+				break
+		_set_hover_focus_agent(level_root, dragging_agent)
 		return
 	if Global.is_mobile_platform:
-		for agent in agents_root.get_children():
-			if _agent_supports_hover_focus(agent):
-				agent.set_hover_focus(false)
+		_set_hover_focus_agent(level_root, null)
 		return
 	var viewport = level_root.get_viewport()
 	if viewport == null:
 		return
 	var screen_pos = viewport.get_mouse_position()
+	if _is_hover_focus_suppressed(level_root, screen_pos):
+		_set_hover_focus_agent(level_root, null)
+		return
 	var hovered_agent: Node = null
 	if not _pointer_over_core_ui(level_root, screen_pos):
 		hovered_agent = _resolve_hovered_agent_from_cell(level_root, agents_root, screen_pos)
-	for agent in agents_root.get_children():
-		if _agent_supports_hover_focus(agent):
-			agent.set_hover_focus(agent == hovered_agent)
+	_set_hover_focus_agent(level_root, hovered_agent)
 
 
 static func handle_gameplay_hotkeys(event: InputEvent, owner: Node, agents_root: Node, include_connector_keys: bool = false) -> bool:
@@ -294,6 +455,24 @@ static func connect_core_agent_signals(agent: Node, trade_target: Callable, new_
 		agent.connect("new_agent", new_agent_target)
 	if agent.has_signal("update_score"):
 		agent.connect("update_score", update_score_target)
+
+
+static func make_agent_name(prefix: String, agents_root: Node, separator: String = "_") -> String:
+	var next_index := 1
+	if is_instance_valid(agents_root):
+		next_index = agents_root.get_child_count() + 1
+	return str(prefix, separator, next_index)
+
+
+static func build_agent_setup_dict(agent_name: String, agent_type: String, position: Vector2, prod_res: Array, texture: Texture2D, start_res: Variant = null) -> Dictionary:
+	return {
+		"name": agent_name,
+		"type": agent_type,
+		"position": position,
+		"prod_res": prod_res,
+		"start_res": start_res,
+		"texture": texture
+	}
 
 
 static func _queue_agent_dirty(level_root: Node, agent: Variant, buddies: bool = true, lines: bool = true, tile_hint: bool = false) -> void:
@@ -576,6 +755,86 @@ static func is_tile_occupied(level_root: Node, agents_root: Node, coord: Vector2
 	return false
 
 
+static func _can_share_trade_network(seeker: Variant, candidate: Variant) -> bool:
+	if not is_instance_valid(seeker):
+		return true
+	if not seeker.has_method("_can_share_story_trade_network"):
+		return true
+	return bool(seeker.call("_can_share_story_trade_network", candidate))
+
+
+static func _is_trade_hub_candidate(seeker: Variant, candidate: Variant) -> bool:
+	if not is_instance_valid(candidate):
+		return false
+	if is_instance_valid(seeker) and candidate == seeker:
+		return false
+	if bool(candidate.get("dead")):
+		return false
+	if str(candidate.get("type")) != "myco":
+		return false
+	return _can_share_trade_network(seeker, candidate)
+
+
+static func _append_trade_hub_candidate(results: Array, seen: Dictionary, seeker: Node, candidate: Variant, use_candidate_radius: bool, max_results: int) -> bool:
+	if not _is_trade_hub_candidate(seeker, candidate):
+		return false
+	var candidate_id = int(candidate.get_instance_id())
+	if seen.has(candidate_id):
+		return false
+	seen[candidate_id] = true
+	var reach = _get_agent_interaction_radius(candidate) if use_candidate_radius else _get_agent_interaction_radius(seeker)
+	if seeker.global_position.distance_to(candidate.global_position) > reach:
+		return false
+	results.append(candidate)
+	return max_results > 0 and results.size() >= max_results
+
+
+static func _trim_trade_hub_results(results: Array, seeker: Node, max_results: int) -> Array:
+	results.sort_custom(func(a: Node, b: Node) -> bool:
+		if not is_instance_valid(a):
+			return false
+		if not is_instance_valid(b):
+			return true
+		return seeker.global_position.distance_squared_to(a.global_position) < seeker.global_position.distance_squared_to(b.global_position)
+	)
+	if max_results > 0 and results.size() > max_results:
+		results.resize(max_results)
+	return results
+
+
+static func query_trade_hubs_near_agent(level_root: Node, agents_root: Node, seeker: Node, max_results: int, use_candidate_radius: bool = true) -> Array:
+	var results: Array = []
+	if not is_instance_valid(seeker):
+		return results
+	var seen: Dictionary = {}
+	var world = _get_world_foundation(level_root)
+	if is_instance_valid(world) and world.has_method("get_tile_occupants_cached") and world.has_method("world_to_tile") and world.has_method("in_bounds"):
+		var tile_size = float(world.get("tile_size"))
+		if tile_size <= 0.0:
+			tile_size = 64.0
+		var search_radius_px = maxf(_get_agent_interaction_radius(seeker), maxf(float(Global.social_buddy_radius), 320.0))
+		var radius_tiles = int(ceil(search_radius_px / tile_size)) + 1
+		var center_coord = Vector2i(world.world_to_tile(seeker.global_position))
+		for y in range(center_coord.y - radius_tiles, center_coord.y + radius_tiles + 1):
+			for x in range(center_coord.x - radius_tiles, center_coord.x + radius_tiles + 1):
+				var coord = Vector2i(x, y)
+				if not world.in_bounds(coord):
+					continue
+				var occupants_variant = world.get_tile_occupants_cached(coord, seeker)
+				if typeof(occupants_variant) != TYPE_ARRAY:
+					continue
+				for candidate in occupants_variant:
+					_append_trade_hub_candidate(results, seen, seeker, candidate, use_candidate_radius, 0)
+		if not results.is_empty():
+			return _trim_trade_hub_results(results, seeker, max_results)
+
+	if not is_instance_valid(agents_root):
+		return results
+	for candidate in agents_root.get_children():
+		_append_trade_hub_candidate(results, seen, seeker, candidate, use_candidate_radius, 0)
+	return _trim_trade_hub_results(results, seeker, max_results)
+
+
 static func _find_free_tile(level_root: Node, agents_root: Node, start_coord: Vector2i, search_radius: int, candidate_agent: Node = null, candidate_scale_override: Variant = null) -> Vector2i:
 	var world = _get_world_foundation(level_root)
 	if not is_instance_valid(world):
@@ -673,11 +932,55 @@ static func _get_agent_interaction_radius(agent: Variant) -> float:
 	return 96.0
 
 
+static func _mark_nearby_agents_dirty_from_occupancy(level_root: Node, agents_root: Node, moved_agent: Variant, old_pos: Vector2, new_pos: Vector2, moved_reach: float) -> bool:
+	var world = _get_world_foundation(level_root)
+	if not (is_instance_valid(world) and world.has_method("get_tile_occupants_cached") and world.has_method("world_to_tile") and world.has_method("in_bounds")):
+		return false
+	var tile_size = float(world.get("tile_size"))
+	if tile_size <= 0.0:
+		tile_size = 64.0
+	var search_radius_px = maxf(moved_reach, maxf(float(Global.social_buddy_radius), 320.0)) + 64.0
+	var radius_tiles = int(ceil(search_radius_px / tile_size)) + 1
+	var centers = [old_pos, new_pos]
+	var seen: Dictionary = {}
+	for center_pos in centers:
+		var center_coord = Vector2i(world.world_to_tile(center_pos))
+		for y in range(center_coord.y - radius_tiles, center_coord.y + radius_tiles + 1):
+			for x in range(center_coord.x - radius_tiles, center_coord.x + radius_tiles + 1):
+				var coord = Vector2i(x, y)
+				if not world.in_bounds(coord):
+					continue
+				var occupants_variant = world.get_tile_occupants_cached(coord, moved_agent)
+				if typeof(occupants_variant) != TYPE_ARRAY:
+					continue
+				for agent in occupants_variant:
+					if not is_instance_valid(agent):
+						continue
+					if agent == moved_agent:
+						continue
+					if bool(agent.get("dead")):
+						continue
+					if str(agent.get("type")) == "cloud":
+						continue
+					var agent_id = int(agent.get_instance_id())
+					if seen.has(agent_id):
+						continue
+					seen[agent_id] = true
+					var pair_reach = maxf(moved_reach, _get_agent_interaction_radius(agent)) + 48.0
+					var near_old = agent.global_position.distance_to(old_pos) <= pair_reach
+					var near_new = agent.global_position.distance_to(new_pos) <= pair_reach
+					if near_old or near_new:
+						_queue_agent_dirty(level_root, agent, true, true, false)
+	return true
+
+
 static func mark_agents_dirty_for_movement(level_root: Node, agents_root: Node, moved_agent: Variant, old_pos: Vector2, new_pos: Vector2) -> void:
 	if not is_instance_valid(moved_agent) or not is_instance_valid(agents_root):
 		return
 	_queue_agent_dirty(level_root, moved_agent, true, true, true)
 	var moved_reach = _get_agent_interaction_radius(moved_agent)
+	if _mark_nearby_agents_dirty_from_occupancy(level_root, agents_root, moved_agent, old_pos, new_pos, moved_reach):
+		return
 	for agent in agents_root.get_children():
 		if not is_instance_valid(agent):
 			continue
@@ -1004,6 +1307,21 @@ static func _prune_invalid_pair_cache(lines_root: Node, pair_store: Dictionary, 
 		_release_pair_from_stores(lines_root, pair_store, pair_meta, agent_index, str(pair_key_variant))
 
 
+static func _should_prune_trade_line_cache(lines_root: Node, dirty_agents: Array) -> bool:
+	if not is_instance_valid(lines_root):
+		return false
+	if dirty_agents.is_empty():
+		return true
+	var now_ms = Time.get_ticks_msec()
+	var last_ms := 0
+	if lines_root.has_meta("trade_line_last_full_prune_ms"):
+		last_ms = int(lines_root.get_meta("trade_line_last_full_prune_ms"))
+	if now_ms - last_ms < 1000:
+		return false
+	lines_root.set_meta("trade_line_last_full_prune_ms", now_ms)
+	return true
+
+
 static func sync_myco_trade_lines(lines_root: Node, agents_root: Node, social_mode: bool = false, dirty_agents: Array = []) -> void:
 	if not is_instance_valid(lines_root) or not is_instance_valid(agents_root):
 		return
@@ -1012,7 +1330,8 @@ static func sync_myco_trade_lines(lines_root: Node, agents_root: Node, social_mo
 	var agent_index = _get_line_agent_index_store(lines_root)
 	var base_color = _line_base_color(social_mode)
 
-	_prune_invalid_pair_cache(lines_root, pair_store, pair_meta, agent_index)
+	if _should_prune_trade_line_cache(lines_root, dirty_agents):
+		_prune_invalid_pair_cache(lines_root, pair_store, pair_meta, agent_index)
 
 	var dirty_lookup: Dictionary = {}
 	for agent in dirty_agents:

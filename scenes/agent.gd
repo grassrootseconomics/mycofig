@@ -256,6 +256,43 @@ func _update_bar_positions() -> void:
 			bars[bar].position = anchor + bars_offset[bar]
 
 
+func setup_resource_bars(asset_keys: Array = [], force_hidden: bool = false) -> void:
+	var canvas = get_node_or_null("CanvasLayer")
+	if not is_instance_valid(canvas):
+		return
+	var bar_nodes := {
+		"N": canvas.get_node_or_null("Nbar"),
+		"P": canvas.get_node_or_null("Pbar"),
+		"K": canvas.get_node_or_null("Kbar"),
+		"R": canvas.get_node_or_null("Rbar")
+	}
+	var visible_assets: Array = asset_keys.duplicate()
+	if visible_assets.is_empty():
+		visible_assets = assets.keys()
+	bars = {}
+	for asset in bar_nodes.keys():
+		var bar_node = bar_nodes[asset]
+		if is_instance_valid(bar_node):
+			bar_node.visible = visible_assets.has(asset)
+	for asset in visible_assets:
+		if not bar_nodes.has(asset):
+			continue
+		var bar_node = bar_nodes[asset]
+		if not is_instance_valid(bar_node):
+			continue
+		if assets.get(asset) == null or needs.get(asset) == null:
+			continue
+		bars[asset] = bar_node
+		bar_node.max_value = int(needs[asset] * 1.2)
+		bar_node.value = assets[asset]
+		bars_offset[asset] = bar_node.position
+		bar_node.tint_progress = Global.asset_colors[asset]
+	bar_canvas = canvas
+	if force_hidden or not Global.bars_on:
+		bar_canvas.visible = false
+	_update_bar_positions()
+
+
 func _is_selected_agent() -> bool:
 	if not is_instance_valid(Global.active_agent):
 		return false
@@ -269,7 +306,7 @@ func _should_show_resource_bars() -> bool:
 		return false
 	if Global.bars_on:
 		return true
-	if Global.is_mobile_platform and _is_selected_agent():
+	if _is_selected_agent():
 		return true
 	if not _is_hover_bar_subject():
 		return false
@@ -463,7 +500,11 @@ func _global_reposition_override_enabled() -> bool:
 func _activate_resource_bars_for_interaction() -> void:
 	Global.active_agent = self
 	Global.prevent_auto_select = false
-	set_hover_focus(true)
+	var level_root = _get_level_root()
+	if is_instance_valid(level_root):
+		LevelHelpersRef.set_hover_focus_agent(level_root, self)
+	else:
+		set_hover_focus(true)
 	_refresh_all_agent_bar_visibility()
 
 
@@ -959,6 +1000,8 @@ func can_drag_for_inventory_harvest() -> bool:
 
 
 func _can_start_user_drag() -> bool:
+	if not draggable and not _global_reposition_override_enabled():
+		return false
 	return _can_user_reposition()
 
 
@@ -1684,22 +1727,8 @@ func set_variables(a_dict) -> void:
 	$EvaporateTimer.wait_time = Global.evap_time
 	$DecayTimer.wait_time = Global.decay_time
 	$ActionTimer.wait_time = Global.get_agent_action_time(self)
-	bars = { #list of needed assets with need level
-		"N": $CanvasLayer/Nbar,
-		"P": $CanvasLayer/Pbar,
-		"K": $CanvasLayer/Kbar,
-		"R": $CanvasLayer/Rbar
-	}
-	for bar in bars:
-		bars[bar].max_value = int(needs[bar]*1.2)
-		bars[bar].value = assets[bar]
-		bars_offset[bar] = bars[bar].position
-		bars[bar].tint_progress = Global.asset_colors[bar]
-	
-	bar_canvas = $CanvasLayer
-	bar_canvas.visible = false
+	setup_resource_bars(["N", "P", "K", "R"], true)
 	refresh_bar_visibility()
-	_update_bar_positions()
 	if is_instance_valid(sprite):
 		_last_occupancy_scale = sprite.scale
 	_sync_occupancy_cache()
@@ -1710,42 +1739,10 @@ func sort_decending(a, b):
 	if a[1] > b[1]:
 		return true
 	return false
-
+		
 
 func draw_selected_box():
-	for line in $"../../Boxes".get_children():
-		line.clear_points()	
-		line.queue_free()
-	
-	var rect = $Sprite2D.get_rect()
-	#position - rect*scale/2 for top left point 
-	#position + rect*scale/2 for bottom right point
-
-
-	var pos = rect.position#+self.global_position
-	#var rects = Rect2(pos,rect.size*5) 
-
-	var rects = rect * Transform2D(0, $Sprite2D.scale, 0, Vector2())
-	#Color(Color.ANTIQUE_WHITE,0.3)
-	#draw_rect(new_rect,Color.GREEN_YELLOW)
-	#draw_line(pos, Vector2(pos.x+200,pos.y+200) , Color.GREEN_YELLOW, 5)
-	
-	var myco_line1 = Line2D.new()
-	myco_line1.width = 2
-	myco_line1.z_as_relative = false
-	myco_line1.antialiased = true
-	myco_line1.global_rotation = 0
-	#myco_line1.modulate = start_color
-	myco_line1.modulate = Color.GREEN_YELLOW
-	#var to = to_local(agent.position)#+agent.global_position		
-	
-	myco_line1.add_point( Vector2(position.x+rects.position.x,position.y+rects.position.y)  )
-	myco_line1.add_point( Vector2(position.x+rects.position.x+2*rects.size[0]/2,position.y+rects.position.y)  )
-	myco_line1.add_point( Vector2(position.x+rects.position.x+2*rects.size[0]/2,position.y+rects.position.y+2*rects.size[1]/2)  )
-	myco_line1.add_point( Vector2(position.x+rects.position.x,position.y+rects.position.y+2*rects.size[1]/2)  )
-	myco_line1.add_point( Vector2(position.x+rects.position.x,position.y+rects.position.y)  )
-			#myco_line.z_index = -1
-	$"../../Boxes".add_child(myco_line1)
+	LevelHelpersRef.draw_agent_selection_box(_get_level_root(), self)
 	
 
 
@@ -1974,7 +1971,8 @@ func evaporate():
 
 
 func _input(event):
-	if not draggable and not _global_reposition_override_enabled():
+	var interaction_only = not draggable and not _global_reposition_override_enabled()
+	if interaction_only and (dead or caught_by != null or not _is_hover_bar_subject()):
 		return
 	if event is InputEventMouseMotion:
 		_set_drag_pointer_screen_pos(event.position)
@@ -2142,12 +2140,15 @@ func _process(delta: float) -> void:
 
 	refresh_bar_visibility()
 	if is_instance_valid(bar_canvas) and bar_canvas.visible:
-		_bar_update_accum += delta
-		if _bar_update_accum >= _get_adaptive_bar_update_interval():
+		if _did_camera_move_since_last_bar_update():
 			_bar_update_accum = 0.0
-			if _did_camera_move_since_last_bar_update():
+			_update_bar_positions()
+		else:
+			_bar_update_accum += delta
+			if _bar_update_accum >= _get_adaptive_bar_update_interval():
+				_bar_update_accum = 0.0
 				_update_bar_positions()
-			
+				
 	if(position != last_position):
 		var old_pos = last_position
 		last_position = position
@@ -2170,22 +2171,8 @@ func _process(delta: float) -> void:
 
 # Search for things to trade with in a radius
 func generate_buddies() -> void:
-	var children =  $"../../Agents".get_children()
-	trade_buddies = []
-	
-	for child in children:
-		if not is_instance_valid(child):
-			continue
-		if bool(child.get("dead")):
-			continue
-		if child.type != "myco":
-			continue
-		if not _can_share_story_trade_network(child):
-			continue
-		var dist = global_position.distance_to(child.global_position)
-		if dist <= child.buddy_radius and len(trade_buddies) < num_buddies:
-			trade_buddies.append(child)
-		
+	var agents_root = get_node_or_null("../../Agents")
+	trade_buddies = LevelHelpersRef.query_trade_hubs_near_agent(_get_level_root(), agents_root, self, num_buddies, true)
 func new_draw_line():
 	var level_root = _get_level_root()
 	var lines_root = get_node_or_null("../../Lines")
@@ -2202,10 +2189,13 @@ func _on_area_entered(ztrade: Area2D) -> void:
 		if assets[ztrade.asset]> needs[ztrade.asset] *2:
 			assets[ztrade.asset] = needs[ztrade.asset] *2
 		else:
-			Global.score+=ztrade.amount
+			Global.add_score(ztrade.amount)
 			emit_signal("update_score")
 		bars[ztrade.asset].value = assets[ztrade.asset]
-		ztrade.call_deferred("queue_free")
+		if ztrade.has_method("finish_trade"):
+			ztrade.call_deferred("finish_trade")
+		else:
+			ztrade.call_deferred("queue_free")
 
 func _on_action_timer_timeout() -> void:
 	logistics_ready = true
@@ -2242,7 +2232,7 @@ func _on_growth_timer_timeout() -> void:
 				new_alpha_up = high_alpha
 			self.modulate = Color(old_modulate_up, new_alpha_up)
 
-			Global.score += 400
+			Global.add_score(400)
 			emit_signal("update_score")
 			for res in assets:
 				assets[res] -= 1
@@ -2297,7 +2287,7 @@ func _on_growth_timer_timeout() -> void:
 		var new_color = Color(old_modulate,new_alpha)
 		self.modulate= new_color
 		
-		Global.score += 400
+		Global.add_score(400)
 		emit_signal("update_score")
 		
 		#print(name, " ", $Sprite2D.scale)

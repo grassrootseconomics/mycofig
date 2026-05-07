@@ -524,14 +524,22 @@ func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, get_world_rect().size), Color(1, 1, 1, 0.9), false, 3.0, true)
 
 
-func _clear_mobile_selection_for_pan() -> void:
-	if not Global.is_mobile_platform:
-		return
+func _clear_selection_for_camera_move() -> void:
 	var level_root = get_parent()
 	if not is_instance_valid(level_root):
 		return
 	var agents_root = level_root.get_node_or_null("Agents")
-	LevelHelpersRef.clear_mobile_selection_and_bars(level_root, agents_root)
+	LevelHelpersRef.clear_selection_and_bars(level_root, agents_root)
+	LevelHelpersRef.suppress_hover_focus_until_pointer_moves(level_root)
+
+
+func _is_mouse_wheel_button(button_index: MouseButton) -> bool:
+	return (
+		button_index == MOUSE_BUTTON_WHEEL_UP
+		or button_index == MOUSE_BUTTON_WHEEL_DOWN
+		or button_index == MOUSE_BUTTON_WHEEL_LEFT
+		or button_index == MOUSE_BUTTON_WHEEL_RIGHT
+	)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -551,6 +559,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_update_debug_label()
 
 	if event is InputEventMouseButton:
+		if event.pressed and _is_mouse_wheel_button(event.button_index):
+			_clear_selection_for_camera_move()
 		if event.button_index == drag_pan_button:
 			if event.pressed:
 				_try_start_desktop_pan(event.button_index, event.position)
@@ -571,17 +581,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			if event.pressed and _touch_drag_id == -1 and not _is_pointer_over_ui(event.position):
 				_touch_drag_id = event.index
 				_touch_drag_last = event.position
-				_clear_mobile_selection_for_pan()
 			elif not event.pressed and event.index == _touch_drag_id:
 				_touch_drag_id = -1
 		if event is InputEventScreenDrag and event.index == _touch_drag_id and not Global.is_dragging:
 			var delta = event.position - _touch_drag_last
 			_touch_drag_last = event.position
 			_pan_camera_by_screen_delta(delta)
+
 	if enable_pan_gesture and event is InputEventPanGesture and not Global.is_dragging:
 		var pointer_pos = get_viewport().get_mouse_position()
 		if not _is_pointer_over_ui(pointer_pos):
-			_clear_mobile_selection_for_pan()
 			_pan_camera_by_screen_delta(event.delta * pan_gesture_scale)
 
 	if event is InputEventMouseMotion:
@@ -1209,6 +1218,8 @@ func _clamp_camera() -> void:
 
 
 func _pan_camera_by_screen_delta(delta: Vector2) -> void:
+	if delta.length_squared() > 0.001:
+		_clear_selection_for_camera_move()
 	camera.global_position -= delta
 	_clamp_camera()
 

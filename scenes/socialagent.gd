@@ -593,35 +593,38 @@ func logistics():
 								if(excess == need):
 									continue
 								excess_iter +=1
-								if(current_needs[need] > 0 and current_excess[excess] >0 ):
+								if current_needs[need] <= 0 or current_excess[excess] <= 0:
+									continue
+								if debug_mode:
+									print(need_itter, ". current need: ", need, " supply: ", assets[need] )
+									print(excess_iter, ". current excess: ", excess, " supply: ",assets[excess] )
+								if not logistics_ready:
+									continue
+								if child.assets.get(excess) == null or child.assets.get(need) == null:
+									continue
+								if debug_mode:
+									print( " ... myco assets: " , child.assets)
+								if(child.assets[excess] < child.needs[excess] *2 and _can_bank_offer_r_to_target(child, excess, need)):
+									var path_dict = {
+										"from_agent": self,
+										"to_agent": child,
+										"trade_path": [self,child],
+										"trade_asset": excess,
+										"trade_amount": 1, #amt_needed,
+										"trade_type": "swap",
+										"return_res": need,
+										"return_amt": 1,#amt_needed
+									}
 									if debug_mode:
-										print(need_itter, ". current need: ", need, " supply: ", assets[need] )
-										print(excess_iter, ". current excess: ", excess, " supply: ",assets[excess] )
-									if(logistics_ready):
-										if child.assets.get(excess) != null and child.assets.get(need) != null:
-											if debug_mode:
-												print( " ... myco assets: " , child.assets)
-											if(child.assets[excess] < child.needs[excess] *2 and _can_bank_offer_r_to_target(child, excess, need)):
-												var path_dict = {
-													"from_agent": self,
-													"to_agent": child,
-													"trade_path": [self,child],
-													"trade_asset": excess,
-													"trade_amount": 1, #amt_needed,
-													"trade_type": "swap",
-													"return_res": need,
-													"return_amt": 1,#amt_needed
-												}
-												if debug_mode:
-													print(" .... sending a trade along, ")
-												if _emit_trade_with_budget(path_dict):
-													assets[excess] -= 1#amt_needed
-													bars[excess].value = assets[excess]
-													logistics_ready = false
-													is_trading = true
-													break
-												#trade.emit(path_dict)
-												#send what is in excess.
+										print(" .... sending a trade along, ")
+									if _emit_trade_with_budget(path_dict):
+										assets[excess] -= 1#amt_needed
+										bars[excess].value = assets[excess]
+										logistics_ready = false
+										is_trading = true
+										break
+									#trade.emit(path_dict)
+									#send what is in excess.
 											
 					
 									#Attempt to push out what you have in abundance
@@ -664,7 +667,7 @@ func _on_area_entered(ztrade: Area2D) -> void:
 		if assets[ztrade.asset]> needs[ztrade.asset] *2:
 			assets[ztrade.asset] = needs[ztrade.asset] *2
 		else:
-			Global.score+=ztrade.amount
+			Global.add_score(ztrade.amount)
 			emit_signal("update_score")
 		bars[ztrade.asset].value = assets[ztrade.asset]
 		ztrade.call_deferred("queue_free")
@@ -707,7 +710,7 @@ func _on_growth_timer_timeout() -> void:
 		self.modulate= new_color
 		
 		
-		Global.score += 400
+		Global.add_score(400)
 		emit_signal("update_score")
 				
 		

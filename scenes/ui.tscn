@@ -39,6 +39,32 @@ shadow_size = 4
 [node name="UI" type="CanvasLayer" groups=["ui"]]
 script = ExtResource("1_j1sfg")
 
+[node name="HighScoreContainer" type="MarginContainer" parent="."]
+offset_left = 14.0
+offset_top = 14.0
+offset_right = 174.0
+offset_bottom = 64.0
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 6
+
+[node name="VBoxContainer" type="VBoxContainer" parent="HighScoreContainer"]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="TitleLabel" type="Label" parent="HighScoreContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.89, 1, 0.7, 1)
+theme_override_font_sizes/font_size = 14
+text = "High Score"
+
+[node name="ValueLabel" type="Label" parent="HighScoreContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.645213, 0.762612, 1, 1)
+theme_override_font_sizes/font_size = 25
+text = "0"
+
 [node name="MarginContainer" type="MarginContainer" parent="."]
 anchors_preset = 7
 anchor_left = 0.5
@@ -196,21 +222,32 @@ ticks_on_borders = true
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
-offset_left = -140.0
+offset_left = -278.0
 offset_top = 14.0
 offset_right = -18.0
-offset_bottom = 58.0
+offset_bottom = 74.0
 grow_horizontal = 0
 theme_override_constants/margin_left = 8
-theme_override_constants/margin_top = 8
+theme_override_constants/margin_top = 6
 theme_override_constants/margin_right = 8
-theme_override_constants/margin_bottom = 8
+theme_override_constants/margin_bottom = 6
 
-[node name="Label" type="Label" parent="EndGameContainer"]
+[node name="ScoreVBox" type="VBoxContainer" parent="EndGameContainer"]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="Label" type="Label" parent="EndGameContainer/ScoreVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.645213, 0.762612, 1, 1)
 theme_override_font_sizes/font_size = 25
 text = "0"
+horizontal_alignment = 1
+
+[node name="RankLabel" type="Label" parent="EndGameContainer/ScoreVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.89, 1, 0.7, 1)
+theme_override_font_sizes/font_size = 14
+text = "Rank: Sporeling"
 horizontal_alignment = 1
 
 [node name="ScoreTimer" type="Timer" parent="."]

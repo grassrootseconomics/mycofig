@@ -1,5 +1,6 @@
 extends Agent
 
+const ResourceEconomyRef = preload("res://scenes/resource_economy.gd")
 const BASKET_MAX_SENDS_PER_LOGISTICS_TICK := 2
 
 var trade_queue = []
@@ -21,66 +22,14 @@ func set_variables(a_dict) -> void:
 	$Sprite2D.texture = sprite_texture
 	$GrowthTimer.wait_time = Global.growth_time
 	$ActionTimer.wait_time = Global.get_village_action_time()
-	
-	$CanvasLayer/Nbar.visible = false
-	$CanvasLayer/Pbar.visible = false
-	$CanvasLayer/Kbar.visible = false
-	$CanvasLayer/Rbar.visible = false
-	
-	bars = {}
-	for asset in assets:
-		if(asset == "N"):
-			bars[asset] = $CanvasLayer/Nbar
-			$CanvasLayer/Nbar.visible = true
-		elif(asset == "P"):
-			bars[asset] = $CanvasLayer/Pbar
-			$CanvasLayer/Pbar.visible = true
-		elif(asset == "K"):
-			bars[asset] = $CanvasLayer/Kbar
-			$CanvasLayer/Kbar.visible = true
-		elif(asset == "R"):
-			bars[asset] = $CanvasLayer/Rbar
-			$CanvasLayer/Rbar.visible = true
-	"""
-	bars = { #list of needed assets with need level
-		"N": $CanvasLayer/Nbar,
-		"P": $CanvasLayer/Pbar,
-		"K": $CanvasLayer/Kbar,
-		"R": $CanvasLayer/Rbar
-	}
-	"""
-	for bar in bars:
-		bars[bar].max_value = int(needs[bar]*1.2)
-		bars[bar].value = assets[bar]
-		bars_offset[bar] = bars[bar].position
-		bars[bar].tint_progress = Global.asset_colors[bar]
-		
-	bar_canvas = $CanvasLayer
-	if Global.bars_on == false:
-		bar_canvas.visible = false
-	_update_bar_positions()
+	setup_resource_bars(assets.keys())
 
 
 # Search for things to trade with in a radius
 func generate_buddies() -> void:
-	var children =  $"../../Agents".get_children()
-	trade_buddies = []
 	num_connectors = 0
-	#print(self.name, " new buddies children: ", children)
-	for child in children:
-		if(is_instance_valid(self) and is_instance_valid(child)):
-			if child.type == 'myco' and child.name != self.name:
-				if not _can_share_story_trade_network(child):
-					continue
-				var dist = global_position.distance_to(child.global_position)
-				if dist <= buddy_radius:
-					if len(trade_buddies) < num_buddies:
-						trade_buddies.append(child)
-			#else:
-			#print(self.name, " is too far from myco: ", dist)
-	#print("final new buddies: ", trade_buddies)
-
-	pass
+	var agents_root = get_node_or_null("../../Agents")
+	trade_buddies = LevelHelpersRef.query_trade_hubs_near_agent(_get_level_root(), agents_root, self, num_buddies, false)
 
 func logistics():
 	var new_trade_queue = []
@@ -119,34 +68,15 @@ func logistics():
 			
 		#determine if there are extra resources (offers)
 		#find excess stock
-		for res in assets:
-			current_excess[res] = -999
-			current_needs[res] = -999
-		for res in assets:
-				
-				 
-				var c_excess = assets[res] - needs[res] 
-				
-				if assets[res] > needs[res]:
-					#if c_excess > high_amt_excess:
-					high_amt_excess = c_excess
-					excess_res = res
-					current_excess[res] = high_amt_excess
-						
-				if assets[res] < needs[res]:
-					#print("res: ", res, " c_excess: ", c_excess, " high_amt_needed: ", high_amt_needed)
-					#if -1 * c_excess > high_amt_needed:
-					high_amt_needed = -1 * c_excess
-					needed_res = res
-					current_needs[res] = high_amt_needed
-				else:
-					current_needs[res] = 0
-		
-		var keys_c: Array = current_needs.keys()
-		var keys_e: Array = current_excess.keys()
-		# Sort keys in descending order of values.
-		keys_c.sort_custom(func(x: String, y: String) -> bool: return current_needs[x] > current_needs[y])
-		keys_e.sort_custom(func(x: String, y: String) -> bool: return current_excess[x] > current_excess[y])
+		var balance: Dictionary = ResourceEconomyRef.analyze_balances(assets, needs, 0.0)
+		current_excess = balance["current_excess"]
+		current_needs = balance["current_needs"]
+		excess_res = balance["excess_res"]
+		needed_res = balance["needed_res"]
+		high_amt_excess = balance["high_amt_excess"]
+		high_amt_needed = balance["high_amt_needed"]
+		var keys_c: Array = balance["needed_keys"]
+		var keys_e: Array = balance["excess_keys"]
 		#print("actual needs: ", needs)
 		if debug_mode:
 			print("excess: ", current_excess,  keys_e, " current_needs: ", current_needs, keys_c)
@@ -195,39 +125,7 @@ func logistics():
 								
 
 func draw_selected_box():
-	for line in $"../../Boxes".get_children():
-		line.clear_points()	
-		line.queue_free()
-	
-	var rect = $Sprite2D.get_rect()
-	#position - rect*scale/2 for top left point 
-	#position + rect*scale/2 for bottom right point
-
-
-	var pos = rect.position#+self.global_position
-	#var rects = Rect2(pos,rect.size*5) 
-
-	var rects = rect * Transform2D(0, $Sprite2D.scale, 0, Vector2())
-	#Color(Color.ANTIQUE_WHITE,0.3)
-	#draw_rect(new_rect,Color.GREEN_YELLOW)
-	#draw_line(pos, Vector2(pos.x+200,pos.y+200) , Color.GREEN_YELLOW, 5)
-	
-	var myco_line1 = Line2D.new()
-	myco_line1.width = 2
-	myco_line1.z_as_relative = false
-	myco_line1.antialiased = true
-	myco_line1.global_rotation = 0
-	#myco_line1.modulate = start_color
-	myco_line1.modulate = Color.GREEN_YELLOW
-	#var to = to_local(agent.position)#+agent.global_position		
-	
-	myco_line1.add_point( Vector2(position.x+rects.position.x,position.y+rects.position.y)  )
-	myco_line1.add_point( Vector2(position.x+rects.position.x+2*rects.size[0]/2,position.y+rects.position.y)  )
-	myco_line1.add_point( Vector2(position.x+rects.position.x+2*rects.size[0]/2,position.y+rects.position.y+2*rects.size[1]/2)  )
-	myco_line1.add_point( Vector2(position.x+rects.position.x,position.y+rects.position.y+2*rects.size[1]/2)  )
-	myco_line1.add_point( Vector2(position.x+rects.position.x,position.y+rects.position.y)  )
-			#myco_line.z_index = -1
-	$"../../Boxes".add_child(myco_line1)
+	LevelHelpersRef.draw_agent_selection_box(_get_level_root(), self)
 
 
 		
@@ -330,7 +228,6 @@ func _on_area_entered(trade: Area2D) -> void:
 		#print("myself", body_entered)
 		#remove the resource from the trade and give it to the end_agent
 		#trade.start_agent.assets[trade.asset]-=trade.amount
-		
 		if assets.get(trade.asset) != null:
 			var return_amount := 0
 			var bank_reserve_protected := false
@@ -338,12 +235,15 @@ func _on_area_entered(trade: Area2D) -> void:
 				return_amount = _calculate_swap_return_amount(trade)
 				bank_reserve_protected = _is_bank_reserve_protected_swap(trade, return_amount)
 				if bank_reserve_protected and not _bank_trade_has_return_surplus(str(trade.return_asset), return_amount):
-					trade.call_deferred("queue_free")
+					if trade.has_method("finish_trade"):
+						trade.call_deferred("finish_trade")
+					else:
+						trade.call_deferred("queue_free")
 					return
 			if(assets[trade.asset] < (needs[trade.asset]*2)):
 				assets[trade.asset]+=trade.amount
 				bars[trade.asset].value = assets[trade.asset]
-			
+
 			if trade.type == "swap":
 				if(assets.get(trade.return_asset) != null):
 					if return_amount > 0:
@@ -376,7 +276,10 @@ func _on_area_entered(trade: Area2D) -> void:
 							trade_queue.append(path_dict)
 				else:
 					print("Error basket without return asset:", trade.return_asset, assets)
-			trade.call_deferred("queue_free")
+			if trade.has_method("finish_trade"):
+				trade.call_deferred("finish_trade")
+			else:
+				trade.call_deferred("queue_free")
 		else:
 			print("Error basket without asset:", trade.asset, assets)
 	#else:

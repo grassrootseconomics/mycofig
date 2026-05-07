@@ -34,6 +34,8 @@ Headless benchmark runner (deterministic seed + scenario):
 godot4 --path . --headless --scene res://scenes/benchmark_runner.tscn -- --scenario=s2 --seed=1337 --duration=120 --target=700
 ```
 
+Add `--bars` to profile worst-case resource bars, or `--no-lines` to isolate simulation without myco-line visuals.
+
 ## Android (APK-First)
 - Android presets are defined in `export_presets.cfg`:
   - `Android-TestAPK` (phone install testing)

@@ -1,5 +1,6 @@
 extends Agent
 
+const ResourceEconomyRef = preload("res://scenes/resource_economy.gd")
 const TEX_MYCO_SPORE_STAGE_PATH := "res://graphics/myco_spore_stage.png"
 
 enum MycoGrowthStage {
@@ -187,7 +188,7 @@ func _set_myco_stage(new_stage: int, force: bool = false) -> void:
 		sparkle.global_position = self.global_position
 		$"../../Sparkles".add_child(sparkle)
 		sparkle.start(0.75)
-		Global.score += 200
+		Global.add_score(200)
 		myco_pod_sparkle_played = true
 
 
@@ -405,40 +406,13 @@ func set_variables(a_dict) -> void:
 
 	$GrowthTimer.wait_time = Global.growth_time
 	$ActionTimer.wait_time = Global.action_time
-	bars = {
-		"N": $CanvasLayer/Nbar,
-		"P": $CanvasLayer/Pbar,
-		"K": $CanvasLayer/Kbar,
-		"R": $CanvasLayer/Rbar
-	}
-	for bar in bars:
-		bars[bar].max_value = int(needs[bar] * 1.2)
-		bars[bar].value = assets[bar]
-		bars_offset[bar] = bars[bar].position
-		bars[bar].tint_progress = Global.asset_colors[bar]
-		
-	bar_canvas = $CanvasLayer
-	if Global.bars_on == false:
-		bar_canvas.visible = false
-	_update_bar_positions()
+	setup_resource_bars(["N", "P", "K", "R"])
 	
 
 # Search for things to trade with in a radius
 func generate_buddies() -> void:
-	var children =  $"../../Agents".get_children()
-	trade_buddies = []
-	for child in children:
-		if not is_instance_valid(child):
-			continue
-		if bool(child.get("dead")):
-			continue
-		if child.type != "myco" or child.name == self.name:
-			continue
-		if not _can_share_story_trade_network(child):
-			continue
-		var dist = global_position.distance_to(child.global_position)
-		if dist <= buddy_radius and len(trade_buddies) < num_buddies:
-			trade_buddies.append(child)
+	var agents_root = get_node_or_null("../../Agents")
+	trade_buddies = LevelHelpersRef.query_trade_hubs_near_agent(_get_level_root(), agents_root, self, num_buddies, false)
 
 
 func logistics():
@@ -477,28 +451,15 @@ func logistics():
 		if debug_mode:
 			print("New Round in: ", name ,", ", assets, " needs: ", needs, "buddies: ", trade_buddies)	
 			
-		for res in assets:
-			current_excess[res] = -999
-			current_needs[res] = -999
-		for res in assets:
-			var c_excess = assets[res] - needs[res]
-			
-			if assets[res] > needs[res]:
-				high_amt_excess = c_excess
-				excess_res = res
-				current_excess[res] = high_amt_excess
-					
-			if assets[res] < needs[res]:
-				high_amt_needed = -1 * c_excess
-				needed_res = res
-				current_needs[res] = high_amt_needed
-			else:
-				current_needs[res] = 0
-		
-		var keys_c: Array = current_needs.keys()
-		var keys_e: Array = current_excess.keys()
-		keys_c.sort_custom(func(x: String, y: String) -> bool: return current_needs[x] > current_needs[y])
-		keys_e.sort_custom(func(x: String, y: String) -> bool: return current_excess[x] > current_excess[y])
+		var balance: Dictionary = ResourceEconomyRef.analyze_balances(assets, needs, 0.0)
+		current_excess = balance["current_excess"]
+		current_needs = balance["current_needs"]
+		excess_res = balance["excess_res"]
+		needed_res = balance["needed_res"]
+		high_amt_excess = balance["high_amt_excess"]
+		high_amt_needed = balance["high_amt_needed"]
+		var keys_c: Array = balance["needed_keys"]
+		var keys_e: Array = balance["excess_keys"]
 		if debug_mode:
 			print("excess: ", current_excess,  keys_e, " current_needs: ", current_needs, keys_c)
 		
@@ -540,26 +501,7 @@ func logistics():
 
 
 func draw_selected_box():
-	for line in $"../../Boxes".get_children():
-		line.clear_points()	
-		line.queue_free()
-	
-	var rect = $Sprite2D.get_rect()
-	var rects = rect * Transform2D(0, $Sprite2D.scale, 0, Vector2())
-	
-	var myco_line1 = Line2D.new()
-	myco_line1.width = 2
-	myco_line1.z_as_relative = false
-	myco_line1.antialiased = true
-	myco_line1.global_rotation = 0
-	myco_line1.modulate = Color.GREEN_YELLOW
-	
-	myco_line1.add_point( Vector2(position.x + rects.position.x, position.y + rects.position.y) )
-	myco_line1.add_point( Vector2(position.x + rects.position.x + 2 * rects.size[0] / 2, position.y + rects.position.y) )
-	myco_line1.add_point( Vector2(position.x + rects.position.x + 2 * rects.size[0] / 2, position.y + rects.position.y + 2 * rects.size[1] / 2) )
-	myco_line1.add_point( Vector2(position.x + rects.position.x, position.y + rects.position.y + 2 * rects.size[1] / 2) )
-	myco_line1.add_point( Vector2(position.x + rects.position.x, position.y + rects.position.y) )
-	$"../../Boxes".add_child(myco_line1)
+	LevelHelpersRef.draw_agent_selection_box(_get_level_root(), self)
 
 
 func _on_area_entered(trade: Area2D) -> void:
@@ -603,7 +545,10 @@ func _on_area_entered(trade: Area2D) -> void:
 							trade_queue.append(path_dict)
 					else:
 						trade_queue.append(path_dict)
-			trade.call_deferred("queue_free")
+				if trade.has_method("finish_trade"):
+					trade.call_deferred("finish_trade")
+				else:
+					trade.call_deferred("queue_free")
 		else:
 			print("Error myco without asset:", trade.asset, assets)
 

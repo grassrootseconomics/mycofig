@@ -62,9 +62,8 @@ func _cancel_drag_state() -> void:
 
 
 func _clear_mobile_selection_for_pan() -> void:
-	if not Global.is_mobile_platform:
-		return
-	LevelHelpersRef.clear_mobile_selection_and_bars(_level_root, _agents_root)
+	LevelHelpersRef.clear_selection_and_bars(_level_root, _agents_root)
+	LevelHelpersRef.suppress_hover_focus_until_pointer_moves(_level_root)
 
 
 func _notification(what: int) -> void:
@@ -144,6 +143,7 @@ func _gui_input(event: InputEvent) -> void:
 		if event.pressed:
 			_dragging = true
 			_request_redraw()
+			_clear_mobile_selection_for_pan()
 			_emit_pan_for_local(event.position)
 		else:
 			_dragging = false

@@ -3,7 +3,7 @@ extends Node2D
 #to run: python3 -m http.server  .. browse to localhost:8000
 
 const LevelHelpersRef = preload("res://scenes/level_helpers.gd")
-const PerfMonitorRef = preload("res://scenes/perf_monitor.gd")
+const LevelRuntimeServicesRef = preload("res://scenes/level_runtime_services.gd")
 const TEX_SQUASH = preload("res://graphics/squash.png")
 const TEX_TREE = preload("res://graphics/acorn_32.png")
 const TEX_MAIZE = preload("res://graphics/maize.png")
@@ -127,6 +127,7 @@ var _dirty_buddies_agents: Dictionary = {}
 var _dirty_lines_agents: Dictionary = {}
 var _dirty_tile_hints_agents: Dictionary = {}
 var _trade_pool: Array = []
+var _trade_visual_packets_by_key: Dictionary = {}
 var _shutdown_cleanup_done := false
 var _story_village_revealed := false
 var _story_village_center_world := Vector2.ZERO
@@ -1717,21 +1718,11 @@ func _validate_myco_spawn(spawn_pos: Vector2, ignore_agent: Variant = null) -> D
 
 
 func _agent_key(agent: Variant) -> int:
-	if not is_instance_valid(agent):
-		return -1
-	return int(agent.get_instance_id())
+	return LevelRuntimeServicesRef.agent_key(agent)
 
 
 func request_agent_dirty(agent: Variant, buddies: bool = true, lines: bool = true, tile_hint: bool = false) -> void:
-	var key = _agent_key(agent)
-	if key < 0:
-		return
-	if buddies:
-		_dirty_buddies_agents[key] = agent
-	if lines and str(agent.get("type")) != "cloud":
-		_dirty_lines_agents[key] = agent
-	if tile_hint:
-		_dirty_tile_hints_agents[key] = agent
+	LevelRuntimeServicesRef.request_agent_dirty(_dirty_buddies_agents, _dirty_lines_agents, _dirty_tile_hints_agents, agent, buddies, lines, tile_hint)
 
 
 func request_all_agents_dirty() -> void:
@@ -1745,61 +1736,15 @@ func mark_agent_moved(agent: Variant, old_pos: Vector2, new_pos: Vector2) -> voi
 
 
 func _process_dirty_queues() -> void:
-	if _dirty_buddies_agents.is_empty() and _dirty_lines_agents.is_empty() and _dirty_tile_hints_agents.is_empty():
-		return
-	for key in _dirty_buddies_agents.keys():
-		var agent = _dirty_buddies_agents[key]
-		if not is_instance_valid(agent):
-			continue
-		if bool(agent.get("dead")):
-			continue
-		if agent.has_method("generate_buddies"):
-			agent.generate_buddies()
-	for key in _dirty_tile_hints_agents.keys():
-		var agent = _dirty_tile_hints_agents[key]
-		if not is_instance_valid(agent):
-			continue
-		if bool(agent.get("dead")):
-			continue
-		if agent.has_method("_update_drag_tile_hint"):
-			var pos = agent.get("position")
-			if typeof(pos) == TYPE_VECTOR2:
-				agent._update_drag_tile_hint(pos)
-
-	if Global.draw_lines and not _dirty_lines_agents.is_empty():
-		LevelHelpersRef.sync_myco_trade_lines($Lines, $Agents, false, _dirty_lines_agents.values())
-
-	_dirty_buddies_agents.clear()
-	_dirty_lines_agents.clear()
-	_dirty_tile_hints_agents.clear()
+	LevelRuntimeServicesRef.process_dirty_queues(self, $Agents, $Lines, _dirty_buddies_agents, _dirty_lines_agents, _dirty_tile_hints_agents, false)
 
 
 func _setup_perf_monitor() -> void:
-	if is_instance_valid(perf_monitor):
-		return
-	perf_monitor = PerfMonitorRef.new()
-	perf_monitor.name = "PerfMonitor"
-	perf_monitor.overlay_enabled = false
-	perf_monitor.adaptive_quality_enabled = true
-	perf_monitor.log_to_files = Global.perf_metrics_enabled
-	add_child(perf_monitor)
-	perf_monitor.configure(self, $Agents, $Trades, $Lines, _get_world_foundation())
+	perf_monitor = LevelRuntimeServicesRef.setup_perf_monitor(self, perf_monitor, $Agents, $Trades, $Lines, _get_world_foundation())
 
 
 func _recycle_trade(trade: Node) -> void:
-	if not is_instance_valid(trade):
-		return
-	if trade.get_parent() != null:
-		trade.get_parent().remove_child(trade)
-	trade.visible = false
-	trade.set_process(false)
-	if trade.has_method("set_deferred"):
-		trade.set_deferred("monitoring", false)
-		trade.set_deferred("monitorable", false)
-	var shape = trade.get_node_or_null("CollisionShape2D")
-	if is_instance_valid(shape):
-		shape.set_deferred("disabled", true)
-	_trade_pool.append(trade)
+	LevelRuntimeServicesRef.recycle_trade(_trade_pool, _trade_visual_packets_by_key, trade)
 
 
 func _ready():
@@ -1931,38 +1876,15 @@ func _ready():
 	
 			
 func _is_android_back_input(event: InputEvent) -> bool:
-	if not Global.is_mobile_platform:
-		return false
-	if event.is_action_pressed("ui_cancel"):
-		return true
-	if event is InputEventKey:
-		var key_event := event as InputEventKey
-		return key_event.pressed and not key_event.echo and key_event.keycode == KEY_ESCAPE
-	return false
+	return LevelHelpersRef.is_android_back_input(event)
 
 
 func _handle_android_back_request(event: InputEvent) -> bool:
-	if not _is_android_back_input(event):
-		return false
-	if get_tree().paused:
-		if $UI.has_method("show_back_to_menu_confirm"):
-			$UI.show_back_to_menu_confirm()
-	else:
-		if $UI.has_method("set_pause_state"):
-			$UI.set_pause_state(true)
-		else:
-			get_tree().paused = true
-	get_viewport().set_input_as_handled()
-	return true
+	return LevelHelpersRef.handle_android_back_request(self, event)
 
 
 func _is_keyboard_escape_input(event: InputEvent) -> bool:
-	if Global.is_mobile_platform:
-		return false
-	if event is InputEventKey:
-		var key_event := event as InputEventKey
-		return key_event.pressed and not key_event.echo and key_event.keycode == KEY_ESCAPE
-	return false
+	return LevelHelpersRef.is_keyboard_escape_input(event)
 
 
 func _on_ui_request_back_to_menu() -> void:
@@ -1995,12 +1917,7 @@ func toggle_challenge_farmer_n_autofill() -> void:
 
 
 func _input(event):
-	if _is_keyboard_escape_input(event):
-		if $UI.has_method("show_back_to_menu_confirm"):
-			$UI.show_back_to_menu_confirm()
-		get_viewport().set_input_as_handled()
-		return
-	if _handle_android_back_request(event):
+	if LevelHelpersRef.handle_level_back_or_escape_input(self, event):
 		return
 	if LevelHelpersRef.handle_gameplay_hotkeys(event, self, $Agents, false):
 		return
@@ -2195,30 +2112,23 @@ func _on_agent_trade(path_dict) -> void:
 
 
 func _build_trade_visual_key(path_dict: Dictionary) -> String:
-	var from_agent = path_dict.get("from_agent", null)
-	var to_agent = path_dict.get("to_agent", null)
-	var asset_key = str(path_dict.get("trade_asset", ""))
-	if asset_key == "":
-		return ""
-	if not is_instance_valid(from_agent) or not is_instance_valid(to_agent):
-		return ""
-	return str(int(from_agent.get_instance_id()), "->", int(to_agent.get_instance_id()), ":", asset_key)
+	return LevelRuntimeServicesRef.build_trade_visual_key(path_dict)
+
+
+func _get_trade_visual_key_for_packet(trade: Node) -> String:
+	return LevelRuntimeServicesRef.get_trade_visual_key_for_packet(trade)
 
 
 func _get_trade_visual_packets_for_key(visual_key: String) -> Array:
-	var packets: Array = []
-	if visual_key == "":
-		return packets
-	for trade in $Trades.get_children():
-		if not is_instance_valid(trade):
-			continue
-		var key_value := ""
-		if trade.has_method("get_trade_visual_key"):
-			key_value = str(trade.call("get_trade_visual_key"))
-		if key_value != visual_key:
-			continue
-		packets.append(trade)
-	return packets
+	return LevelRuntimeServicesRef.get_trade_visual_packets_for_key(_trade_visual_packets_by_key, $Trades, visual_key)
+
+
+func _register_trade_visual_packet(trade: Node) -> void:
+	LevelRuntimeServicesRef.register_trade_visual_packet(_trade_visual_packets_by_key, trade)
+
+
+func _unregister_trade_visual_packet(trade: Node) -> void:
+	LevelRuntimeServicesRef.unregister_trade_visual_packet(_trade_visual_packets_by_key, trade)
 
 
 func _spawn_trade(path_dict) -> void:
@@ -2256,6 +2166,7 @@ func _spawn_trade(path_dict) -> void:
 	else:
 		trade.set_variables(trade_dict)
 	$Trades.add_child(trade)
+	_register_trade_visual_packet(trade)
 	
 func update_bars(path_dict)  -> void:
 	if is_instance_valid(Global.active_agent) and is_instance_valid(path_dict["from_agent"]) and is_instance_valid(path_dict["to_agent"]):  
@@ -2455,6 +2366,9 @@ func _spawn_tuktuk_predators(requested_count: int, play_alert: bool = false) -> 
 					
 func _on_update_score() -> void:
 	var current_score_lvl := Global.get_rank_threshold(Global.score)
+	var ui_node = get_node_or_null("UI")
+	if is_instance_valid(ui_node) and ui_node.has_method("refresh_score_rank_display"):
+		ui_node.refresh_score_rank_display()
 	if current_score_lvl > score_lvl:
 		if _is_story_mode() and _story_phase_id < 2:
 			# Keep predator rank progression pending until story phase 2 unlocks birds.
@@ -2663,16 +2577,8 @@ func make_squash(pos, already_snapped: bool = false):
 	if not already_snapped:
 		squash_position = _resolve_tile_spawn_pos(pos)
 	
-	var named = "Squash_" + str($Agents.get_child_count()+1)
-	
-	var squash_dict = {
-		"name": named,
-		"type": "squash",
-		"position": squash_position,
-		"prod_res": ["P"],
-		"start_res": null,
-		"texture": TEX_SQUASH
-	}
+	var named = LevelHelpersRef.make_agent_name("Squash", $Agents)
+	var squash_dict = LevelHelpersRef.build_agent_setup_dict(named, "squash", squash_position, ["P"], TEX_SQUASH)
 	
 	var squash = plant_scene.instantiate()
 	squash.set_variables(squash_dict)
@@ -2692,16 +2598,8 @@ func make_tree(pos, already_snapped: bool = false):
 	if not already_snapped:
 		tree_position = _resolve_tile_spawn_pos(pos)
 	
-	var named = "Tree_" + str($Agents.get_child_count()+1)
-	
-	var tree_dict = {
-		"name": named,
-		"type": "tree",
-		"position": tree_position,
-		"prod_res": ["R"],
-		"start_res": null,
-		"texture": TEX_TREE
-	}
+	var named = LevelHelpersRef.make_agent_name("Tree", $Agents)
+	var tree_dict = LevelHelpersRef.build_agent_setup_dict(named, "tree", tree_position, ["R"], TEX_TREE)
 	var tree = plant_scene.instantiate()
 	tree.set_variables(tree_dict)
 	$Agents.add_child(tree)
@@ -2739,16 +2637,8 @@ func make_maize(pos, already_snapped: bool = false):
 	if not already_snapped:
 		maize_position = _resolve_tile_spawn_pos(pos)
 	
-	var named = "Maize_" + str($Agents.get_child_count()+1)
-	
-	var maize_dict = {
-		"name": named,
-		"type": "maize",
-		"position": maize_position,
-		"prod_res": ["K"],
-		"start_res": null,
-		"texture": TEX_MAIZE
-	}
+	var named = LevelHelpersRef.make_agent_name("Maize", $Agents)
+	var maize_dict = LevelHelpersRef.build_agent_setup_dict(named, "maize", maize_position, ["K"], TEX_MAIZE)
 	var maize = plant_scene.instantiate()
 	maize.set_variables(maize_dict)
 	$Agents.add_child(maize)
@@ -2766,16 +2656,8 @@ func make_bean(pos, already_snapped: bool = false):
 	if not already_snapped:
 		bean_position = _resolve_tile_spawn_pos(pos)
 	
-	var named = "Bean_" + str($Agents.get_child_count()+1)
-	
-	var bean_dict = {
-		"name": named,
-		"type": "bean",
-		"position": bean_position,
-		"prod_res": ["N"],
-		"start_res": null,
-		"texture": TEX_BEAN
-	}
+	var named = LevelHelpersRef.make_agent_name("Bean", $Agents)
+	var bean_dict = LevelHelpersRef.build_agent_setup_dict(named, "bean", bean_position, ["N"], TEX_BEAN)
 	var bean = plant_scene.instantiate()
 	bean.set_variables(bean_dict)
 	$Agents.add_child(bean)
@@ -2790,16 +2672,8 @@ func make_bean(pos, already_snapped: bool = false):
 
 func make_cloud(pos):
 	
-	var named = "Cloud_" + str($Agents.get_child_count()+1)
-	
-	var cloud_dict = {
-		"name": named,
-		"type": "cloud",
-		"position": pos,
-		"prod_res": ["R"],
-		"start_res": 20,
-		"texture": TEX_CLOUD
-	}
+	var named = LevelHelpersRef.make_agent_name("Cloud", $Agents)
+	var cloud_dict = LevelHelpersRef.build_agent_setup_dict(named, "cloud", pos, ["R"], TEX_CLOUD, 20)
 	var cloud = cloud_scene.instantiate()
 	cloud.set_variables(cloud_dict)
 	$Agents.add_child(cloud)
@@ -2813,15 +2687,8 @@ func make_story_bank(pos: Vector2) -> Node:
 	var bank_pos = _resolve_tile_spawn_pos(pos)
 	if _is_story_mode() and not _is_story_village_spawn_allowed(bank_pos):
 		return null
-	var named = str("VillageBank_", $Agents.get_child_count() + 1)
-	var bank_dict = {
-		"name": named,
-		"type": "bank",
-		"position": bank_pos,
-		"prod_res": ["R"],
-		"start_res": null,
-		"texture": TEX_BANK
-	}
+	var named = LevelHelpersRef.make_agent_name("VillageBank", $Agents)
+	var bank_dict = LevelHelpersRef.build_agent_setup_dict(named, "bank", bank_pos, ["R"], TEX_BANK)
 	var bank = socialagent_scene.instantiate()
 	bank.set_variables(bank_dict)
 	bank.buddy_radius = Global.social_buddy_radius
@@ -2844,17 +2711,8 @@ func make_myco(pos, already_snapped: bool = false):
 	if not already_snapped:
 		myco_position = _resolve_tile_spawn_pos(pos)
 	
-	var named = "Mycorrhizal_" + str($Agents.get_child_count()+1)
-		
-	
-	var myco_dict = {
-		"name": named,
-		"type": "myco",
-		"position": myco_position,
-		"prod_res": [null],
-		"start_res": null,
-		"texture": TEX_MYCO
-	}
+	var named = LevelHelpersRef.make_agent_name("Mycorrhizal", $Agents)
+	var myco_dict = LevelHelpersRef.build_agent_setup_dict(named, "myco", myco_position, [null], TEX_MYCO)
 	
 	var myco = myco_scene.instantiate()
 	myco.set_variables(myco_dict)
@@ -2895,15 +2753,8 @@ func _make_story_person(role: String, texture: Texture2D, pos: Vector2, prod_res
 	var spawn_pos = _resolve_tile_spawn_pos(pos)
 	if _is_story_mode() and not _is_story_village_spawn_allowed(spawn_pos):
 		return null
-	var named = str(role.capitalize(), "_", $Agents.get_child_count() + 1)
-	var person_dict = {
-		"name": named,
-		"type": role,
-		"position": spawn_pos,
-		"prod_res": prod_res,
-		"start_res": null,
-		"texture": texture
-	}
+	var named = LevelHelpersRef.make_agent_name(str(role.capitalize()), $Agents)
+	var person_dict = LevelHelpersRef.build_agent_setup_dict(named, role, spawn_pos, prod_res, texture)
 	var person = socialagent_scene.instantiate()
 	person.set_variables(person_dict)
 	$Agents.add_child(person)
@@ -2930,15 +2781,8 @@ func make_story_basket(pos: Vector2, asset_key: String = "") -> Node:
 	var basket_pos = _resolve_tile_spawn_pos(pos)
 	if _is_story_mode() and not _is_story_village_spawn_allowed(basket_pos):
 		return null
-	var named = str("VillageBasket_", $Agents.get_child_count() + 1)
-	var basket_dict = {
-		"name": named,
-		"type": "myco",
-		"position": basket_pos,
-		"prod_res": [null],
-		"start_res": null,
-		"texture": TEX_BASKET
-	}
+	var named = LevelHelpersRef.make_agent_name("VillageBasket", $Agents)
+	var basket_dict = LevelHelpersRef.build_agent_setup_dict(named, "myco", basket_pos, [null], TEX_BASKET)
 	var basket = basket_scene.instantiate()
 	var normalized_asset = asset_key.strip_edges()
 	if normalized_asset != "":

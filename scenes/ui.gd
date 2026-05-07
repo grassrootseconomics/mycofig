@@ -72,6 +72,8 @@ const MINIMAP_SIZE_TINY := Vector2(132, 88)
 const SIDE_BUTTON_SIZE_DEFAULT := Vector2(84, 38)
 const SIDE_BUTTON_SIZE_COMPACT := Vector2(98, 46)
 const SIDE_BUTTON_SIZE_TINY := Vector2(112, 52)
+const RANK_FLASH_SCALE := 1.34
+const RANK_SPARKLE_DURATION := 0.62
 
 var _slot_icons: Array = []
 var _slot_labels: Array = []
@@ -112,6 +114,12 @@ var _tutorial_panel: Control = null
 var _tutorial_label: Label = null
 var _tutorial_helper_panel: Panel = null
 var _endgame_container: Control = null
+var _score_label: Label = null
+var _rank_label: Label = null
+var _high_score_container: Control = null
+var _high_score_value_label: Label = null
+var _last_rank_key := -1
+var _rank_flash_tween: Tween = null
 var _pause_container_ref: MarginContainer = null
 var _quit_container_ref: MarginContainer = null
 var _pause_button_ref: Button = null
@@ -129,6 +137,7 @@ func _ready() -> void:
 	inventory_spawn_rng.randomize()
 	_ensure_drag_preview()
 	_cache_layout_nodes()
+	_update_score_rank_display(false)
 	_connect_viewport_resize_signal()
 	_apply_responsive_layout()
 	_flush_layout_updates(true)
@@ -150,6 +159,7 @@ var inventory_sprites = {}
 
 func setup():
 	_cache_layout_nodes()
+	_update_score_rank_display(false)
 	_slot_icons = [
 		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer/ChooseBeans,
 		$MarginContainer/VBoxContainer/PalletContainer/VBoxContainer/HBoxContainer/VBoxContainer2/ChooseSquash,
@@ -187,6 +197,12 @@ func _cache_layout_nodes() -> void:
 	_tutorial_label = get_node_or_null("TutorialMarginContainer1/Label")
 	_tutorial_helper_panel = get_node_or_null("TutorialMarginContainer1/HelperPanel")
 	_endgame_container = get_node_or_null("EndGameContainer")
+	_score_label = get_node_or_null("EndGameContainer/ScoreVBox/Label")
+	if not is_instance_valid(_score_label):
+		_score_label = get_node_or_null("EndGameContainer/Label")
+	_rank_label = get_node_or_null("EndGameContainer/ScoreVBox/RankLabel")
+	_high_score_container = get_node_or_null("HighScoreContainer")
+	_high_score_value_label = get_node_or_null("HighScoreContainer/VBoxContainer/ValueLabel")
 	_pause_container_ref = find_child("MarginCMarginContainer2ontainer", true, false) as MarginContainer
 	_quit_container_ref = find_child("QuitContainer", true, false) as MarginContainer
 	_pause_button_ref = find_child("PauseButton", true, false) as Button
@@ -1052,8 +1068,11 @@ func _layout_tutorial_container() -> void:
 		size = _tutorial_collapsed_size if _tutorial_collapsed else _tutorial_expanded_size
 	var margin := 12.0
 	if _tutorial_collapsed:
+		if is_instance_valid(_high_score_container) and _high_score_container.visible:
+			var high_score_rect = _high_score_container.get_global_rect()
+			margin = maxf(margin, high_score_rect.position.y + high_score_rect.size.y + 8.0)
 		tutorial.global_position = Vector2(
-			round(view_rect.position.x + margin),
+			round(view_rect.position.x + 12.0),
 			round(view_rect.position.y + margin)
 		)
 		return
@@ -1062,6 +1081,9 @@ func _layout_tutorial_container() -> void:
 	if is_instance_valid(score_container) and score_container.visible:
 		var score_rect = score_container.get_global_rect()
 		top_y = score_rect.position.y + score_rect.size.y + 12.0
+	if is_instance_valid(_high_score_container) and _high_score_container.visible:
+		var high_score_rect = _high_score_container.get_global_rect()
+		top_y = maxf(top_y, high_score_rect.position.y + high_score_rect.size.y + 12.0)
 	var x = view_rect.position.x + (view_rect.size.x - size.x) * 0.5
 	x = clampf(x, view_rect.position.x + margin, view_rect.position.x + view_rect.size.x - size.x - margin)
 	var y = maxf(top_y, view_rect.position.y + margin)
@@ -1102,7 +1124,77 @@ func _on_tutorial_toggle_pressed() -> void:
 func _on_score_timer_timeout() -> void:
 	#time_elapsed += 1
 	#Global.score += 1
-	$EndGameContainer/Label.text=str(Global.score)
+	_update_score_rank_display()
+
+
+func refresh_score_rank_display() -> void:
+	_update_score_rank_display()
+
+
+func _update_score_rank_display(animate_rank_change: bool = true) -> void:
+	Global.update_high_score(Global.score)
+	if is_instance_valid(_score_label):
+		_score_label.text = Global.format_score_value(Global.score)
+	if is_instance_valid(_high_score_value_label):
+		_high_score_value_label.text = Global.format_score_value(Global.high_score)
+	if is_instance_valid(_rank_label):
+		var rank_key := Global.get_rank_threshold(Global.score)
+		var rank_changed: bool = _last_rank_key >= 0 and rank_key != _last_rank_key
+		_rank_label.text = "Rank: " + str(Global.ranks.get(rank_key, ""))
+		_last_rank_key = rank_key
+		if animate_rank_change and rank_changed:
+			_play_rank_change_attention()
+
+
+func _play_rank_change_attention() -> void:
+	if not is_instance_valid(_rank_label):
+		return
+	if is_instance_valid(_rank_flash_tween):
+		_rank_flash_tween.kill()
+	_rank_label.scale = Vector2.ONE
+	_rank_label.modulate = Color.WHITE
+	_rank_label.pivot_offset = _rank_label.size * 0.5
+	_spawn_rank_sparkles()
+	_rank_flash_tween = get_tree().create_tween()
+	_rank_flash_tween.tween_property(_rank_label, "scale", Vector2(RANK_FLASH_SCALE, RANK_FLASH_SCALE), 0.12)
+	_rank_flash_tween.parallel().tween_property(_rank_label, "modulate", Color(1.0, 0.88, 0.25, 1.0), 0.12)
+	_rank_flash_tween.tween_property(_rank_label, "scale", Vector2(1.08, 1.08), 0.13)
+	_rank_flash_tween.parallel().tween_property(_rank_label, "modulate", Color.WHITE, 0.13)
+	_rank_flash_tween.tween_property(_rank_label, "scale", Vector2(1.22, 1.22), 0.10)
+	_rank_flash_tween.parallel().tween_property(_rank_label, "modulate", Color(1.0, 0.95, 0.45, 1.0), 0.10)
+	_rank_flash_tween.tween_property(_rank_label, "scale", Vector2.ONE, 0.22)
+	_rank_flash_tween.parallel().tween_property(_rank_label, "modulate", Color.WHITE, 0.22)
+
+
+func _spawn_rank_sparkles() -> void:
+	if not is_instance_valid(_rank_label):
+		return
+	var rect := _rank_label.get_global_rect()
+	var center := rect.position + rect.size * 0.5
+	var offsets := [
+		Vector2(-58, -10),
+		Vector2(-34, 14),
+		Vector2(0, -20),
+		Vector2(38, 12),
+		Vector2(62, -8)
+	]
+	for offset in offsets:
+		var sparkle := Label.new()
+		sparkle.text = "*"
+		sparkle.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		sparkle.z_index = 1000
+		sparkle.modulate = Color(1.0, 0.94, 0.35, 1.0)
+		sparkle.add_theme_font_size_override("font_size", 24)
+		add_child(sparkle)
+		var start_pos: Vector2 = center + offset
+		var drift: Vector2 = offset.normalized() * 20.0 + Vector2(0, -12)
+		sparkle.position = start_pos
+		sparkle.scale = Vector2(0.75, 0.75)
+		var tween := get_tree().create_tween()
+		tween.tween_property(sparkle, "scale", Vector2(1.55, 1.55), RANK_SPARKLE_DURATION)
+		tween.parallel().tween_property(sparkle, "position", start_pos + drift, RANK_SPARKLE_DURATION)
+		tween.parallel().tween_property(sparkle, "modulate:a", 0.0, RANK_SPARKLE_DURATION).set_delay(0.10)
+		tween.finished.connect(Callable(sparkle, "queue_free"))
 	
 
 
@@ -1914,6 +2006,7 @@ func _on_choose_tree_mouse_exited() -> void:
 func _on_restart_button_pressed() -> void:
 	set_pause_state(false)
 	hide_back_to_menu_confirm()
+	Global.update_high_score()
 	Global.score = 0
 	get_tree().call_deferred("change_scene_to_file","res://scenes/title_screen.tscn")
 

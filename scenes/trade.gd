@@ -81,6 +81,10 @@ func _despawn() -> void:
 		call_deferred("queue_free")
 
 
+func finish_trade() -> void:
+	_despawn()
+
+
 func _is_endpoint_locked(agent: Variant) -> bool:
 	if not is_instance_valid(agent):
 		return false

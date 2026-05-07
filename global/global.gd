@@ -1,6 +1,8 @@
 extends Node
 
 var score := 0
+var high_score := 0
+const HIGH_SCORE_SAVE_PATH := "user://high_score.cfg"
 
 var move_rate = 1 #4 #6
 var movement_speed = 50 #100 #200
@@ -15,7 +17,7 @@ var stage_inc = 0
 var max_stage_inc = 5
 var baby_mode = true
 var allow_agent_reposition = false
-var draw_lines = false
+var draw_lines = true
 
 var social_mode = false
 var world_bounds_enabled = false
@@ -312,6 +314,7 @@ var stage_colors = {
 
 
 func _ready() -> void:
+	load_high_score()
 	var seeded = false
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--seed="):
@@ -327,6 +330,48 @@ func _ready() -> void:
 		# Smaller radius reduces partner scans and line churn on phones.
 		social_buddy_radius = 170
 	reset_trade_dispatch_budgets()
+
+
+func load_high_score() -> void:
+	var cfg := ConfigFile.new()
+	var err := cfg.load(HIGH_SCORE_SAVE_PATH)
+	if err == OK:
+		high_score = max(0, int(cfg.get_value("scores", "high_score", 0)))
+	else:
+		high_score = 0
+
+
+func save_high_score() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("scores", "high_score", max(0, high_score))
+	cfg.save(HIGH_SCORE_SAVE_PATH)
+
+
+func update_high_score(score_value: int = -1) -> bool:
+	var checked_score := score if score_value < 0 else score_value
+	if checked_score <= high_score:
+		return false
+	high_score = checked_score
+	save_high_score()
+	return true
+
+
+func add_score(amount: int) -> int:
+	score += amount
+	update_high_score(score)
+	return score
+
+
+func format_score_value(score_value: int) -> String:
+	var raw := str(score_value)
+	var formatted := ""
+	var digit_count := 0
+	for index in range(raw.length() - 1, -1, -1):
+		formatted = raw.substr(index, 1) + formatted
+		digit_count += 1
+		if digit_count % 3 == 0 and index > 0:
+			formatted = "," + formatted
+	return formatted
 
 
 func set_world_context(rect: Rect2, mode_id: String = "", scenario_id: String = "") -> void:

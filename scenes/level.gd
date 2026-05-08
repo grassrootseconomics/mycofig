@@ -43,9 +43,12 @@ const STORY_PHASE3_MYCO_NEAR_VILLAGER_MIN_RADIUS := 3
 const STORY_PHASE3_MYCO_NEAR_VILLAGER_MAX_RADIUS := 7
 const STORY_PHASE4_FARMER_HARVEST_RADIUS := 8
 const STORY_FARMER_LOW_N_REHARVEST_THRESHOLD := 1.0
+const STORY_PHASE2_BIRD_WAVE_COUNT := 3
 const CHALLENGE_FARMER_N_AUTOFILL_INTERVAL := 0.20
 const BIRD_FORWARD_TARGET_MIN_X_DELTA := 8.0
 const BASKET_NEAR_PERSON_MAX_TILES := 4
+const STORY_PHASE5_BASKET_R_LIQUIDITY := STORY_VILLAGER_COUNT_PER_ROLE * 3 * 2
+const STORY_PHASE5_FORCED_BASKET_LINK_META := "story_force_phase5_basket_link"
 const STORY_VILLAGE_PERMANENT_REVEAL_BUFFER := 4
 const STORY_PHASE5_OBJECTIVE_KEY := "village_everyone_trading"
 const AMBIENT_TREE_AUDIO_RADIUS_TILES := 4.0
@@ -597,6 +600,7 @@ func _set_story_phase(phase_id: int) -> void:
 	if previous_phase < 2 and _story_phase_id >= 2:
 		# Birds are intentionally deferred until Phase 2 in story mode.
 		_on_update_score()
+		_spawn_story_phase2_bird_wave()
 	if safe_phase == 3:
 		_story_phase3_myco_near_villager = false
 	if safe_phase == 4:
@@ -612,6 +616,7 @@ func _set_story_phase(phase_id: int) -> void:
 	elif safe_phase == 5:
 		_story_phase4_reserved_crop_to_farmer_ids.clear()
 		_story_reset_phase5_trading_progress()
+		_story_prepare_existing_phase5_baskets()
 		_story_refresh_hud()
 		_story_center_camera_on_phase5_nontrading_villagers(false)
 		_story_show_phase5_prompt_after_camera_pan(prompt_text)
@@ -643,6 +648,16 @@ func _story_show_phase5_prompt_after_camera_pan(prompt_text: String) -> void:
 	if is_instance_valid(world) and world.has_method("reset_camera_smoothing_speed"):
 		world.reset_camera_smoothing_speed()
 	_story_set_prompt(prompt_text, 5)
+
+
+func _spawn_story_phase2_bird_wave() -> void:
+	if not _is_story_mode():
+		return
+	if _story_phase_id < 2:
+		return
+	if not Global.is_birding:
+		return
+	_spawn_predators(STORY_PHASE2_BIRD_WAVE_COUNT, true)
 
 
 func on_story_instruction_continue(phase_id: int) -> void:
@@ -923,6 +938,10 @@ func _story_collect_villager_ids() -> Dictionary:
 	for agent in $Agents.get_children():
 		if not _is_story_villager(agent):
 			continue
+		if bool(agent.get("dead")):
+			continue
+		if not _is_story_village_person_type(str(agent.get("type"))):
+			continue
 		ids[int(agent.get_instance_id())] = true
 	return ids
 
@@ -1023,7 +1042,7 @@ func bird_try_assign_harvest_target(bird: Node) -> Node:
 	_bird_cleanup_harvest_reservations()
 	var bird_id = int(bird.get_instance_id())
 	var best_crop: Node = null
-	if str(Global.mode) == "challenge":
+	if _is_story_mode() or str(Global.mode) == "challenge":
 		best_crop = _bird_find_best_harvest_target(bird, "tree")
 	if not is_instance_valid(best_crop):
 		best_crop = _bird_find_best_harvest_target(bird)
@@ -1034,7 +1053,7 @@ func bird_try_assign_harvest_target(bird: Node) -> Node:
 
 
 func bird_try_assign_acorn_target(bird: Node) -> Node:
-	if str(Global.mode) != "challenge":
+	if not _is_story_mode() and str(Global.mode) != "challenge":
 		return null
 	if not is_instance_valid(bird):
 		return null
@@ -1164,6 +1183,119 @@ func _story_reset_phase5_trading_progress() -> void:
 	_story_phase5_traded_villager_ids.clear()
 	_story_phase5_all_villagers_trading = false
 	Global.village_objective_flags[STORY_PHASE5_OBJECTIVE_KEY] = false
+
+
+func _story_is_phase5_player_basket(agent: Variant) -> bool:
+	if not _is_story_village_actor(agent):
+		return false
+	if str(agent.get("type")) != "myco":
+		return false
+	return str(agent.get_meta("story_kind", "")) == "basket"
+
+
+func _story_set_agent_asset_value(agent: Node, asset_key: String, amount: int) -> void:
+	if not is_instance_valid(agent):
+		return
+	var assets_variant = agent.get("assets")
+	if typeof(assets_variant) != TYPE_DICTIONARY:
+		return
+	var assets: Dictionary = assets_variant
+	assets[asset_key] = amount
+	agent.set("assets", assets)
+	var bars_variant = agent.get("bars")
+	if typeof(bars_variant) != TYPE_DICTIONARY:
+		return
+	var bars: Dictionary = bars_variant
+	var bar = bars.get(asset_key, null)
+	if is_instance_valid(bar):
+		bar.value = amount
+
+
+func _story_set_agent_need_value(agent: Node, asset_key: String, amount: int) -> void:
+	if not is_instance_valid(agent):
+		return
+	var needs_variant = agent.get("needs")
+	if typeof(needs_variant) != TYPE_DICTIONARY:
+		return
+	var needs: Dictionary = needs_variant
+	needs[asset_key] = amount
+	agent.set("needs", needs)
+	var bars_variant = agent.get("bars")
+	if typeof(bars_variant) != TYPE_DICTIONARY:
+		return
+	var bars: Dictionary = bars_variant
+	var bar = bars.get(asset_key, null)
+	if is_instance_valid(bar):
+		bar.max_value = maxi(int(ceil(float(amount) * 1.2)), 1)
+
+
+func _story_seed_phase5_basket_liquidity(basket: Node) -> void:
+	if not _story_is_phase5_player_basket(basket):
+		return
+	var assets_variant = basket.get("assets")
+	if typeof(assets_variant) != TYPE_DICTIONARY:
+		return
+	var assets: Dictionary = assets_variant
+	var current_r = int(assets.get("R", 0))
+	var needs_variant = basket.get("needs")
+	var current_need_r := 0
+	if typeof(needs_variant) == TYPE_DICTIONARY:
+		var needs: Dictionary = needs_variant
+		current_need_r = int(needs.get("R", 0))
+	_story_set_agent_need_value(basket, "R", maxi(current_need_r, STORY_PHASE5_BASKET_R_LIQUIDITY))
+	if current_r < STORY_PHASE5_BASKET_R_LIQUIDITY:
+		_story_set_agent_asset_value(basket, "R", STORY_PHASE5_BASKET_R_LIQUIDITY)
+
+
+func _story_append_unique_buddy(agent: Node, buddy: Node) -> bool:
+	if not is_instance_valid(agent) or not is_instance_valid(buddy):
+		return false
+	var buddies_variant = agent.get("trade_buddies")
+	if typeof(buddies_variant) != TYPE_ARRAY:
+		return false
+	var buddies: Array = buddies_variant
+	if buddies.has(buddy):
+		return false
+	buddies.append(buddy)
+	agent.set("trade_buddies", buddies)
+	return true
+
+
+func _story_force_phase5_basket_links(basket: Node) -> void:
+	if not _story_is_phase5_player_basket(basket):
+		return
+	for agent in $Agents.get_children():
+		if not _is_story_villager(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if not _is_story_village_person_type(str(agent.get("type"))):
+			continue
+		_story_append_unique_buddy(agent, basket)
+		agent.set("logistics_ready", true)
+		request_agent_dirty(agent, true, true, false)
+	request_agent_dirty(basket, true, true, false)
+
+
+func _story_prepare_phase5_basket(basket: Node) -> void:
+	if not _is_story_mode():
+		return
+	if not _story_is_phase5_player_basket(basket):
+		return
+	basket.set_meta(STORY_PHASE5_FORCED_BASKET_LINK_META, true)
+	basket.set("logistics_ready", true)
+	_story_seed_phase5_basket_liquidity(basket)
+	_story_force_phase5_basket_links(basket)
+	_process_dirty_queues()
+	LevelHelpersRef.refresh_trade_line_visuals($Lines)
+
+
+func _story_prepare_existing_phase5_baskets() -> void:
+	if not _is_story_mode():
+		return
+	for agent in $Agents.get_children():
+		if _story_is_phase5_player_basket(agent):
+			_story_prepare_phase5_basket(agent)
 
 
 func get_story_phase5_nontrading_lower_villagers_center_world() -> Dictionary:
@@ -3284,6 +3416,8 @@ func make_story_basket(pos: Vector2, asset_key: String = "") -> Node:
 	if basket.has_signal("trade"):
 		basket.connect("trade", _on_agent_trade)
 	LevelHelpersRef.sync_agent_occupancy(self, basket)
+	if _is_story_mode() and _story_phase_id >= 5 and normalized_asset == "":
+		_story_prepare_phase5_basket(basket)
 	return basket
 	
 	

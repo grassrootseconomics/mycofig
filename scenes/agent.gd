@@ -56,6 +56,7 @@ const HARVEST_GUIDE_MAIZE_RECT := Rect2(0.28, 0.20, 0.42, 0.66)
 const HARVEST_GUIDE_MYCO_RECT := Rect2(0.08, 0.08, 0.84, 0.84)
 const TREE_HARVEST_ACORN_LOCAL_POS := Vector2(0.0, -64.0)
 const TREE_HARVEST_ACORN_HOTSPOT_RADIUS := 24.0
+const STORY_PHASE5_FORCED_BASKET_LINK_META := "story_force_phase5_basket_link"
 
 signal trade(pos)
 signal clicked
@@ -1158,6 +1159,29 @@ func _restore_lifecycle_spawn_anchor_buddy() -> void:
 		return
 	if not _has_trade_buddy_link_to(anchor):
 		trade_buddies.append(anchor)
+
+
+func _restore_story_forced_village_basket_buddies() -> void:
+	if not _is_story_village_person_node(self):
+		return
+	var agents_root = _get_agents_root()
+	if not is_instance_valid(agents_root):
+		return
+	for candidate in agents_root.get_children():
+		if not is_instance_valid(candidate):
+			continue
+		if candidate == self:
+			continue
+		if bool(candidate.get("dead")):
+			continue
+		if str(candidate.get("type")) != "myco":
+			continue
+		if not bool(candidate.get_meta(STORY_PHASE5_FORCED_BASKET_LINK_META, false)):
+			continue
+		if not _can_share_story_trade_network(candidate):
+			continue
+		if not _has_trade_buddy_link_to(candidate):
+			trade_buddies.append(candidate)
 
 
 func _is_lifecycle_orphan_spawn_child() -> bool:
@@ -2415,6 +2439,7 @@ func generate_buddies() -> void:
 	var agents_root = get_node_or_null("../../Agents")
 	trade_buddies = LevelHelpersRef.query_trade_hubs_near_agent(_get_level_root(), agents_root, self, num_buddies, true)
 	_restore_lifecycle_spawn_anchor_buddy()
+	_restore_story_forced_village_basket_buddies()
 func new_draw_line():
 	var level_root = _get_level_root()
 	var lines_root = get_node_or_null("../../Lines")

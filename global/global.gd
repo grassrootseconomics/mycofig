@@ -129,19 +129,19 @@ var assets_social = { #list of assets -
 var story_stage_text = {
 	1: "Phase 1 - This is your Garden! 
 	
-	Below: your inventory of crops you can plant.
+	Below is your harvest basket of crops you can plant.
 	
-	Plant one of each of your crops.",
+	Tap on them and try to plant one of each of your crops.",
 	2: "Phase 2 - Harvest time!
 	
-	Harvest your crops by clicking on them, before the birds eat them.",
+	Harvest your crops by tapping on them, before the birds eat them.",
 	3: "Phase 3 - Grow your garden 
 	
 	Grow more crops in the right direction. 
 	(see the minimap).
 
 	Tap to check what crops need to grow.
-	Each plant fits a differnt need 
+	The plants can help eachother.
 	and mushrooms connect them.",
 	4: "Phase 4 - You reached a village! 
 	
@@ -150,8 +150,8 @@ var story_stage_text = {
 	Grow more crops they can harvest.",
 	5: "Phase 5: Help them share!
 	
-	Put a basket from your inventory near the villagers who are not trading so they can share with eachother.",
-	6: "Story Complete! 
+	Try giving them a basket. They can use that to share their goods and services with eachother.",
+	6: "You did it! 
 	
 	You restored soil health and helped the village recover. 
 	

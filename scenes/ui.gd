@@ -59,6 +59,23 @@ const STORY_TUTORIAL_CHALLENGE_BUTTON_SIZE := Vector2(220, 42)
 const STORY_TUTORIAL_CONTINUE_TEXT := "Let's go!"
 const STORY_TUTORIAL_CHALLENGE_TEXT := "Give me a Challenge!"
 const CHALLENGE_LOSS_CONTINUE_TEXT := "View my score"
+const STORY_FACTS_BUTTON_SIZE := Vector2(196, 42)
+const STORY_FACTS_PANEL_SIZE := Vector2(640, 430)
+const STORY_FACTS_PANEL_COLOR := Color(0.96, 0.42, 0.08, 0.82)
+const STORY_FACTS_PANEL_BORDER := Color(1.0, 0.86, 0.44, 0.72)
+const STORY_FACTS_BUTTON_BG := Color(0.82, 0.33, 0.08, 0.94)
+const STORY_FACTS_BUTTON_BG_HOVER := Color(0.96, 0.45, 0.12, 0.98)
+const STORY_FACTS_BUTTON_BG_PRESSED := Color(0.62, 0.23, 0.06, 1.0)
+const STORY_FACTS_SPARKLE_INTERVAL := 0.72
+const STORY_FACTS_SPARKLE_DURATION := 0.70
+const STORY_FACTS_TEXT := {
+	1: "Growing plants require healthy soil.\n\nFungi help make the soil healthy and alive.",
+	2: "Birds deserve to eat too. So plant more to feed them.\n\nBirds like seeds.",
+	3: "Beans help fix nitrogen (Green) in the soil.\nSquash bring shade and potassium (Orange).\nMaize brings Phosphorus (Pink).\nTrees are helping bring in water (Blue).\n\nBelow the Mushrooms is Mycorrhizal fungi which form a relationship with plant roots, acting as an extension of the root system to enhance nutrient and water absorption.",
+	4: "Healthy people need healthy soil.",
+	5: "People can exchange, lend, borrow, rotate their goods and services fairly even without money.",
+	6: "This was the easy part. Now try Challenge Mode!"
+}
 const STORY_GUIDE_ARROW_COLOR := Color(1.0, 0.74, 0.16, 0.96)
 const STORY_GUIDE_ARROW_SHADOW_COLOR := Color(0.12, 0.05, 0.02, 0.42)
 const STORY_GUIDE_ARROW_WIDTH := 7.0
@@ -147,6 +164,17 @@ var _score_label: Label = null
 var _rank_label: Label = null
 var _high_score_container: Control = null
 var _high_score_value_label: Label = null
+var _story_facts_button: Button = null
+var _story_facts_panel: Panel = null
+var _story_facts_label: Label = null
+var _story_facts_close_button: Button = null
+var _story_facts_back_button: Button = null
+var _story_facts_challenge_button: Button = null
+var _story_facts_available := false
+var _story_facts_seen_phases: Dictionary = {}
+var _story_facts_current_phase := 0
+var _story_facts_sparkle_elapsed := 0.0
+var _story_facts_sparkle_spawn_elapsed := STORY_FACTS_SPARKLE_INTERVAL
 var _last_rank_key := -1
 var _rank_flash_tween: Tween = null
 var _pause_container_ref: MarginContainer = null
@@ -237,6 +265,8 @@ func _cache_layout_nodes() -> void:
 	_quit_container_ref = find_child("QuitContainer", true, false) as MarginContainer
 	_pause_button_ref = find_child("PauseButton", true, false) as Button
 	_quit_button_ref = find_child("QuitButton", true, false) as Button
+	_ensure_story_facts_button()
+	_ensure_story_facts_panel()
 
 
 func _ensure_minimap_panel() -> void:
@@ -528,6 +558,121 @@ func _make_story_instruction_button_style(bg_color: Color) -> StyleBoxFlat:
 	style.content_margin_top = 8
 	style.content_margin_bottom = 8
 	return style
+
+
+func _make_story_facts_panel_style() -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = STORY_FACTS_PANEL_COLOR
+	style.corner_radius_top_left = 10
+	style.corner_radius_top_right = 10
+	style.corner_radius_bottom_left = 10
+	style.corner_radius_bottom_right = 10
+	style.border_width_left = 2
+	style.border_width_top = 2
+	style.border_width_right = 2
+	style.border_width_bottom = 2
+	style.border_color = STORY_FACTS_PANEL_BORDER
+	style.shadow_color = Color(0.0, 0.0, 0.0, 0.28)
+	style.shadow_size = 5
+	style.content_margin_left = 18
+	style.content_margin_top = 16
+	style.content_margin_right = 18
+	style.content_margin_bottom = 16
+	return style
+
+
+func _make_story_facts_button_style(bg_color: Color) -> StyleBoxFlat:
+	var style := _make_story_instruction_button_style(bg_color)
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_radius_bottom_right = 8
+	style.border_color = STORY_FACTS_PANEL_BORDER
+	return style
+
+
+func _style_story_facts_button(button: Button, bg_color: Color = STORY_FACTS_BUTTON_BG) -> void:
+	if not is_instance_valid(button):
+		return
+	button.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+	button.add_theme_color_override("font_hover_color", Color(1, 1, 1, 1))
+	button.add_theme_color_override("font_pressed_color", Color(1, 1, 1, 1))
+	button.add_theme_stylebox_override("normal", _make_story_facts_button_style(bg_color))
+	button.add_theme_stylebox_override("hover", _make_story_facts_button_style(STORY_FACTS_BUTTON_BG_HOVER))
+	button.add_theme_stylebox_override("pressed", _make_story_facts_button_style(STORY_FACTS_BUTTON_BG_PRESSED))
+
+
+func _ensure_story_facts_button() -> void:
+	if is_instance_valid(_story_facts_button):
+		return
+	var score_vbox = get_node_or_null("EndGameContainer/ScoreVBox")
+	if not is_instance_valid(score_vbox):
+		return
+	_story_facts_button = Button.new()
+	_story_facts_button.name = "StoryFactsButton"
+	_story_facts_button.custom_minimum_size = STORY_FACTS_BUTTON_SIZE
+	_story_facts_button.focus_mode = Control.FOCUS_NONE
+	_story_facts_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	_story_facts_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_story_facts_button.visible = false
+	_story_facts_button.add_theme_font_size_override("font_size", 16)
+	_style_story_facts_button(_story_facts_button)
+	_story_facts_button.pressed.connect(_on_story_facts_button_pressed)
+	score_vbox.add_child(_story_facts_button)
+
+
+func _ensure_story_facts_panel() -> void:
+	if is_instance_valid(_story_facts_panel):
+		return
+	_story_facts_panel = Panel.new()
+	_story_facts_panel.name = "StoryFactsPanel"
+	_story_facts_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	_story_facts_panel.z_index = 180
+	_story_facts_panel.visible = false
+	_story_facts_panel.add_theme_stylebox_override("panel", _make_story_facts_panel_style())
+	add_child(_story_facts_panel)
+
+	_story_facts_label = Label.new()
+	_story_facts_label.name = "FactsLabel"
+	_story_facts_label.process_mode = Node.PROCESS_MODE_ALWAYS
+	_story_facts_label.theme_type_variation = "Label"
+	_story_facts_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_story_facts_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_story_facts_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_story_facts_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+	_story_facts_label.add_theme_font_size_override("font_size", 18)
+	_story_facts_panel.add_child(_story_facts_label)
+
+	_story_facts_close_button = Button.new()
+	_story_facts_close_button.name = "CloseButton"
+	_story_facts_close_button.text = "X"
+	_story_facts_close_button.custom_minimum_size = Vector2(34, 34)
+	_story_facts_close_button.focus_mode = Control.FOCUS_NONE
+	_story_facts_close_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	_style_story_facts_button(_story_facts_close_button, Color(0.64, 0.18, 0.06, 0.96))
+	_story_facts_close_button.pressed.connect(_on_story_facts_close_pressed)
+	_story_facts_panel.add_child(_story_facts_close_button)
+
+	_story_facts_back_button = Button.new()
+	_story_facts_back_button.name = "BackButton"
+	_story_facts_back_button.text = "Back to the Game"
+	_story_facts_back_button.custom_minimum_size = Vector2(190, 44)
+	_story_facts_back_button.focus_mode = Control.FOCUS_NONE
+	_story_facts_back_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	_style_story_facts_button(_story_facts_back_button, Color(0.22, 0.45, 0.20, 0.96))
+	_story_facts_back_button.pressed.connect(_on_story_facts_close_pressed)
+	_story_facts_panel.add_child(_story_facts_back_button)
+
+	_story_facts_challenge_button = Button.new()
+	_story_facts_challenge_button.name = "ChallengeButton"
+	_story_facts_challenge_button.text = "Challenge Mode"
+	_story_facts_challenge_button.custom_minimum_size = Vector2(190, 44)
+	_story_facts_challenge_button.focus_mode = Control.FOCUS_NONE
+	_story_facts_challenge_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	_style_story_facts_button(_story_facts_challenge_button, Color(0.22, 0.35, 0.74, 0.96))
+	_story_facts_challenge_button.pressed.connect(_on_story_facts_challenge_pressed)
+	_story_facts_panel.add_child(_story_facts_challenge_button)
+	_layout_story_facts_panel()
 
 
 func _ensure_slot_sparkle_ring(icon: TextureRect, host: Panel) -> void:
@@ -1190,6 +1335,7 @@ func _apply_runtime_layout(force: bool = false) -> void:
 		return
 	_layout_quit_container()
 	_layout_tutorial_container()
+	_layout_story_facts_panel()
 	_position_tutorial_toggle()
 	_ui_layout_dirty = false
 
@@ -1357,6 +1503,9 @@ func _apply_responsive_layout() -> void:
 		_tutorial_continue_button.offset_top = -continue_size.y - 12.0
 		_tutorial_continue_button.offset_bottom = -12.0
 		_tutorial_continue_button.add_theme_font_size_override("font_size", 18 if compact else 16)
+	if is_instance_valid(_story_facts_button):
+		_story_facts_button.custom_minimum_size = Vector2(214, 48) if compact else STORY_FACTS_BUTTON_SIZE
+		_story_facts_button.add_theme_font_size_override("font_size", 18 if compact else 16)
 	var pause_button: Button = _get_pause_button()
 	var quit_button: Button = _get_quit_button()
 	var pause_size = SIDE_BUTTON_SIZE_TINY if tiny else (SIDE_BUTTON_SIZE_COMPACT if compact else SIDE_BUTTON_SIZE_DEFAULT)
@@ -1400,6 +1549,7 @@ func refund_inventory_item(agent_name: String, amount: int = 1) -> void:
 func _process(delta: float) -> void:
 	_update_minimap_input_lock()
 	_update_inventory_phase1_sparkle_animation(delta)
+	_update_story_facts_button_sparkle(delta)
 	_update_selected_inventory_hover_hint()
 	_refresh_tutorial_panel_state()
 	_update_layout_pass(delta)
@@ -1624,6 +1774,60 @@ func _layout_tutorial_container() -> void:
 	tutorial.global_position = Vector2(round(x), round(y))
 
 
+func _layout_story_facts_panel() -> void:
+	if not is_instance_valid(_story_facts_panel):
+		return
+	var view_rect = get_viewport().get_visible_rect()
+	var compact = _is_compact_ui()
+	var tiny = _is_tiny_ui()
+	var panel_size = STORY_FACTS_PANEL_SIZE
+	panel_size.x = minf(panel_size.x, maxf(view_rect.size.x - 28.0, 300.0))
+	panel_size.y = minf(panel_size.y, maxf(view_rect.size.y - 28.0, 260.0))
+	if compact:
+		panel_size = Vector2(minf(panel_size.x, view_rect.size.x - 24.0), minf(panel_size.y, view_rect.size.y - 24.0))
+	_story_facts_panel.custom_minimum_size = panel_size
+	_story_facts_panel.size = panel_size
+	_story_facts_panel.global_position = Vector2(
+		round(view_rect.position.x + (view_rect.size.x - panel_size.x) * 0.5),
+		round(view_rect.position.y + (view_rect.size.y - panel_size.y) * 0.5)
+	)
+
+	if is_instance_valid(_story_facts_close_button):
+		var close_size = Vector2(38, 38) if compact else Vector2(34, 34)
+		_story_facts_close_button.custom_minimum_size = close_size
+		_story_facts_close_button.size = close_size
+		_story_facts_close_button.position = Vector2(panel_size.x - close_size.x - 10.0, 10.0)
+		_story_facts_close_button.add_theme_font_size_override("font_size", 18 if compact else 16)
+
+	var bottom_button_size = Vector2(204, 46) if compact else Vector2(190, 44)
+	if tiny:
+		bottom_button_size = Vector2(212, 48)
+	var show_challenge = _story_facts_current_phase == 6
+	if is_instance_valid(_story_facts_challenge_button):
+		_story_facts_challenge_button.visible = show_challenge
+		_story_facts_challenge_button.custom_minimum_size = bottom_button_size
+		_story_facts_challenge_button.size = bottom_button_size
+	if is_instance_valid(_story_facts_back_button):
+		_story_facts_back_button.custom_minimum_size = bottom_button_size
+		_story_facts_back_button.size = bottom_button_size
+
+	var gap := 14.0
+	var buttons_width = bottom_button_size.x
+	if show_challenge:
+		buttons_width = bottom_button_size.x * 2.0 + gap
+	var start_x = (panel_size.x - buttons_width) * 0.5
+	var button_y = panel_size.y - bottom_button_size.y - 18.0
+	if is_instance_valid(_story_facts_back_button):
+		_story_facts_back_button.position = Vector2(start_x, button_y)
+	if show_challenge and is_instance_valid(_story_facts_challenge_button):
+		_story_facts_challenge_button.position = Vector2(start_x + bottom_button_size.x + gap, button_y)
+
+	if is_instance_valid(_story_facts_label):
+		_story_facts_label.add_theme_font_size_override("font_size", 15 if tiny else (16 if compact else 18))
+		_story_facts_label.position = Vector2(30.0, 54.0)
+		_story_facts_label.size = Vector2(panel_size.x - 60.0, button_y - 64.0)
+
+
 func _refresh_tutorial_panel_state() -> void:
 	var tutorial = _tutorial_panel
 	if not is_instance_valid(tutorial):
@@ -1677,6 +1881,8 @@ func _on_tutorial_continue_pressed() -> void:
 		if is_instance_valid(level_root) and level_root.has_method("on_challenge_loss_score_continue"):
 			level_root.call("on_challenge_loss_score_continue")
 		return
+	if _is_story_instruction_mode() and phase_id >= 1 and phase_id <= 6:
+		_unlock_story_facts_button()
 	if is_instance_valid(level_root) and level_root.has_method("on_story_instruction_continue"):
 		level_root.call("on_story_instruction_continue", phase_id)
 
@@ -1693,17 +1899,163 @@ func refresh_score_rank_display() -> void:
 
 func _update_score_rank_display(animate_rank_change: bool = true) -> void:
 	Global.update_high_score(Global.score)
+	var story_mode := _is_story_instruction_mode()
 	if is_instance_valid(_score_label):
+		_score_label.visible = not story_mode
 		_score_label.text = Global.format_score_value(Global.score)
+	if is_instance_valid(_high_score_container):
+		_high_score_container.visible = not story_mode
 	if is_instance_valid(_high_score_value_label):
 		_high_score_value_label.text = Global.format_score_value(Global.high_score)
 	if is_instance_valid(_rank_label):
+		_rank_label.visible = not story_mode
 		var rank_key := Global.get_rank_threshold(Global.score)
 		var rank_changed: bool = _last_rank_key >= 0 and rank_key != _last_rank_key
 		_rank_label.text = "Rank: " + str(Global.ranks.get(rank_key, ""))
 		_last_rank_key = rank_key
-		if animate_rank_change and rank_changed:
+		if not story_mode and animate_rank_change and rank_changed:
 			_play_rank_change_attention()
+	_sync_story_facts_button_state()
+	if is_instance_valid(_endgame_container):
+		_endgame_container.visible = (not story_mode) or (is_instance_valid(_story_facts_button) and _story_facts_button.visible)
+
+
+func _get_story_facts_phase() -> int:
+	return clampi(int(Global.story_chapter_id), 1, 6)
+
+
+func _get_story_facts_button_text(phase_id: int) -> String:
+	return str("Phase ", clampi(phase_id, 1, 6), ". Facts!")
+
+
+func _story_facts_should_sparkle() -> bool:
+	if not _is_story_instruction_mode():
+		return false
+	if not _story_facts_available:
+		return false
+	if not is_instance_valid(_story_facts_button) or not _story_facts_button.visible:
+		return false
+	return not bool(_story_facts_seen_phases.get(_story_facts_current_phase, false))
+
+
+func _sync_story_facts_button_state() -> void:
+	_ensure_story_facts_button()
+	if not is_instance_valid(_story_facts_button):
+		return
+	var story_mode := _is_story_instruction_mode()
+	if not story_mode:
+		_story_facts_button.visible = false
+		if is_instance_valid(_story_facts_panel):
+			_story_facts_panel.visible = false
+		if is_instance_valid(_endgame_container):
+			_endgame_container.visible = true
+		return
+	var old_visible := _story_facts_button.visible
+	var old_text := str(_story_facts_button.text)
+	var phase_id = _get_story_facts_phase()
+	if phase_id != _story_facts_current_phase:
+		_story_facts_current_phase = phase_id
+		_story_facts_sparkle_spawn_elapsed = STORY_FACTS_SPARKLE_INTERVAL
+	var panel_open = is_instance_valid(_story_facts_panel) and _story_facts_panel.visible
+	var story_prompt_open = is_instance_valid(_tutorial_panel) and _tutorial_panel.visible and not _tutorial_collapsed
+	_story_facts_button.visible = _story_facts_available and not panel_open and not story_prompt_open
+	var button_text = _get_story_facts_button_text(phase_id)
+	if _story_facts_should_sparkle():
+		button_text = str("* ", button_text, " *")
+	_story_facts_button.text = button_text
+	if is_instance_valid(_endgame_container):
+		_endgame_container.visible = _story_facts_button.visible
+	if old_visible != _story_facts_button.visible or old_text != button_text:
+		_request_layout_update()
+
+
+func _unlock_story_facts_button() -> void:
+	if not _is_story_instruction_mode():
+		return
+	var was_available = _story_facts_available
+	_story_facts_available = true
+	_sync_story_facts_button_state()
+	if not was_available:
+		_spawn_story_facts_sparkles()
+
+
+func _update_story_facts_button_sparkle(delta: float) -> void:
+	_sync_story_facts_button_state()
+	if not _story_facts_should_sparkle():
+		_story_facts_sparkle_elapsed = 0.0
+		if is_instance_valid(_story_facts_button):
+			_story_facts_button.modulate = Color.WHITE
+		return
+	_story_facts_sparkle_elapsed += maxf(delta, 0.0)
+	_story_facts_sparkle_spawn_elapsed += maxf(delta, 0.0)
+	var pulse = 0.62 + 0.38 * (0.5 + 0.5 * sin(_story_facts_sparkle_elapsed * 5.2))
+	_story_facts_button.modulate = Color(1.0, 0.90 + 0.10 * pulse, 0.48 + 0.36 * pulse, 1.0)
+	if _story_facts_sparkle_spawn_elapsed >= STORY_FACTS_SPARKLE_INTERVAL:
+		_story_facts_sparkle_spawn_elapsed = 0.0
+		_spawn_story_facts_sparkles()
+
+
+func _spawn_story_facts_sparkles() -> void:
+	if not is_instance_valid(_story_facts_button) or not _story_facts_button.visible:
+		return
+	var rect := _story_facts_button.get_global_rect()
+	var center := rect.position + rect.size * 0.5
+	var offsets := [
+		Vector2(-70, -16),
+		Vector2(-42, 18),
+		Vector2(0, -24),
+		Vector2(44, 18),
+		Vector2(72, -12)
+	]
+	for offset in offsets:
+		var sparkle := Label.new()
+		sparkle.text = "*"
+		sparkle.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		sparkle.z_index = 1000
+		sparkle.modulate = Color(1.0, 0.92, 0.24, 1.0)
+		sparkle.add_theme_font_size_override("font_size", 24)
+		add_child(sparkle)
+		var start_pos: Vector2 = center + offset
+		var drift: Vector2 = offset.normalized() * 18.0 + Vector2(0, -10)
+		sparkle.position = start_pos
+		sparkle.scale = Vector2(0.72, 0.72)
+		var tween := get_tree().create_tween()
+		tween.tween_property(sparkle, "scale", Vector2(1.45, 1.45), STORY_FACTS_SPARKLE_DURATION)
+		tween.parallel().tween_property(sparkle, "position", start_pos + drift, STORY_FACTS_SPARKLE_DURATION)
+		tween.parallel().tween_property(sparkle, "modulate:a", 0.0, STORY_FACTS_SPARKLE_DURATION).set_delay(0.10)
+		tween.finished.connect(Callable(sparkle, "queue_free"))
+
+
+func _on_story_facts_button_pressed() -> void:
+	var phase_id = _get_story_facts_phase()
+	_story_facts_current_phase = phase_id
+	_story_facts_seen_phases[phase_id] = true
+	_ensure_story_facts_panel()
+	if is_instance_valid(_story_facts_label):
+		_story_facts_label.text = str(STORY_FACTS_TEXT.get(phase_id, ""))
+	if is_instance_valid(_story_facts_panel):
+		_story_facts_panel.visible = true
+	if is_instance_valid(_story_facts_challenge_button):
+		_story_facts_challenge_button.visible = phase_id == 6
+	_sync_story_facts_button_state()
+	_layout_story_facts_panel()
+	set_pause_state(true)
+
+
+func _on_story_facts_close_pressed() -> void:
+	if is_instance_valid(_story_facts_panel):
+		_story_facts_panel.visible = false
+	_sync_story_facts_button_state()
+	set_pause_state(false)
+
+
+func _on_story_facts_challenge_pressed() -> void:
+	if is_instance_valid(_story_facts_panel):
+		_story_facts_panel.visible = false
+	set_pause_state(false)
+	var level_root = get_parent()
+	if is_instance_valid(level_root) and level_root.has_method("on_story_instruction_continue"):
+		level_root.call("on_story_instruction_continue", 6)
 
 
 func _play_rank_change_attention() -> void:
@@ -2649,6 +3001,9 @@ func _on_quit_button_pressed() -> void:
 
 
 func _on_pause_button_pressed() -> void:
+	if is_instance_valid(_story_facts_panel) and _story_facts_panel.visible:
+		set_pause_state(true)
+		return
 	if _is_guidance_instruction_mode() and is_instance_valid(_tutorial_panel) and _tutorial_panel.visible and not _tutorial_collapsed:
 		set_pause_state(true)
 		return

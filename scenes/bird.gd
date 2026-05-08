@@ -62,7 +62,7 @@ func _assign_reserved_harvest_target() -> bool:
 	return true
 
 
-func _try_switch_to_challenge_acorn() -> bool:
+func _try_switch_to_preferred_acorn() -> bool:
 	if caught:
 		return false
 	if quarry_found and is_instance_valid(the_quarry) and str(the_quarry.get("type")) == "tree":
@@ -266,8 +266,8 @@ func _physics_process(delta: float) -> void:
 	if not is_instance_valid(the_quarry) or bool(the_quarry.get("dead")):
 		_clear_quarry_target()
 
-	if str(Global.mode) == "challenge" and not caught and quarry_found and is_instance_valid(the_quarry) and _retarget_retry_cooldown <= 0.0:
-		_try_switch_to_challenge_acorn()
+	if (str(Global.mode) == "story" or str(Global.mode) == "challenge") and not caught and quarry_found and is_instance_valid(the_quarry) and _retarget_retry_cooldown <= 0.0:
+		_try_switch_to_preferred_acorn()
 		_retarget_retry_cooldown = RETARGET_RETRY_INTERVAL
 
 	if not caught and not quarry_found and _retarget_retry_cooldown <= 0.0:

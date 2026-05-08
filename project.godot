@@ -10,8 +10,8 @@ config_version=5
 
 [application]
 
-config/name="Social Soil Gardening"
-config/version="1.0.2"
+config/name="Social Soil"
+config/version="1.1.0"
 run/main_scene="res://scenes/title_screen.tscn"
 config/quit_on_go_back=false
 config/features=PackedStringArray("4.5", "GL Compatibility")

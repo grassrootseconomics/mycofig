@@ -30,6 +30,18 @@ var _title_bird_basket_sprite: Sprite2D = null
 var _title_tuktuk_node: Node2D = null
 var _title_tuktuk_basket_sprite: Sprite2D = null
 var _title_flyby_running := false
+var _title_flyby_phase := ""
+var _title_flyby_elapsed := 0.0
+var _title_bird_start_pos := Vector2.ZERO
+var _title_bird_drop_pos := Vector2.ZERO
+var _title_bird_exit_pos := Vector2.ZERO
+var _title_basket_drop_start_pos := Vector2.ZERO
+var _title_basket_rest_pos := Vector2.ZERO
+var _title_tuktuk_start_pos := Vector2.ZERO
+var _title_tuktuk_pickup_pos := Vector2.ZERO
+var _title_tuktuk_exit_pos := Vector2.ZERO
+var _title_tuktuk_pickup_seconds := 0.0
+var _title_tuktuk_exit_seconds := 0.0
 
 
 func _get_ge_logo_texture() -> Texture2D:
@@ -115,7 +127,7 @@ func _setup_version_label() -> void:
 	var version_label: Label = $VersionLabel
 	if not is_instance_valid(version_label):
 		return
-	var version_text = str(ProjectSettings.get_setting("application/config/version", "1.0.2"))
+	var version_text = str(ProjectSettings.get_setting("application/config/version", "1.1.0"))
 	if not version_text.begins_with("v"):
 		version_text = "v" + version_text
 	version_label.text = version_text
@@ -203,8 +215,7 @@ func _update_title_score_widgets(view_size: Vector2, compact: bool, tiny: bool) 
 		_high_score_label.custom_minimum_size = high_size
 		_high_score_label.size = high_size
 		_high_score_label.text = str("High Score: ", Global.format_score_value(Global.high_score))
-	var basket: Sprite2D = get_node_or_null("CenterContainer/Basket") as Sprite2D
-	var basket_center = basket.global_position if is_instance_valid(basket) else Vector2(view_size.x * 0.5, view_size.y * 0.72)
+	var basket_center = _get_title_basket_score_anchor(view_size, compact)
 	if is_instance_valid(_last_score_label):
 		var last_y = basket_center.y - (98.0 if tiny else (108.0 if compact else 122.0))
 		var link: LinkButton = $CenterContainer/VBoxContainer/LinkButton
@@ -323,84 +334,192 @@ func _get_title_basket_sprite() -> Sprite2D:
 	return get_node_or_null("CenterContainer/Basket") as Sprite2D
 
 
-func _get_title_basket_center(view_size: Vector2) -> Vector2:
-	var basket = _get_title_basket_sprite()
-	if is_instance_valid(basket):
-		return basket.global_position
+func _get_title_basket_local_rest_position(compact: bool) -> Vector2:
+	var center_container: Control = $CenterContainer
+	var center_x = center_container.size.x * 0.5 if is_instance_valid(center_container) else 283.5
+	return Vector2(center_x, 520.0 if compact else 534.5)
+
+
+func _get_title_basket_score_anchor(view_size: Vector2, compact: bool) -> Vector2:
+	var center_container: Control = $CenterContainer
+	if is_instance_valid(center_container):
+		var local_rest = _get_title_basket_local_rest_position(compact)
+		return center_container.global_position + local_rest
 	return Vector2(view_size.x * 0.5, view_size.y * 0.72)
 
 
-func _play_title_bird_flyby() -> void:
+func _get_title_basket_center(view_size: Vector2) -> Vector2:
+	var compact = Global.is_mobile_platform or minf(view_size.x, view_size.y) <= TITLE_COMPACT_SHORT_EDGE
+	return _get_title_basket_score_anchor(view_size, compact)
+
+
+func _title_phase_t(duration: float) -> float:
+	if duration <= 0.0:
+		return 1.0
+	return clampf(_title_flyby_elapsed / duration, 0.0, 1.0)
+
+
+func _title_ease_sine(t: float) -> float:
+	return 0.5 - 0.5 * cos(clampf(t, 0.0, 1.0) * PI)
+
+
+func _title_basket_drop_position(t: float) -> Vector2:
+	var drop_t = clampf(t, 0.0, 1.0)
+	var drop_x = _title_basket_rest_pos.x
+	var start_y = _title_basket_drop_start_pos.y
+	var rest_y = _title_basket_rest_pos.y
+	var fall_end := 0.72
+	var first_bounce_end := 0.88
+	var bounce_height = clampf((rest_y - start_y) * 0.12, 12.0, 34.0)
+	if drop_t < fall_end:
+		var fall_t = drop_t / fall_end
+		return Vector2(drop_x, lerpf(start_y, rest_y, fall_t * fall_t))
+	if drop_t < first_bounce_end:
+		var bounce_t = (drop_t - fall_end) / (first_bounce_end - fall_end)
+		return Vector2(drop_x, rest_y - sin(bounce_t * PI) * bounce_height)
+	var settle_t = (drop_t - first_bounce_end) / (1.0 - first_bounce_end)
+	return Vector2(drop_x, rest_y - sin(settle_t * PI) * bounce_height * 0.32)
+
+
+func _begin_title_bird_flyby() -> void:
 	_ensure_title_flyby_nodes()
-	if not is_instance_valid(_title_bird_sprite):
-		return
 	var view_size = get_viewport_rect().size
 	var y = _get_title_bird_flyby_y(view_size)
+	_title_basket_rest_pos = _get_title_basket_center(view_size)
+	_title_bird_start_pos = Vector2(-98.0, y)
+	_title_bird_drop_pos = Vector2(_title_basket_rest_pos.x - 42.0, y - 4.0)
+	_title_bird_exit_pos = Vector2(view_size.x + 98.0, y - 12.0)
 	var basket = _get_title_basket_sprite()
-	var basket_rest = _get_title_basket_center(view_size)
 	if is_instance_valid(basket):
-		basket.global_position = basket_rest
+		basket.global_position = _title_basket_rest_pos
 		basket.visible = false
-	var start_pos = Vector2(-98.0, y)
-	var drop_pos = Vector2(view_size.x * 0.5 - 38.0, y - 4.0)
-	var exit_pos = Vector2(view_size.x + 98.0, y - 12.0)
-	_title_bird_sprite.position = start_pos
+	if not is_instance_valid(_title_bird_sprite):
+		return
+	_title_bird_sprite.position = _title_bird_start_pos
 	_title_bird_sprite.visible = true
 	_title_bird_sprite.play(&"default")
 	if is_instance_valid(_title_bird_basket_sprite):
 		_title_bird_basket_sprite.visible = true
-	var inbound_duration = TITLE_BIRD_FLYBY_SECONDS * 0.48
-	var outbound_duration = TITLE_BIRD_FLYBY_SECONDS - inbound_duration
-	var inbound_tween := create_tween()
-	inbound_tween.tween_property(_title_bird_sprite, "position", drop_pos, inbound_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	await inbound_tween.finished
-	var drop_start = _title_bird_sprite.position + Vector2(42.0, 5.0)
-	if is_instance_valid(_title_bird_basket_sprite):
-		drop_start = _title_bird_basket_sprite.global_position
-		_title_bird_basket_sprite.visible = false
-	if is_instance_valid(basket):
-		basket.global_position = drop_start
-		basket.visible = true
-	var drop_tween := create_tween()
-	drop_tween.set_parallel(true)
-	drop_tween.tween_property(_title_bird_sprite, "position", exit_pos, outbound_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	if is_instance_valid(basket):
-		drop_tween.tween_property(basket, "global_position", basket_rest, TITLE_BASKET_DROP_SECONDS).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
-	await drop_tween.finished
-	if is_instance_valid(_title_bird_sprite):
-		_title_bird_sprite.visible = false
-
-
-func _play_title_tuktuk_flyby() -> void:
-	_ensure_title_flyby_nodes()
-	if not is_instance_valid(_title_tuktuk_node):
-		return
-	var view_size = get_viewport_rect().size
-	var basket = _get_title_basket_sprite()
-	var basket_center = _get_title_basket_center(view_size)
-	var start_x = -96.0
-	var pickup_x = basket_center.x - 24.0
-	var exit_x = view_size.x + 112.0
-	var total_distance = maxf(exit_x - start_x, 1.0)
-	var pickup_duration = clampf(((pickup_x - start_x) / total_distance) * TITLE_TUKTUK_FLYBY_SECONDS, 0.55, TITLE_TUKTUK_FLYBY_SECONDS * 0.72)
-	var exit_duration = maxf(TITLE_TUKTUK_FLYBY_SECONDS - pickup_duration, 0.75)
-	_title_tuktuk_node.position = Vector2(start_x, basket_center.y)
-	_title_tuktuk_node.visible = true
+	if is_instance_valid(_title_tuktuk_node):
+		_title_tuktuk_node.visible = false
 	if is_instance_valid(_title_tuktuk_basket_sprite):
 		_title_tuktuk_basket_sprite.visible = false
+	_title_flyby_phase = "bird_in"
+	_title_flyby_elapsed = 0.0
+
+
+func _drop_title_basket_from_bird() -> void:
+	_title_basket_drop_start_pos = Vector2(_title_basket_rest_pos.x, _title_bird_drop_pos.y + 5.0)
+	if is_instance_valid(_title_bird_basket_sprite):
+		_title_basket_drop_start_pos.y = _title_bird_basket_sprite.global_position.y
+		_title_bird_basket_sprite.visible = false
+	var basket = _get_title_basket_sprite()
 	if is_instance_valid(basket):
-		basket.global_position = basket_center
+		basket.global_position = _title_basket_drop_start_pos
 		basket.visible = true
-	var pickup_tween := create_tween()
-	pickup_tween.tween_property(_title_tuktuk_node, "position", Vector2(pickup_x, basket_center.y), pickup_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
-	await pickup_tween.finished
+	_title_flyby_phase = "bird_out_drop"
+	_title_flyby_elapsed = 0.0
+
+
+func _begin_title_tuktuk_flyby() -> void:
+	_ensure_title_flyby_nodes()
+	var view_size = get_viewport_rect().size
+	if _title_basket_rest_pos == Vector2.ZERO:
+		_title_basket_rest_pos = _get_title_basket_center(view_size)
+	_title_tuktuk_start_pos = Vector2(-96.0, _title_basket_rest_pos.y)
+	_title_tuktuk_pickup_pos = Vector2(_title_basket_rest_pos.x - 24.0, _title_basket_rest_pos.y)
+	_title_tuktuk_exit_pos = Vector2(view_size.x + 112.0, _title_basket_rest_pos.y)
+	var total_distance = maxf(_title_tuktuk_exit_pos.x - _title_tuktuk_start_pos.x, 1.0)
+	_title_tuktuk_pickup_seconds = clampf(((_title_tuktuk_pickup_pos.x - _title_tuktuk_start_pos.x) / total_distance) * TITLE_TUKTUK_FLYBY_SECONDS, 0.55, TITLE_TUKTUK_FLYBY_SECONDS * 0.72)
+	_title_tuktuk_exit_seconds = maxf(TITLE_TUKTUK_FLYBY_SECONDS - _title_tuktuk_pickup_seconds, 0.75)
+	if is_instance_valid(_title_tuktuk_node):
+		_title_tuktuk_node.position = _title_tuktuk_start_pos
+		_title_tuktuk_node.visible = true
+	if is_instance_valid(_title_tuktuk_basket_sprite):
+		_title_tuktuk_basket_sprite.visible = false
+	var basket = _get_title_basket_sprite()
+	if is_instance_valid(basket):
+		basket.global_position = _title_basket_rest_pos
+		basket.visible = true
+	_title_flyby_phase = "tuktuk_pickup"
+	_title_flyby_elapsed = 0.0
+
+
+func _title_tuktuk_pickup_basket() -> void:
+	var basket = _get_title_basket_sprite()
 	if is_instance_valid(basket):
 		basket.visible = false
 	if is_instance_valid(_title_tuktuk_basket_sprite):
 		_title_tuktuk_basket_sprite.visible = true
-	var exit_tween := create_tween()
-	exit_tween.tween_property(_title_tuktuk_node, "position", Vector2(exit_x, basket_center.y), exit_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	await exit_tween.finished
+	_title_flyby_phase = "tuktuk_exit"
+	_title_flyby_elapsed = 0.0
+
+
+func _finish_title_tuktuk_flyby() -> void:
+	if is_instance_valid(_title_tuktuk_node):
+		_title_tuktuk_node.visible = false
+	if is_instance_valid(_title_tuktuk_basket_sprite):
+		_title_tuktuk_basket_sprite.visible = false
+	_title_flyby_phase = "wait_after_tuktuk"
+	_title_flyby_elapsed = 0.0
+
+
+func _update_title_flyby(delta: float) -> void:
+	if not _title_flyby_running:
+		return
+	_title_flyby_elapsed += maxf(delta, 0.0)
+	match _title_flyby_phase:
+		"bird_in":
+			var bird_in_seconds = TITLE_BIRD_FLYBY_SECONDS * 0.48
+			var t = _title_ease_sine(_title_phase_t(bird_in_seconds))
+			if is_instance_valid(_title_bird_sprite):
+				_title_bird_sprite.position = _title_bird_start_pos.lerp(_title_bird_drop_pos, t)
+			if _title_flyby_elapsed >= bird_in_seconds:
+				_drop_title_basket_from_bird()
+		"bird_out_drop":
+			var bird_out_seconds = TITLE_BIRD_FLYBY_SECONDS * 0.52
+			var t_bird = _title_ease_sine(_title_phase_t(bird_out_seconds))
+			if is_instance_valid(_title_bird_sprite):
+				_title_bird_sprite.position = _title_bird_drop_pos.lerp(_title_bird_exit_pos, t_bird)
+				if _title_flyby_elapsed >= bird_out_seconds:
+					_title_bird_sprite.visible = false
+			var basket = _get_title_basket_sprite()
+			var t_drop = _title_phase_t(TITLE_BASKET_DROP_SECONDS)
+			if is_instance_valid(basket):
+				basket.global_position = _title_basket_drop_position(t_drop)
+			if _title_flyby_elapsed >= maxf(bird_out_seconds, TITLE_BASKET_DROP_SECONDS):
+				if is_instance_valid(basket):
+					basket.global_position = _title_basket_rest_pos
+					basket.visible = true
+				_title_flyby_phase = "wait_after_drop"
+				_title_flyby_elapsed = 0.0
+		"wait_after_drop":
+			if _title_flyby_elapsed >= TITLE_FLYBY_WAIT_SECONDS:
+				_begin_title_tuktuk_flyby()
+		"tuktuk_pickup":
+			var t_pickup = _title_ease_sine(_title_phase_t(_title_tuktuk_pickup_seconds))
+			if is_instance_valid(_title_tuktuk_node):
+				_title_tuktuk_node.position = _title_tuktuk_start_pos.lerp(_title_tuktuk_pickup_pos, t_pickup)
+			if _title_flyby_elapsed >= _title_tuktuk_pickup_seconds:
+				_title_tuktuk_pickup_basket()
+		"tuktuk_exit":
+			var t_exit = _title_ease_sine(_title_phase_t(_title_tuktuk_exit_seconds))
+			if is_instance_valid(_title_tuktuk_node):
+				_title_tuktuk_node.position = _title_tuktuk_pickup_pos.lerp(_title_tuktuk_exit_pos, t_exit)
+			if _title_flyby_elapsed >= _title_tuktuk_exit_seconds:
+				_finish_title_tuktuk_flyby()
+		"wait_after_tuktuk":
+			if _title_flyby_elapsed >= TITLE_FLYBY_WAIT_SECONDS:
+				_begin_title_bird_flyby()
+		_:
+			_begin_title_bird_flyby()
+
+
+func _reset_title_flyby_visuals() -> void:
+	if is_instance_valid(_title_bird_sprite):
+		_title_bird_sprite.visible = false
+	if is_instance_valid(_title_bird_basket_sprite):
+		_title_bird_basket_sprite.visible = false
 	if is_instance_valid(_title_tuktuk_node):
 		_title_tuktuk_node.visible = false
 	if is_instance_valid(_title_tuktuk_basket_sprite):
@@ -411,16 +530,7 @@ func _start_title_flyby_cycle() -> void:
 	if _title_flyby_running:
 		return
 	_title_flyby_running = true
-	_run_title_flyby_cycle()
-
-
-func _run_title_flyby_cycle() -> void:
-	await get_tree().process_frame
-	while is_inside_tree() and _title_flyby_running:
-		await _play_title_bird_flyby()
-		await get_tree().create_timer(TITLE_FLYBY_WAIT_SECONDS).timeout
-		await _play_title_tuktuk_flyby()
-		await get_tree().create_timer(TITLE_FLYBY_WAIT_SECONDS).timeout
+	_begin_title_bird_flyby()
 
 
 func _connect_viewport_resize_signal() -> void:
@@ -561,8 +671,8 @@ func _apply_responsive_layout() -> void:
 			small_shroom.scale = Vector2(0.42, 0.42)
 		small_shroom.position = Vector2(270.0, 522.0) if compact else Vector2(269.5, 541.5)
 	if is_instance_valid(basket):
-		basket.position = Vector2(268.5, 520.0) if compact else Vector2(268.5, 534.5)
 		if not _title_flyby_running:
+			basket.position = _get_title_basket_local_rest_position(compact)
 			basket.visible = true
 	_update_title_score_widgets(view_size, compact, tiny)
 	if is_instance_valid(title):
@@ -614,7 +724,7 @@ func _reset_run_state() -> void:
 
 
 func _ready():
-	DisplayServer.window_set_title("Social Soil Gardening")
+	DisplayServer.window_set_title("Social Soil")
 	Global.record_last_score()
 	Global.score = 0
 	$CenterContainer/BG.modulate.a = 1
@@ -633,10 +743,12 @@ func _ready():
 
 func _process(delta: float) -> void:
 	_update_title_score_sparkles(delta)
+	_update_title_flyby(delta)
 
 
 func _exit_tree() -> void:
 	_title_flyby_running = false
+	_reset_title_flyby_visuals()
 	var basket = _get_title_basket_sprite()
 	if is_instance_valid(basket):
 		basket.visible = true

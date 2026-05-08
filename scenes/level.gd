@@ -2273,7 +2273,7 @@ func _ready():
 	_mute_runtime_audio_if_headless()
 	_setup_perf_monitor()
 	Global.prevent_auto_select = false
-	DisplayServer.window_set_title("Social Soil Gardening")
+	DisplayServer.window_set_title("Social Soil")
 	if is_instance_valid(_bird_long_player):
 		_ambient_tree_audio_base_db = _bird_long_player.volume_db
 		_bird_long_player.volume_db = AMBIENT_TREE_AUDIO_SILENT_DB

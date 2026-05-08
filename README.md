@@ -41,9 +41,9 @@ Add `--bars` to profile worst-case resource bars, or `--no-lines` to isolate sim
   - `Android-TestAPK` (phone install testing)
   - `Android-PlayAAB` (Google Play upload)
 - Stable Android package/application ID:
-  - `org.grassecon.socialsoilgardening`
+  - `org.grassecon.socialsoil`
 - Version contract:
-  - `versionName`: `1.0.0` (from `project.godot` + preset override)
+  - `versionName`: `1.1.0` (from `project.godot` + preset override)
   - `versionCode`: `1` (must be incremented before each Play upload)
 
 Local test export:

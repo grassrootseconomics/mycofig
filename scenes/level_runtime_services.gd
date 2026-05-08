@@ -4,6 +4,14 @@ class_name LevelRuntimeServices
 const PerfMonitorRef = preload("res://scenes/perf_monitor.gd")
 const LevelHelpersRef = preload("res://scenes/level_helpers.gd")
 
+const DIRTY_BUDDY_PROCESS_CAP_T0 := 96
+const DIRTY_BUDDY_PROCESS_CAP_T1 := 64
+const DIRTY_BUDDY_PROCESS_CAP_T2 := 40
+const DIRTY_LINE_PROCESS_CAP_T0 := 160
+const DIRTY_LINE_PROCESS_CAP_T1 := 96
+const DIRTY_LINE_PROCESS_CAP_T2 := 64
+const DIRTY_TILE_HINT_PROCESS_CAP := 24
+
 
 static func agent_key(agent: Variant) -> int:
 	if not is_instance_valid(agent):
@@ -23,32 +31,68 @@ static func request_agent_dirty(dirty_buddies: Dictionary, dirty_lines: Dictiona
 		dirty_tile_hints[key] = agent
 
 
-static func process_dirty_queues(level_root: Node, agents_root: Node, lines_root: Node, dirty_buddies: Dictionary, dirty_lines: Dictionary, dirty_tile_hints: Dictionary, social_mode: bool) -> void:
+static func _get_dirty_buddy_process_cap() -> int:
+	match Global.get_effective_perf_tier():
+		1:
+			return DIRTY_BUDDY_PROCESS_CAP_T1
+		2:
+			return DIRTY_BUDDY_PROCESS_CAP_T2
+		_:
+			return DIRTY_BUDDY_PROCESS_CAP_T0
+
+
+static func _get_dirty_line_process_cap() -> int:
+	match Global.get_effective_perf_tier():
+		1:
+			return DIRTY_LINE_PROCESS_CAP_T1
+		2:
+			return DIRTY_LINE_PROCESS_CAP_T2
+		_:
+			return DIRTY_LINE_PROCESS_CAP_T0
+
+
+static func _take_dirty_agents(dirty_store: Dictionary, max_count: int, skip_keys: Dictionary = {}) -> Array:
+	var agents: Array = []
+	var processed_keys: Array = []
+	for key in dirty_store.keys():
+		if max_count >= 0 and agents.size() >= max_count:
+			break
+		if skip_keys.has(key):
+			continue
+		var agent = dirty_store[key]
+		processed_keys.append(key)
+		if is_instance_valid(agent) and not bool(agent.get("dead")):
+			agents.append(agent)
+	for key in processed_keys:
+		dirty_store.erase(key)
+	return agents
+
+
+static func process_dirty_queues(level_root: Node, agents_root: Node, lines_root: Node, dirty_buddies: Dictionary, dirty_lines: Dictionary, dirty_tile_hints: Dictionary, social_mode: bool, force_all: bool = false) -> void:
 	if dirty_buddies.is_empty() and dirty_lines.is_empty() and dirty_tile_hints.is_empty():
 		return
-	for key in dirty_buddies.keys():
-		var agent = dirty_buddies[key]
-		if not is_instance_valid(agent):
-			continue
-		if bool(agent.get("dead")):
-			continue
+	var buddy_cap = -1 if force_all else _get_dirty_buddy_process_cap()
+	var line_cap = -1 if force_all else _get_dirty_line_process_cap()
+	var tile_hint_cap = -1 if force_all else DIRTY_TILE_HINT_PROCESS_CAP
+
+	var buddy_agents = _take_dirty_agents(dirty_buddies, buddy_cap)
+	for agent in buddy_agents:
 		if agent.has_method("generate_buddies"):
 			agent.generate_buddies()
-	for key in dirty_tile_hints.keys():
-		var agent = dirty_tile_hints[key]
-		if not is_instance_valid(agent):
-			continue
-		if bool(agent.get("dead")):
-			continue
+
+	var tile_hint_agents = _take_dirty_agents(dirty_tile_hints, tile_hint_cap)
+	for agent in tile_hint_agents:
 		if agent.has_method("_update_drag_tile_hint"):
 			var pos = agent.get("position")
 			if typeof(pos) == TYPE_VECTOR2:
 				agent._update_drag_tile_hint(pos)
-	if Global.draw_lines and not dirty_lines.is_empty():
-		LevelHelpersRef.sync_myco_trade_lines(lines_root, agents_root, social_mode, dirty_lines.values())
-	dirty_buddies.clear()
-	dirty_lines.clear()
-	dirty_tile_hints.clear()
+
+	if not Global.draw_lines:
+		dirty_lines.clear()
+	elif not dirty_lines.is_empty():
+		var line_agents = _take_dirty_agents(dirty_lines, line_cap, dirty_buddies)
+		if not line_agents.is_empty():
+			LevelHelpersRef.sync_myco_trade_lines(lines_root, agents_root, social_mode, line_agents)
 
 
 static func setup_perf_monitor(owner: Node, existing_monitor: Node, agents_root: Node, trades_root: Node, lines_root: Node, world_root: Node) -> Node:

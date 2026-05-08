@@ -1331,7 +1331,7 @@ func _story_prepare_phase5_basket(basket: Node) -> void:
 	if _is_story_mode():
 		_story_seed_phase5_basket_liquidity(basket)
 	_story_force_phase5_basket_links(basket)
-	_process_dirty_queues()
+	_process_dirty_queues(true)
 	LevelHelpersRef.refresh_trade_line_visuals($Lines)
 
 
@@ -2284,13 +2284,17 @@ func request_all_agents_dirty() -> void:
 		request_agent_dirty(agent, true, true, false)
 
 
+func request_spawn_neighborhood_dirty(agent: Variant) -> void:
+	LevelHelpersRef.mark_agents_dirty_for_spawn(self, $Agents, agent)
+
+
 func mark_agent_moved(agent: Variant, old_pos: Vector2, new_pos: Vector2) -> void:
 	LevelHelpersRef.mark_agents_dirty_for_movement(self, $Agents, agent, old_pos, new_pos)
 	LevelHelpersRef.sync_agent_occupancy(self, agent)
 
 
-func _process_dirty_queues() -> void:
-	LevelRuntimeServicesRef.process_dirty_queues(self, $Agents, $Lines, _dirty_buddies_agents, _dirty_lines_agents, _dirty_tile_hints_agents, false)
+func _process_dirty_queues(force_all: bool = false) -> void:
+	LevelRuntimeServicesRef.process_dirty_queues(self, $Agents, $Lines, _dirty_buddies_agents, _dirty_lines_agents, _dirty_tile_hints_agents, false, force_all)
 
 
 func _setup_perf_monitor() -> void:
@@ -2421,7 +2425,7 @@ func _ready():
 
 	LevelHelpersRef.rebuild_world_occupancy_cache(self, $Agents)
 	request_all_agents_dirty()
-	_process_dirty_queues()
+	_process_dirty_queues(true)
 
 	
 	#var bird = bird_scene.instantiate()
@@ -2652,7 +2656,7 @@ func _story_spawn_village_cast() -> void:
 
 	if placed > 0:
 		request_all_agents_dirty()
-		_process_dirty_queues()
+		_process_dirty_queues(true)
 				
 
 
@@ -3231,7 +3235,7 @@ func _on_new_agent(agent_dict) -> void:
 				_story_phase5_basket_placed = true
 			_story_try_advance_phase_milestones()
 			_story_sync_phase1_inventory_sparkle_targets()
-		request_all_agents_dirty()
+		request_spawn_neighborhood_dirty(new_agent)
 		if _is_story_mode() and _is_story_village_actor(new_agent):
 			_story_refresh_hud()
 	if(Global.active_agent == null and not Global.prevent_auto_select):
@@ -3255,7 +3259,6 @@ func make_squash(pos, already_snapped: bool = false):
 	_connect_harvest_committed_signal(squash)
 	_connect_lifecycle_residue_signal(squash)
 	LevelHelpersRef.sync_agent_occupancy(self, squash)
-	request_all_agents_dirty()
 	
 	return squash
 
@@ -3276,7 +3279,6 @@ func make_tree(pos, already_snapped: bool = false):
 	_connect_harvest_committed_signal(tree)
 	_connect_lifecycle_residue_signal(tree)
 	LevelHelpersRef.sync_agent_occupancy(self, tree)
-	request_all_agents_dirty()
 	return tree
 	
 	
@@ -3314,7 +3316,6 @@ func make_maize(pos, already_snapped: bool = false):
 	_connect_harvest_committed_signal(maize)
 	_connect_lifecycle_residue_signal(maize)
 	LevelHelpersRef.sync_agent_occupancy(self, maize)
-	request_all_agents_dirty()
 	
 	return maize
 		
@@ -3333,7 +3334,6 @@ func make_bean(pos, already_snapped: bool = false):
 	_connect_harvest_committed_signal(bean)
 	_connect_lifecycle_residue_signal(bean)
 	LevelHelpersRef.sync_agent_occupancy(self, bean)
-	request_all_agents_dirty()
 	
 	return bean
 
@@ -3394,7 +3394,6 @@ func make_myco(pos, already_snapped: bool = false):
 	_connect_harvest_committed_signal(myco)
 	_connect_lifecycle_residue_signal(myco)
 	LevelHelpersRef.sync_agent_occupancy(self, myco)
-	request_all_agents_dirty()
 	
 	return myco
 

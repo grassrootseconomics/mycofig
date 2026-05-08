@@ -1181,6 +1181,28 @@ static func mark_agents_dirty_for_movement(level_root: Node, agents_root: Node, 
 			_queue_agent_dirty(level_root, agent, true, true, false)
 
 
+static func mark_agents_dirty_for_spawn(level_root: Node, agents_root: Node, spawned_agent: Variant) -> void:
+	if not is_instance_valid(spawned_agent) or not is_instance_valid(agents_root):
+		return
+	_queue_agent_dirty(level_root, spawned_agent, true, true, false)
+	var spawn_pos = spawned_agent.global_position
+	var spawn_reach = _get_agent_interaction_radius(spawned_agent)
+	if _mark_nearby_agents_dirty_from_occupancy(level_root, agents_root, spawned_agent, spawn_pos, spawn_pos, spawn_reach):
+		return
+	for agent in agents_root.get_children():
+		if not is_instance_valid(agent):
+			continue
+		if agent == spawned_agent:
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if str(agent.get("type")) == "cloud":
+			continue
+		var pair_reach = maxf(spawn_reach, _get_agent_interaction_radius(agent)) + 48.0
+		if agent.global_position.distance_to(spawn_pos) <= pair_reach:
+			_queue_agent_dirty(level_root, agent, true, true, false)
+
+
 static func _line_pair_key(agent_a: Variant, agent_b: Variant) -> String:
 	if not is_instance_valid(agent_a) or not is_instance_valid(agent_b):
 		return ""

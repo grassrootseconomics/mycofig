@@ -56,9 +56,10 @@ const AMBIENT_TREE_AUDIO_RADIUS_TILES := 4.0
 const AMBIENT_TREE_AUDIO_SCAN_INTERVAL := 0.20
 const AMBIENT_TREE_AUDIO_SILENT_DB := -36.0
 const AMBIENT_TREE_AUDIO_FADE_SPEED_DB := 28.0
-const STORY_PHASE4_CAMERA_PROMPT_DELAY_SEC := 1.6
+const STORY_PHASE4_CAMERA_PROMPT_DELAY_SEC := 2.2
 const STORY_PHASE5_CAMERA_PROMPT_DELAY_SEC := 1.6
 const STORY_PHASE4_CAMERA_SMOOTHING_SPEED := 3.0
+const STORY_PHASE4_VILLAGE_CAMERA_SMOOTHING_SPEED := 2.25
 const STORY_PHASE4_CAMERA_RESTORE_DELAY_SEC := 1.6
 const STORY_GUIDANCE_RING_COLOR := Color(1.0, 0.96, 0.50, 1.0)
 const STORY_GUIDANCE_RING_WIDTH := 3.0
@@ -632,7 +633,7 @@ func _story_center_camera_on_village(immediate: bool = false) -> void:
 	var world = _get_world_foundation()
 	if is_instance_valid(world) and world.has_method("set_camera_world_center"):
 		if world.has_method("set_camera_smoothing_speed"):
-			world.set_camera_smoothing_speed(STORY_PHASE4_CAMERA_SMOOTHING_SPEED)
+			world.set_camera_smoothing_speed(STORY_PHASE4_VILLAGE_CAMERA_SMOOTHING_SPEED)
 		world.set_camera_world_center(_story_village_center_world, immediate)
 
 

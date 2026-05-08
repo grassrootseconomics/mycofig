@@ -85,6 +85,12 @@ const STORY_GUIDE_ARROW_SHADOW_WIDTH := 12.0
 const STORY_GUIDE_ARROW_HEAD_LENGTH := 32.0
 const STORY_GUIDE_ARROW_HEAD_WIDTH := 30.0
 const STORY_GUIDE_ARROW_LAYER_Z_INDEX := 85
+const STORY_PHASE3_DIRECTION_PROMPT_INTERVAL := 20.0
+const STORY_PHASE3_DIRECTION_PROMPT_DURATION := 2.0
+const STORY_PHASE3_DIRECTION_PROMPT_TEXT := "plant in this direction!"
+const STORY_PHASE3_DIRECTION_PROMPT_LABEL_SIZE := Vector2(230, 42)
+const STORY_PHASE3_DIRECTION_PROMPT_ARROW_LENGTH := 96.0
+const STORY_PHASE3_DIRECTION_PROMPT_MARGIN := 64.0
 const TUTORIAL_PANEL_Z_INDEX := 110
 const TUTORIAL_TOGGLE_BUTTON_Z_INDEX := 120
 const QUIT_DIALOG_PANEL_COLOR := Color(0.00, 0.13, 0.47, 0.57)
@@ -160,6 +166,17 @@ var _story_phase1_arrow_lines: Array = []
 var _story_phase1_arrow_shadows: Array = []
 var _story_phase1_arrow_heads: Array = []
 var _story_phase1_arrow_head_shadows: Array = []
+var _story_village_center_world := Vector2.ZERO
+var _story_village_center_known := false
+var _story_phase3_direction_layer: Control = null
+var _story_phase3_direction_line: Line2D = null
+var _story_phase3_direction_shadow: Line2D = null
+var _story_phase3_direction_head: Line2D = null
+var _story_phase3_direction_head_shadow: Line2D = null
+var _story_phase3_direction_label: Label = null
+var _story_phase3_direction_interval_elapsed := 0.0
+var _story_phase3_direction_visible_elapsed := 0.0
+var _story_phase3_direction_is_visible := false
 var _inventory_side_controls_embedded := false
 var _inventory_panel: MarginContainer = null
 var _tutorial_panel: Control = null
@@ -1203,6 +1220,175 @@ func _set_story_arrow_shape(index: int, start_pos: Vector2, control_pos: Vector2
 	_set_story_arrow_visible(index, true)
 
 
+func _ensure_story_phase3_direction_prompt() -> void:
+	if is_instance_valid(_story_phase3_direction_layer):
+		return
+	_story_phase3_direction_layer = Control.new()
+	_story_phase3_direction_layer.name = "StoryPhase3DirectionPrompt"
+	_story_phase3_direction_layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	_story_phase3_direction_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_story_phase3_direction_layer.z_as_relative = false
+	_story_phase3_direction_layer.z_index = STORY_GUIDE_ARROW_LAYER_Z_INDEX + 5
+	_story_phase3_direction_layer.visible = false
+	add_child(_story_phase3_direction_layer)
+
+	_story_phase3_direction_shadow = Line2D.new()
+	_story_phase3_direction_shadow.name = "ArrowShadow"
+	_story_phase3_direction_shadow.width = STORY_GUIDE_ARROW_SHADOW_WIDTH
+	_story_phase3_direction_shadow.default_color = STORY_GUIDE_ARROW_SHADOW_COLOR
+	_story_phase3_direction_shadow.antialiased = true
+	_story_phase3_direction_shadow.round_precision = 12
+	_story_phase3_direction_layer.add_child(_story_phase3_direction_shadow)
+
+	_story_phase3_direction_line = Line2D.new()
+	_story_phase3_direction_line.name = "ArrowLine"
+	_story_phase3_direction_line.width = STORY_GUIDE_ARROW_WIDTH
+	_story_phase3_direction_line.default_color = STORY_GUIDE_ARROW_COLOR
+	_story_phase3_direction_line.antialiased = true
+	_story_phase3_direction_line.round_precision = 12
+	_story_phase3_direction_layer.add_child(_story_phase3_direction_line)
+
+	_story_phase3_direction_head_shadow = Line2D.new()
+	_story_phase3_direction_head_shadow.name = "ArrowHeadShadow"
+	_story_phase3_direction_head_shadow.width = STORY_GUIDE_ARROW_SHADOW_WIDTH
+	_story_phase3_direction_head_shadow.default_color = STORY_GUIDE_ARROW_SHADOW_COLOR
+	_story_phase3_direction_head_shadow.antialiased = true
+	_story_phase3_direction_head_shadow.round_precision = 12
+	_story_phase3_direction_layer.add_child(_story_phase3_direction_head_shadow)
+
+	_story_phase3_direction_head = Line2D.new()
+	_story_phase3_direction_head.name = "ArrowHead"
+	_story_phase3_direction_head.width = STORY_GUIDE_ARROW_WIDTH
+	_story_phase3_direction_head.default_color = STORY_GUIDE_ARROW_COLOR
+	_story_phase3_direction_head.antialiased = true
+	_story_phase3_direction_head.round_precision = 12
+	_story_phase3_direction_layer.add_child(_story_phase3_direction_head)
+
+	_story_phase3_direction_label = Label.new()
+	_story_phase3_direction_label.name = "PromptLabel"
+	_story_phase3_direction_label.text = STORY_PHASE3_DIRECTION_PROMPT_TEXT
+	_story_phase3_direction_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_story_phase3_direction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_story_phase3_direction_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_story_phase3_direction_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_story_phase3_direction_label.add_theme_font_size_override("font_size", 20)
+	_story_phase3_direction_label.add_theme_color_override("font_color", Color(1.0, 0.96, 0.45, 1.0))
+	_story_phase3_direction_label.add_theme_color_override("font_outline_color", Color(0.12, 0.05, 0.02, 0.92))
+	_story_phase3_direction_label.add_theme_constant_override("outline_size", 5)
+	_story_phase3_direction_layer.add_child(_story_phase3_direction_label)
+
+
+func _set_story_phase3_direction_prompt_visible(visible: bool) -> void:
+	_story_phase3_direction_is_visible = visible
+	if not visible:
+		if is_instance_valid(_story_phase3_direction_layer):
+			_story_phase3_direction_layer.visible = false
+		return
+	_ensure_story_phase3_direction_prompt()
+	_story_phase3_direction_layer.visible = true
+	_layout_story_phase3_direction_prompt()
+
+
+func _should_run_story_phase3_direction_prompt() -> bool:
+	if not _is_story_instruction_mode():
+		return false
+	if int(Global.story_chapter_id) != 3:
+		return false
+	if not _story_village_center_known:
+		return false
+	if get_tree().paused:
+		return false
+	if is_instance_valid(_story_facts_panel) and _story_facts_panel.visible:
+		return false
+	return true
+
+
+func _layout_story_phase3_direction_prompt() -> void:
+	if not is_instance_valid(_story_phase3_direction_layer):
+		return
+	var view_rect = get_viewport().get_visible_rect()
+	var view_size = view_rect.size
+	if view_size.x <= 0.0 or view_size.y <= 0.0:
+		return
+	_story_phase3_direction_layer.position = view_rect.position
+	_story_phase3_direction_layer.size = view_size
+
+	var center = view_rect.position + view_size * 0.5
+	var target_screen = _world_to_screen(_story_village_center_world)
+	var direction = target_screen - center
+	if direction.length_squared() <= 1.0:
+		direction = Vector2.RIGHT
+	else:
+		direction = direction.normalized()
+
+	var margin = STORY_PHASE3_DIRECTION_PROMPT_MARGIN
+	var side_center: Vector2 = center
+	if absf(direction.x) >= absf(direction.y):
+		side_center.x = view_rect.position.x + view_size.x - margin if direction.x >= 0.0 else view_rect.position.x + margin
+		side_center.y = clampf(center.y + direction.y * view_size.y * 0.28, view_rect.position.y + 96.0, view_rect.position.y + view_size.y - 96.0)
+	else:
+		side_center.y = view_rect.position.y + view_size.y - margin if direction.y >= 0.0 else view_rect.position.y + margin
+		side_center.x = clampf(center.x + direction.x * view_size.x * 0.28, view_rect.position.x + 110.0, view_rect.position.x + view_size.x - 110.0)
+
+	var half_length = STORY_PHASE3_DIRECTION_PROMPT_ARROW_LENGTH * 0.5
+	var start_pos = side_center - direction * half_length
+	var tip_pos = side_center + direction * half_length
+	var clamp_margin := 22.0
+	start_pos.x = clampf(start_pos.x, view_rect.position.x + clamp_margin, view_rect.position.x + view_size.x - clamp_margin)
+	start_pos.y = clampf(start_pos.y, view_rect.position.y + clamp_margin, view_rect.position.y + view_size.y - clamp_margin)
+	tip_pos.x = clampf(tip_pos.x, view_rect.position.x + clamp_margin, view_rect.position.x + view_size.x - clamp_margin)
+	tip_pos.y = clampf(tip_pos.y, view_rect.position.y + clamp_margin, view_rect.position.y + view_size.y - clamp_margin)
+
+	var local_start = start_pos - view_rect.position
+	var local_tip = tip_pos - view_rect.position
+	var local_body_tip = local_tip - direction * (STORY_GUIDE_ARROW_HEAD_LENGTH * 0.58)
+	var body_points := PackedVector2Array()
+	body_points.append(local_start)
+	body_points.append(local_body_tip)
+	if is_instance_valid(_story_phase3_direction_line):
+		_story_phase3_direction_line.points = body_points
+	if is_instance_valid(_story_phase3_direction_shadow):
+		var shadow_points := PackedVector2Array()
+		for point in body_points:
+			shadow_points.append(point + Vector2(2, 2))
+		_story_phase3_direction_shadow.points = shadow_points
+	if is_instance_valid(_story_phase3_direction_head):
+		_story_phase3_direction_head.points = _make_story_arrow_head_points(local_tip, local_start, STORY_GUIDE_ARROW_HEAD_LENGTH, STORY_GUIDE_ARROW_HEAD_WIDTH)
+	if is_instance_valid(_story_phase3_direction_head_shadow):
+		_story_phase3_direction_head_shadow.points = _make_story_arrow_head_points(local_tip + Vector2(2, 2), local_start + Vector2(2, 2), STORY_GUIDE_ARROW_HEAD_LENGTH + 4.0, STORY_GUIDE_ARROW_HEAD_WIDTH + 5.0)
+
+	if is_instance_valid(_story_phase3_direction_label):
+		var label_size = STORY_PHASE3_DIRECTION_PROMPT_LABEL_SIZE
+		var label_center = side_center + Vector2(0, -42)
+		if absf(direction.y) > absf(direction.x):
+			label_center = side_center + (Vector2(0, -36) if direction.y >= 0.0 else Vector2(0, 36))
+		var label_pos = label_center - label_size * 0.5
+		label_pos.x = clampf(label_pos.x, view_rect.position.x + 8.0, view_rect.position.x + view_size.x - label_size.x - 8.0)
+		label_pos.y = clampf(label_pos.y, view_rect.position.y + 8.0, view_rect.position.y + view_size.y - label_size.y - 8.0)
+		_story_phase3_direction_label.size = label_size
+		_story_phase3_direction_label.position = label_pos - view_rect.position
+
+
+func _update_story_phase3_direction_prompt(delta: float) -> void:
+	if not _should_run_story_phase3_direction_prompt():
+		_story_phase3_direction_interval_elapsed = 0.0
+		_story_phase3_direction_visible_elapsed = 0.0
+		_set_story_phase3_direction_prompt_visible(false)
+		return
+	if _story_phase3_direction_is_visible:
+		_story_phase3_direction_visible_elapsed += maxf(delta, 0.0)
+		_layout_story_phase3_direction_prompt()
+		if _story_phase3_direction_visible_elapsed >= STORY_PHASE3_DIRECTION_PROMPT_DURATION:
+			_story_phase3_direction_visible_elapsed = 0.0
+			_set_story_phase3_direction_prompt_visible(false)
+		return
+	_story_phase3_direction_interval_elapsed += maxf(delta, 0.0)
+	if _story_phase3_direction_interval_elapsed >= STORY_PHASE3_DIRECTION_PROMPT_INTERVAL:
+		_story_phase3_direction_interval_elapsed = 0.0
+		_story_phase3_direction_visible_elapsed = 0.0
+		_set_story_phase3_direction_prompt_visible(true)
+
+
 func _get_phase1_garden_arrow_target() -> Vector2:
 	var garden_agent = Global.active_agent
 	if is_instance_valid(garden_agent):
@@ -1662,6 +1848,7 @@ func _process(delta: float) -> void:
 	_update_selected_inventory_hover_hint()
 	_refresh_tutorial_panel_state()
 	_update_layout_pass(delta)
+	_update_story_phase3_direction_prompt(delta)
 	_update_story_instruction_arrows()
 
 
@@ -3064,6 +3251,12 @@ func set_village_inventory_unlocked(_unlocked: bool) -> void:
 
 
 func set_story_village_marker(world_pos: Vector2, visible: bool) -> void:
+	if _is_story_instruction_mode() and world_pos != Vector2.ZERO:
+		_story_village_center_world = world_pos
+		_story_village_center_known = true
+	elif not _is_story_instruction_mode():
+		_story_village_center_known = false
+		_set_story_phase3_direction_prompt_visible(false)
 	if is_instance_valid(minimap_panel):
 		minimap_panel.set_village_marker(world_pos, visible)
 

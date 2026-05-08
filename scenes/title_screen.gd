@@ -757,7 +757,7 @@ func _exit_tree() -> void:
 func _on_tutorial_pressed() -> void:
 	_reset_run_state()
 	Global.mode = "story"
-	Global.is_raining = false
+	Global.is_raining = true
 	Global.is_birding = true
 	Global.is_killing = false
 	Global.is_max_babies = true

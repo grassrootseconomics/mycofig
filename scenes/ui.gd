@@ -75,7 +75,7 @@ const STORY_FACTS_TEXT := {
 	2: "Birds deserve to eat too. So plant more to feed them.\n\nBirds like seeds.",
 	3: "Beans help fix nitrogen (Green) in the soil.\nSquash bring shade and potassium (Orange).\nMaize brings Phosphorus (Pink).\nTrees are helping bring in water (Blue).\n\nBelow the Mushrooms are Mycorrhizal fungi which form a relationship with plant roots, acting as an extension of the root system to enhance nutrient and water absorption.",
 	4: "Healthy people need healthy soil.",
-	5: "People can exchange, lend, borrow, rotate and share their goods and services fairly even without money.",
+	5: "People can exchange, lend, borrow, rotate, gift and share their goods and services fairly even without money.",
 	6: "This was the easy part. Now try Challenge Mode!"
 }
 const STORY_GUIDE_ARROW_COLOR := Color(1.0, 0.74, 0.16, 0.96)
@@ -2642,7 +2642,7 @@ func _emit_inventory_drag_preview(agent_name: String, screen_pos: Vector2, activ
 	if not active:
 		emit_signal("inventory_drag_preview", agent_name, Vector2.ZERO, false)
 		return
-	if _is_story_village_inventory_item(agent_name):
+	if _is_story_village_inventory_item(agent_name) and agent_name != "basket":
 		emit_signal("inventory_drag_preview", agent_name, Vector2.ZERO, false)
 		return
 	var view = get_viewport().get_visible_rect()

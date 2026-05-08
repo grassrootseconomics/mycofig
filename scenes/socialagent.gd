@@ -12,14 +12,16 @@ const CARRY_TEX_BEAN := preload("res://graphics/bean.png")
 const CARRY_TEX_SQUASH := preload("res://graphics/squash_32.png")
 const CARRY_TEX_MAIZE := preload("res://graphics/maize_32.png")
 const CARRY_TEX_TREE := preload("res://graphics/acorn_32.png")
-const BANK_LIQUIDITY_SEED_AMOUNT := 1
 const VILLAGER_FAMILY_ENERGY_THRESHOLD := 48
 const VILLAGER_FAMILY_ENERGY_TRADE := 1
 const VILLAGER_FAMILY_ENERGY_MISSING_NUTRIENT := 2
 const VILLAGER_FAMILY_ENERGY_COMPLETE_NPK := 1
 const VILLAGER_FAMILY_RETRY_TICKS := 24
 const VILLAGER_NUTRIENTS := ["N", "P", "K"]
+const DEFAULT_WORLD_TILE_SIZE := 64.0
+const DIRECT_PERSON_TRADE_RADIUS_TILE_REDUCTION := 1.0
 
+var trade_queue = []
 var is_trading = false
 var is_raining = true
 var villager_family_energy := 0
@@ -503,6 +505,13 @@ func _get_liquidity_r_fill_target() -> float:
 	return maxf(need_r, float(_get_villager_r_buffer_target()))
 
 
+func _get_excess_r_repayment_threshold() -> float:
+	var threshold = float(needs.get("R", 0.0))
+	if threshold <= 0.0:
+		threshold = float(_get_villager_r_buffer_target())
+	return threshold
+
+
 func _can_bank_offer_r_to_target(target: Node, offered_res: String, requested_res: String = "") -> bool:
 	if str(type) != "bank" or offered_res != "R":
 		return true
@@ -520,55 +529,151 @@ func _can_bank_offer_r_to_target(target: Node, offered_res: String, requested_re
 	return float(target.assets[requested_res]) - float(target.needs[requested_res]) >= 1.0
 
 
-func _is_bank_liquidity_seed_target(target: Node) -> bool:
-	if str(type) != "bank":
-		return false
-	if not is_instance_valid(target):
-		return false
-	if bool(target.get("dead")):
-		return false
-	if str(target.get("type")) != "myco":
-		return false
-	if not bool(target.get_meta("story_village_actor", false)):
-		return false
-	var story_kind = str(target.get_meta("story_kind", ""))
-	if not story_kind.begins_with("basket_"):
-		return false
-	if target.assets.get("R") == null or target.needs.get("R") == null:
-		return false
-	return float(target.assets["R"]) < float(target.needs["R"])
+func _is_village_bank_node(agent: Variant) -> bool:
+	return is_instance_valid(agent) and str(agent.get("type")) == "bank" and bool(agent.get_meta("story_village_actor", false))
 
 
-func _try_seed_r_to_colored_basket(debug_mode: bool = false) -> bool:
-	if str(type) != "bank":
+func _is_village_person_node(agent: Variant) -> bool:
+	if not is_instance_valid(agent):
 		return false
-	if not logistics_ready or not is_raining:
+	if not bool(agent.get_meta("story_village_actor", false)):
 		return false
-	if assets.get("R") == null or float(assets["R"]) < float(BANK_LIQUIDITY_SEED_AMOUNT):
+	var agent_type = str(agent.get("type"))
+	return agent_type == "farmer" or agent_type == "vendor" or agent_type == "cook"
+
+
+func _can_bank_buy_for_r(bank: Variant, offered_res: String, requested_res: String) -> bool:
+	if not _is_village_bank_node(bank):
 		return false
-	trade_buddies.shuffle()
-	for child in trade_buddies:
-		if not _is_bank_liquidity_seed_target(child):
+	if requested_res != "R":
+		return false
+	return _is_villager_nutrient(offered_res)
+
+
+func _set_agent_asset_bar(agent: Variant, asset_key: String, amount: float) -> void:
+	if not is_instance_valid(agent):
+		return
+	if agent.assets.get(asset_key) == null:
+		return
+	agent.assets[asset_key] = amount
+	if agent.bars.get(asset_key) != null and is_instance_valid(agent.bars[asset_key]):
+		agent.bars[asset_key].value = amount
+
+
+func _person_can_accept_r_for_swap(person: Variant, amount: int) -> bool:
+	if not _is_village_person_node(person):
+		return false
+	if person.assets.get("R") == null or person.needs.get("R") == null:
+		return false
+	return float(person.assets["R"]) + float(amount) <= float(person.needs["R"]) * 2.0
+
+
+func _person_has_return_surplus(person: Variant, requested_res: String, amount: int) -> bool:
+	if not _is_village_person_node(person):
+		return false
+	if not _is_villager_nutrient(requested_res):
+		return false
+	if person.assets.get(requested_res) == null or person.needs.get(requested_res) == null:
+		return false
+	return float(person.assets[requested_res]) - float(person.needs[requested_res]) >= float(amount)
+
+
+func _get_direct_person_trade_tile_size() -> float:
+	var tile_size := DEFAULT_WORLD_TILE_SIZE
+	var level_root = _story_farmer_get_level_root()
+	if is_instance_valid(level_root) and level_root.has_method("_get_world_foundation"):
+		var world: Variant = level_root.call("_get_world_foundation")
+		if typeof(world) == TYPE_OBJECT and is_instance_valid(world):
+			var raw_tile_size = world.get("tile_size")
+			if typeof(raw_tile_size) == TYPE_FLOAT or typeof(raw_tile_size) == TYPE_INT:
+				tile_size = maxf(float(raw_tile_size), 1.0)
+	return tile_size
+
+
+func _get_direct_person_trade_reach(target: Variant) -> float:
+	var self_reach = float(buddy_radius)
+	var target_reach = self_reach
+	if is_instance_valid(target):
+		var target_radius = target.get("buddy_radius")
+		if typeof(target_radius) == TYPE_FLOAT or typeof(target_radius) == TYPE_INT:
+			target_reach = float(target_radius)
+	var tile_reduction = _get_direct_person_trade_tile_size() * DIRECT_PERSON_TRADE_RADIUS_TILE_REDUCTION
+	return maxf(minf(self_reach, target_reach) - tile_reduction, 1.0)
+
+
+func _try_send_direct_person_liquidity_swap(requested_res: String, debug_mode: bool = false) -> bool:
+	if not _is_story_village_person_actor():
+		return false
+	if not _is_villager_nutrient(requested_res):
+		return false
+	if assets.get("R") == null or float(assets["R"]) <= 0.0:
+		return false
+	var agents_root = get_node_or_null("../../Agents")
+	if not is_instance_valid(agents_root):
+		return false
+	var candidates: Array = agents_root.get_children()
+	candidates.shuffle()
+	for child in candidates:
+		if child == self:
 			continue
-		var target_r = float(child.assets["R"])
-		var target_r_need = float(child.needs["R"])
-		if target_r_need <= 0.0 or target_r >= target_r_need:
+		if not _is_village_person_node(child):
+			continue
+		if bool(child.get("dead")):
+			continue
+		if global_position.distance_to(child.global_position) > _get_direct_person_trade_reach(child):
+			continue
+		if not _person_can_accept_r_for_swap(child, 1):
+			continue
+		if not _person_has_return_surplus(child, requested_res, 1):
 			continue
 		var path_dict = {
 			"from_agent": self,
 			"to_agent": child,
 			"trade_path": [self, child],
 			"trade_asset": "R",
-			"trade_amount": BANK_LIQUIDITY_SEED_AMOUNT,
-			"trade_type": "send",
-			"return_res": null,
-			"return_amt": null,
-			"bank_liquidity_seed": true
+			"trade_amount": 1,
+			"trade_type": "swap",
+			"return_res": requested_res,
+			"return_amt": 1,
+			"liquidity_cycle_trade": true,
+			"liquidity_cycle_origin_id": int(get_instance_id())
 		}
 		if debug_mode:
-			print("bank liquidity seed: R -> ", child.name)
+			print("direct money swap: R -> ", requested_res, " with ", child.name)
 		if _emit_trade_with_budget(path_dict):
-			assets["R"] -= BANK_LIQUIDITY_SEED_AMOUNT
+			assets["R"] -= 1
+			bars["R"].value = assets["R"]
+			logistics_ready = false
+			is_trading = true
+			return true
+	return false
+
+
+func _try_send_excess_r_to_bank(debug_mode: bool = false) -> bool:
+	if not _is_story_village_person_actor():
+		return false
+	if assets.get("R") == null:
+		return false
+	if float(assets["R"]) <= _get_excess_r_repayment_threshold():
+		return false
+	trade_buddies.shuffle()
+	for child in trade_buddies:
+		if not _is_village_bank_node(child):
+			continue
+		var path_dict = {
+			"from_agent": self,
+			"to_agent": child,
+			"trade_path": [self, child],
+			"trade_asset": "R",
+			"trade_amount": 1,
+			"trade_type": "send",
+			"return_res": null,
+			"return_amt": null
+		}
+		if debug_mode:
+			print("excess R repayment: ", name, " -> ", child.name)
+		if _emit_trade_with_budget(path_dict):
+			assets["R"] -= 1
 			bars["R"].value = assets["R"]
 			logistics_ready = false
 			is_trading = true
@@ -581,18 +686,29 @@ func _try_send_liquidity_swap(offered_res: String, requested_res: String, debug_
 		return false
 	if assets.get(offered_res) == null or float(assets[offered_res]) <= 0.0:
 		return false
+	if offered_res == "R" and _is_villager_nutrient(requested_res):
+		if _try_send_direct_person_liquidity_swap(requested_res, debug_mode):
+			return true
 	trade_buddies.shuffle()
 	for child in trade_buddies:
 		if not is_instance_valid(child):
 			continue
-		if child.type != "myco" or child.name == self.name:
+		if child == self:
 			continue
-		if child.assets.get(offered_res) == null or child.assets.get(requested_res) == null:
+		var child_is_bank = _is_village_bank_node(child)
+		var child_is_basket = str(child.get("type")) == "myco"
+		if not child_is_bank and not child_is_basket:
 			continue
-		if float(child.assets[requested_res]) <= 0.0:
-			continue
-		if offered_res != "R" and child.assets[offered_res] >= child.needs[offered_res] * 2:
-			continue
+		if child_is_bank:
+			if not _can_bank_buy_for_r(child, offered_res, requested_res):
+				continue
+		else:
+			if child.assets.get(offered_res) == null or child.assets.get(requested_res) == null:
+				continue
+			if float(child.assets[requested_res]) <= 0.0:
+				continue
+			if offered_res != "R" and child.assets[offered_res] >= child.needs[offered_res] * 2:
+				continue
 		var path_dict = {
 			"from_agent": self,
 			"to_agent": child,
@@ -635,7 +751,17 @@ func _run_villager_r_liquidity_cycle(debug_mode: bool = false) -> void:
 			for deficit_res in deficit_order:
 				if _try_send_liquidity_swap("R", deficit_res, debug_mode):
 					return
-		# Phase 2: build liquidity from tradeable nutrient up to target R.
+		# Phase 2: use baskets for direct resource swaps before creating more R.
+		if tradeable_res != "":
+			for deficit_res in deficit_order:
+				if deficit_res == tradeable_res:
+					continue
+				if _try_send_liquidity_swap(tradeable_res, deficit_res, debug_mode):
+					return
+		# Phase 3: repay excess R only after available deficit-buying routes were tried.
+		if _try_send_excess_r_to_bank(debug_mode):
+			return
+		# Phase 4: build liquidity from tradeable nutrient up to target R.
 		if current_r < r_fill_target and tradeable_res != "":
 			if _try_send_liquidity_swap(tradeable_res, "R", debug_mode):
 				return
@@ -644,8 +770,137 @@ func _run_villager_r_liquidity_cycle(debug_mode: bool = false) -> void:
 			_try_send_liquidity_swap(tradeable_res, "R", debug_mode)
 		return
 	var r_buffer_target = float(_get_villager_r_buffer_target())
+	if _try_send_excess_r_to_bank(debug_mode):
+		return
 	if current_r < r_buffer_target:
 		_try_send_liquidity_swap(dominant_res, "R", debug_mode)
+
+
+func _calculate_swap_return_amount(trade_packet: Area2D) -> int:
+	var trade_asset = str(trade_packet.asset)
+	var return_asset = str(trade_packet.return_asset)
+	var trade_value = float(Global.values.get(trade_asset, 1))
+	var return_value = float(Global.values.get(return_asset, 1))
+	if return_value <= 0.0:
+		return 0
+	var return_amount = float(trade_packet.return_amt) * trade_value / return_value
+	if return_amount < 0.5:
+		return 0
+	if return_amount < 1.0:
+		return 1
+	return int(return_amount)
+
+
+func _can_return_swap_asset(trade_packet: Area2D, return_amount: int) -> bool:
+	if return_amount <= 0:
+		return false
+	var received_asset = str(trade_packet.asset)
+	var return_asset = str(trade_packet.return_asset)
+	if _is_village_bank_node(self):
+		if received_asset == "R":
+			return false
+		if return_asset != "R":
+			return false
+		if not _is_villager_nutrient(received_asset):
+			return false
+		return true
+	if _is_story_village_person_actor():
+		if received_asset != "R":
+			return false
+		return _person_has_return_surplus(self, return_asset, return_amount)
+	return false
+
+
+func _deduct_trade_asset(asset_key: String, amount: int) -> void:
+	if assets.get(asset_key) == null:
+		return
+	assets[asset_key] -= amount
+	if bars.get(asset_key) != null and is_instance_valid(bars[asset_key]):
+		bars[asset_key].value = assets[asset_key]
+
+
+func _emit_or_queue_trade(path_dict: Dictionary) -> bool:
+	var asset_key = str(path_dict.get("trade_asset", ""))
+	var amount = maxi(int(path_dict.get("trade_amount", 1)), 1)
+	if asset_key == "":
+		return false
+	if _is_village_bank_node(self) and asset_key == "R":
+		if _emit_trade_with_budget(path_dict):
+			return true
+		trade_queue.append(path_dict)
+		return false
+	if assets.get(asset_key) == null:
+		return false
+	if float(assets[asset_key]) < float(amount):
+		trade_queue.append(path_dict)
+		return false
+	if _emit_trade_with_budget(path_dict):
+		_deduct_trade_asset(asset_key, amount)
+		return true
+	trade_queue.append(path_dict)
+	return false
+
+
+func _flush_trade_queue() -> void:
+	if trade_queue.is_empty():
+		return
+	var remaining_queue: Array = []
+	for queued_trade in trade_queue:
+		if typeof(queued_trade) != TYPE_DICTIONARY:
+			continue
+		var path_dict: Dictionary = queued_trade
+		var asset_key = str(path_dict.get("trade_asset", ""))
+		var amount = maxi(int(path_dict.get("trade_amount", 1)), 1)
+		if asset_key == "":
+			continue
+		if _is_village_bank_node(self) and asset_key == "R":
+			if not _emit_trade_with_budget(path_dict):
+				remaining_queue.append(path_dict)
+			continue
+		if assets.get(asset_key) == null:
+			continue
+		if float(assets[asset_key]) < float(amount):
+			remaining_queue.append(path_dict)
+			continue
+		if _emit_trade_with_budget(path_dict):
+			_deduct_trade_asset(asset_key, amount)
+		else:
+			remaining_queue.append(path_dict)
+	trade_queue = remaining_queue
+
+
+func _finish_trade_packet(trade_packet: Area2D) -> void:
+	if trade_packet.has_method("finish_trade"):
+		trade_packet.call_deferred("finish_trade")
+	else:
+		trade_packet.call_deferred("queue_free")
+
+
+func _refund_rejected_r_swap(trade_packet: Area2D) -> bool:
+	if str(trade_packet.asset) != "R":
+		return false
+	if not is_instance_valid(trade_packet.start_agent):
+		return false
+	var refund_amount = maxi(int(trade_packet.amount), 1)
+	if not _is_village_bank_node(self):
+		if assets.get("R") == null:
+			return false
+		assets["R"] += refund_amount
+		if bars.get("R") != null and is_instance_valid(bars["R"]):
+			bars["R"].value = assets["R"]
+	var refund_path = {
+		"from_agent": self,
+		"to_agent": trade_packet.start_agent,
+		"trade_path": [self, trade_packet.start_agent],
+		"trade_asset": "R",
+		"trade_amount": refund_amount,
+		"trade_type": "send",
+		"return_res": null,
+		"return_amt": null,
+		"liquidity_cycle_trade": bool(trade_packet.get("liquidity_cycle_trade")),
+		"liquidity_cycle_origin_id": int(trade_packet.get("liquidity_cycle_origin_id"))
+	}
+	return _emit_or_queue_trade(refund_path)
 
 
 func logistics():
@@ -654,6 +909,10 @@ func logistics():
 		return
 	if str(type) == "bank" and bool(get_meta("bank_disabled", false)):
 		logistics_ready = false
+		is_trading = false
+		return
+	_flush_trade_queue()
+	if str(type) == "bank":
 		is_trading = false
 		return
 	var farmer_trade_any_n := false
@@ -666,9 +925,6 @@ func logistics():
 	var high_amt_needed = 0
 	
 	var debug_mode = false
-	
-	if str(type) == "bank" and _try_seed_r_to_colored_basket(debug_mode):
-		return
 	
 	if _should_use_villager_r_liquidity_cycle():
 		_run_villager_r_liquidity_cycle(debug_mode)
@@ -821,6 +1077,17 @@ func logistics():
 func _on_area_entered(ztrade: Area2D) -> void:
 	if ztrade.end_agent == self:
 		var received_asset := str(ztrade.asset)
+		if assets.get(received_asset) == null:
+			_finish_trade_packet(ztrade)
+			return
+		var should_return_swap := str(ztrade.type) == "swap"
+		var return_amount := 0
+		if should_return_swap:
+			return_amount = _calculate_swap_return_amount(ztrade)
+			if not _can_return_swap_asset(ztrade, return_amount):
+				_refund_rejected_r_swap(ztrade)
+				_finish_trade_packet(ztrade)
+				return
 		var received_nutrient: bool = _is_villager_nutrient(received_asset)
 		var was_missing_nutrient: bool = _is_story_village_person_actor() and received_nutrient and float(assets.get(received_asset, 0.0)) <= 0.0
 		assets[ztrade.asset]+=ztrade.amount
@@ -831,6 +1098,24 @@ func _on_area_entered(ztrade: Area2D) -> void:
 			Global.add_score(ztrade.amount)
 			emit_signal("update_score")
 		bars[ztrade.asset].value = assets[ztrade.asset]
+		if should_return_swap and return_amount > 0:
+			var liquidity_origin_value = ztrade.get("liquidity_cycle_origin_id")
+			var liquidity_origin_id := 0
+			if liquidity_origin_value != null:
+				liquidity_origin_id = int(liquidity_origin_value)
+			var return_path = {
+				"from_agent": self,
+				"to_agent": ztrade.start_agent,
+				"trade_path": [self, ztrade.start_agent],
+				"trade_asset": str(ztrade.return_asset),
+				"trade_amount": return_amount,
+				"trade_type": "send",
+				"return_res": null,
+				"return_amt": null,
+				"liquidity_cycle_trade": bool(ztrade.get("liquidity_cycle_trade")),
+				"liquidity_cycle_origin_id": liquidity_origin_id
+			}
+			_emit_or_queue_trade(return_path)
 		if _is_story_village_person_actor() and received_nutrient:
 			_add_villager_family_energy(VILLAGER_FAMILY_ENERGY_TRADE)
 			if was_missing_nutrient:
@@ -840,7 +1125,17 @@ func _on_area_entered(ztrade: Area2D) -> void:
 		var level_root = _story_farmer_get_level_root()
 		if is_instance_valid(level_root) and level_root.has_method("notify_story_phase5_trade_received"):
 			level_root.call("notify_story_phase5_trade_received", self, ztrade)
-		ztrade.call_deferred("queue_free")
+		_finish_trade_packet(ztrade)
+
+
+func _bank_consume_nutrients_if_ready() -> void:
+	if not _is_village_bank_node(self):
+		return
+	for res in VILLAGER_NUTRIENTS:
+		if float(assets.get(res, 0.0)) < 2.0:
+			return
+	for res in VILLAGER_NUTRIENTS:
+		_set_agent_asset_bar(self, res, float(assets[res]) - 1.0)
 
 
 func _on_growth_timer_timeout() -> void:
@@ -850,6 +1145,9 @@ func _on_growth_timer_timeout() -> void:
 	#	production_ready = false
 	if villager_family_retry_ticks > 0:
 		villager_family_retry_ticks -= 1
+	if _is_village_bank_node(self):
+		_bank_consume_nutrients_if_ready()
+		return
 	var disable_story_farmer_production = bool(get_meta("story_disable_farmer_production", false))
 	if not disable_story_farmer_production and prod_res.size() > 0 and prod_res[0] != null:
 		for res in prod_res:

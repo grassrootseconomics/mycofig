@@ -4,6 +4,14 @@ const ResourceEconomyRef = preload("res://scenes/resource_economy.gd")
 const BASKET_MAX_SENDS_PER_LOGISTICS_TICK := 2
 
 var trade_queue = []
+
+
+func _update_basket_connection_preview(active: bool) -> void:
+	var level_root = get_node_or_null("../..")
+	if is_instance_valid(level_root) and level_root.has_method("update_agent_connection_preview"):
+		level_root.call("update_agent_connection_preview", "basket", position if active else Vector2.ZERO, active)
+
+
 func set_variables(a_dict) -> void:
 	name = a_dict.get("name")
 	type = a_dict.get("type")
@@ -140,12 +148,14 @@ func _physics_process(delta):
 			hit = true
 		
 		if hit==true:
+			_update_basket_connection_preview(false)
 			kill_it()
 			#queue_free()
 			return
 		var t = min(1.0, delay * delta)
 		var dragged_target = position.lerp(pointer_world_pos, t)
 		position = _clamp_position_to_world(dragged_target)
+		_update_basket_connection_preview(true)
 		if is_instance_valid(bar_canvas) and bar_canvas.visible:
 			_update_bar_positions()
 
@@ -174,6 +184,7 @@ func _input(event):
 			if event.index != _active_touch_id:
 				return
 			_on_pointer_release(event.position)
+			_update_basket_connection_preview(false)
 			_active_touch_id = -1
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
@@ -183,6 +194,7 @@ func _input(event):
 			_on_pointer_press(event.position)
 		else:
 			_on_pointer_release(event.position)
+			_update_basket_connection_preview(false)
 
 
 

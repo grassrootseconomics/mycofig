@@ -52,6 +52,7 @@ const STORY_PHASE5_BASKET_R_LIQUIDITY := STORY_VILLAGER_COUNT_PER_ROLE * 3 * STO
 const STORY_PHASE5_FORCED_BASKET_LINK_META := "story_force_phase5_basket_link"
 const STORY_VILLAGE_PERMANENT_REVEAL_BUFFER := 4
 const STORY_PHASE5_OBJECTIVE_KEY := "village_everyone_trading"
+const STORY_BANK_BUDDY_RADIUS := 210.0
 const AMBIENT_TREE_AUDIO_RADIUS_TILES := 4.0
 const AMBIENT_TREE_AUDIO_SCAN_INTERVAL := 0.20
 const AMBIENT_TREE_AUDIO_SILENT_DB := -36.0
@@ -1137,9 +1138,24 @@ func _story_get_base_villager_layout() -> Array:
 	var village_rect = _get_runtime_village_rect(world)
 	var top_people_row_y = village_rect.position.y + 5
 	return [
-		{"role": "farmer", "tile": Vector2i(village_rect.position.x + 6, top_people_row_y)},
+		{"role": "farmer", "tile": Vector2i(village_rect.position.x + 6, top_people_row_y - 1)},
 		{"role": "vendor", "tile": Vector2i(village_rect.position.x + 7, top_people_row_y)},
-		{"role": "cook", "tile": Vector2i(village_rect.position.x + 8, top_people_row_y)}
+		{"role": "cook", "tile": Vector2i(village_rect.position.x + 8, top_people_row_y + 1)}
+	]
+
+
+func _story_get_lower_villager_layout() -> Array:
+	var world = _get_world_foundation()
+	var village_rect = _get_runtime_village_rect(world)
+	var lower_bottom_y = village_rect.position.y + village_rect.size.y - 1
+	var lower_top_y = mini(village_rect.position.y + 8, lower_bottom_y)
+	return [
+		{"role": "vendor", "tile": Vector2i(village_rect.position.x + 4, lower_top_y)},
+		{"role": "cook", "tile": Vector2i(village_rect.position.x + 6, lower_top_y)},
+		{"role": "farmer", "tile": Vector2i(village_rect.position.x + 4, mini(lower_top_y + 1, lower_bottom_y))},
+		{"role": "vendor", "tile": Vector2i(village_rect.position.x + 6, mini(lower_top_y + 1, lower_bottom_y))},
+		{"role": "cook", "tile": Vector2i(village_rect.position.x + 5, lower_bottom_y)},
+		{"role": "farmer", "tile": Vector2i(village_rect.position.x + 8, lower_bottom_y)}
 	]
 
 
@@ -1266,6 +1282,23 @@ func _story_append_unique_buddy(agent: Node, buddy: Node) -> bool:
 	return true
 
 
+func _should_link_village_person_to_basket(agent: Node, basket: Node) -> bool:
+	if not is_instance_valid(agent) or not is_instance_valid(basket):
+		return false
+	if _is_story_mode():
+		return true
+	if not _is_challenge_dual_village_runtime():
+		return false
+	var agent_radius = agent.get("buddy_radius")
+	var basket_radius = basket.get("buddy_radius")
+	var reach := float(Global.social_buddy_radius)
+	if typeof(agent_radius) == TYPE_FLOAT or typeof(agent_radius) == TYPE_INT:
+		reach = maxf(reach, float(agent_radius))
+	if typeof(basket_radius) == TYPE_FLOAT or typeof(basket_radius) == TYPE_INT:
+		reach = maxf(reach, float(basket_radius))
+	return agent.global_position.distance_to(basket.global_position) <= reach
+
+
 func _story_force_phase5_basket_links(basket: Node) -> void:
 	if not _story_is_phase5_player_basket(basket):
 		return
@@ -1276,20 +1309,27 @@ func _story_force_phase5_basket_links(basket: Node) -> void:
 			continue
 		if not _is_story_village_person_type(str(agent.get("type"))):
 			continue
+		if not _should_link_village_person_to_basket(agent, basket):
+			continue
 		_story_append_unique_buddy(agent, basket)
+		LevelHelpersRef.pulse_village_trade_pair_line($Lines, agent, basket)
 		agent.set("logistics_ready", true)
+		if agent.has_method("logistics"):
+			agent.call_deferred("logistics")
 		request_agent_dirty(agent, true, true, false)
 	request_agent_dirty(basket, true, true, false)
 
 
 func _story_prepare_phase5_basket(basket: Node) -> void:
-	if not _is_story_mode():
+	if not (_is_story_mode() or _is_challenge_dual_village_runtime()):
 		return
 	if not _story_is_phase5_player_basket(basket):
 		return
-	basket.set_meta(STORY_PHASE5_FORCED_BASKET_LINK_META, true)
+	if _is_story_mode():
+		basket.set_meta(STORY_PHASE5_FORCED_BASKET_LINK_META, true)
 	basket.set("logistics_ready", true)
-	_story_seed_phase5_basket_liquidity(basket)
+	if _is_story_mode():
+		_story_seed_phase5_basket_liquidity(basket)
 	_story_force_phase5_basket_links(basket)
 	_process_dirty_queues()
 	LevelHelpersRef.refresh_trade_line_visuals($Lines)
@@ -2370,7 +2410,7 @@ func _ready():
 		var cloud_width = mid_width + 250
 		var cloud_height = mid_height - 300
 		var cloud_position = Vector2(cloud_width,cloud_height)
-		if Global.mode == "challenge" and is_instance_valid(myco) and _supports_world_tiles(world):
+		if (_is_story_mode() or _is_challenge_dual_village_runtime()) and is_instance_valid(myco) and _supports_world_tiles(world):
 			var myco_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(myco.global_position)))
 			cloud_position = _tile_pos_from_center(world, myco_coord, Vector2i(4, -4))
 	
@@ -2469,6 +2509,10 @@ func _process(_delta: float) -> void:
 
 func _on_inventory_drag_preview(agent_name: String, world_pos: Vector2, active: bool) -> void:
 	LevelHelpersRef.update_inventory_connection_preview(self, $Agents, $Lines, inventory_preview_lines, agent_name, world_pos, active)
+
+
+func update_agent_connection_preview(agent_name: String, world_pos: Vector2, active: bool) -> void:
+	LevelHelpersRef.update_inventory_connection_preview(self, $Agents, $Lines, inventory_preview_lines, agent_name, world_pos, active)
 				
 				
 				
@@ -2523,21 +2567,50 @@ func _bootstrap_challenge_dual_village() -> void:
 	_story_refresh_hud()
 
 
-func _spawn_story_villager_role(role: String, world_pos: Vector2) -> Node:
+func _spawn_story_villager_role(role: String, world_pos: Vector2, resolve_spawn: bool = true) -> Node:
 	match role:
 		"farmer":
-			return make_farmer(world_pos)
+			return make_farmer(world_pos, resolve_spawn)
 		"vendor":
-			return make_vendor(world_pos)
+			return make_vendor(world_pos, resolve_spawn)
 		"cook":
-			return make_cook(world_pos)
+			return make_cook(world_pos, resolve_spawn)
 		_:
 			return null
 
 
-func _spawn_story_villager_at_tile(world: Node, tile: Vector2i, role: String) -> Node:
+func _story_resolve_villager_spawn_tile(world: Node, tile: Vector2i, lower_zone_only: bool = false) -> Vector2i:
 	var clamped = _clamp_tile_coord(world, tile)
-	return _spawn_story_villager_role(role, world.tile_to_world_center(clamped))
+	if not LevelHelpersRef.is_tile_occupied(self, $Agents, clamped, null, true):
+		return clamped
+	var village_rect = _get_runtime_village_rect(world)
+	var min_x = village_rect.position.x
+	var max_x = village_rect.position.x + village_rect.size.x - 1
+	var min_y = village_rect.position.y
+	var max_y = village_rect.position.y + village_rect.size.y - 1
+	if lower_zone_only:
+		min_x = village_rect.position.x + 4
+		max_x = village_rect.position.x + village_rect.size.x - 2
+		min_y = village_rect.position.y + 7
+	for radius in range(1, village_rect.size.x + village_rect.size.y):
+		for dy in range(-radius, radius + 1):
+			for dx in range(-radius, radius + 1):
+				if abs(dx) != radius and abs(dy) != radius:
+					continue
+				var candidate: Vector2i = clamped + Vector2i(dx, dy)
+				if candidate.x < min_x or candidate.x > max_x or candidate.y < min_y or candidate.y > max_y:
+					continue
+				if not world.in_bounds(candidate):
+					continue
+				if not LevelHelpersRef.is_tile_occupied(self, $Agents, candidate, null, true):
+					return candidate
+	return clamped
+
+
+func _spawn_story_villager_at_tile(world: Node, tile: Vector2i, role: String, lower_zone_only: bool = false) -> Node:
+	var clamped = _clamp_tile_coord(world, tile)
+	var spawn_tile = _story_resolve_villager_spawn_tile(world, clamped, lower_zone_only)
+	return _spawn_story_villager_role(role, world.tile_to_world_center(spawn_tile), false)
 
 
 func _story_spawn_village_cast() -> void:
@@ -2547,19 +2620,8 @@ func _story_spawn_village_cast() -> void:
 	var village_rect = _get_runtime_village_rect(world)
 	var placed := 0
 	var spawned_village_actors: Array[Node] = []
-	# Mirror the old social-mode cluster: bank at top-right, 3 colored baskets, and 3 villagers beneath.
-	var bank_tile = Vector2i(village_rect.position.x + 8, village_rect.position.y + 1)
-	var basket_tiles = [
-		Vector2i(village_rect.position.x + 6, village_rect.position.y + 3),
-		Vector2i(village_rect.position.x + 7, village_rect.position.y + 3),
-		Vector2i(village_rect.position.x + 8, village_rect.position.y + 3)
-	]
-	var basket_assets = ["N", "P", "K"]
-	for i in range(mini(basket_tiles.size(), basket_assets.size())):
-		var tile = basket_tiles[i]
-		var basket = make_story_basket(world.tile_to_world_center(_clamp_tile_coord(world, tile)), basket_assets[i])
-		if is_instance_valid(basket):
-			spawned_village_actors.append(basket)
+	# The bank reaches the top 3 villagers by radius from the village hub row.
+	var bank_tile = Vector2i(village_rect.position.x + 7, village_rect.position.y + 3)
 
 	var bank = make_story_bank(world.tile_to_world_center(_clamp_tile_coord(world, bank_tile)))
 	if is_instance_valid(bank):
@@ -2573,31 +2635,11 @@ func _story_spawn_village_cast() -> void:
 			placed += 1
 			spawned_village_actors.append(spawned_person)
 
-	# Add 6 more villagers (2 extra of each role) in random tiles below the base trio.
-	var extra_roles: Array[String] = [
-		"farmer", "farmer",
-		"vendor", "vendor",
-		"cook", "cook"
-	]
-	extra_roles.shuffle()
-	var candidate_tiles: Array[Vector2i] = []
-	var min_x = village_rect.position.x + 4
-	var max_x = village_rect.position.x + village_rect.size.x - 2
-	var min_y = village_rect.position.y + 7
-	var max_y = village_rect.position.y + village_rect.size.y - 1
-	for y in range(min_y, max_y + 1):
-		for x in range(min_x, max_x + 1):
-			candidate_tiles.append(Vector2i(x, y))
-	candidate_tiles.shuffle()
-	var role_index := 0
-	for tile in candidate_tiles:
-		if role_index >= extra_roles.size():
-			break
-		var spawned_extra = _spawn_story_villager_at_tile(world, tile, extra_roles[role_index])
+	for person_cfg in _story_get_lower_villager_layout():
+		var spawned_extra = _spawn_story_villager_at_tile(world, person_cfg["tile"], person_cfg["role"], true)
 		if spawned_extra != null:
 			spawned_extra.set_meta("story_protected_from_tuktuk", false)
 			placed += 1
-			role_index += 1
 			spawned_village_actors.append(spawned_extra)
 
 	# Kick-start village economy immediately on reveal (old social-level feel).
@@ -2662,7 +2704,11 @@ func _spawn_trade(path_dict) -> void:
 		trade_dict["created_at_msec"] = Time.get_ticks_msec()
 	var trade_amount = maxi(int(trade_dict.get("trade_amount", 1)), 1)
 	trade_dict["trade_amount"] = trade_amount
-	if Global.trade_visual_hybrid_enabled:
+	var is_village_visual_trade := LevelHelpersRef.is_village_trade_visual_path(trade_dict)
+	if is_village_visual_trade:
+		trade_dict["village_ephemeral_trade_visual"] = true
+		LevelHelpersRef.pulse_village_trade_pair_line($Lines, trade_dict.get("from_agent", null), trade_dict.get("to_agent", null))
+	if not is_village_visual_trade and Global.trade_visual_hybrid_enabled:
 		var visual_key = _build_trade_visual_key(trade_dict)
 		if visual_key != "":
 			trade_dict["visual_key"] = visual_key
@@ -3313,7 +3359,7 @@ func make_story_bank(pos: Vector2) -> Node:
 	var bank_dict = LevelHelpersRef.build_agent_setup_dict(named, "bank", bank_pos, ["R"], TEX_BANK)
 	var bank = socialagent_scene.instantiate()
 	bank.set_variables(bank_dict)
-	bank.buddy_radius = Global.social_buddy_radius
+	bank.buddy_radius = maxf(float(Global.social_buddy_radius), STORY_BANK_BUDDY_RADIUS)
 	bank.draggable = false
 	bank.killable = false
 	bank.set_meta("bank_disabled", not _bank_hotkey_enabled)
@@ -3376,8 +3422,8 @@ func _setup_story_person_flags(person: Node, role: String) -> void:
 		person.current_maturity = 0
 
 
-func _make_story_person(role: String, texture: Texture2D, pos: Vector2, prod_res: Array) -> Node:
-	var spawn_pos = _resolve_tile_spawn_pos(pos)
+func _make_story_person(role: String, texture: Texture2D, pos: Vector2, prod_res: Array, resolve_spawn: bool = true) -> Node:
+	var spawn_pos: Vector2 = _resolve_tile_spawn_pos(pos) if resolve_spawn else pos
 	if _is_story_mode() and not _is_story_village_spawn_allowed(spawn_pos):
 		return null
 	var named = LevelHelpersRef.make_agent_name(str(role.capitalize()), $Agents)
@@ -3392,16 +3438,16 @@ func _make_story_person(role: String, texture: Texture2D, pos: Vector2, prod_res
 	return person
 
 
-func make_farmer(pos: Vector2) -> Node:
-	return _make_story_person("farmer", TEX_FARMER, pos, [null])
+func make_farmer(pos: Vector2, resolve_spawn: bool = true) -> Node:
+	return _make_story_person("farmer", TEX_FARMER, pos, [null], resolve_spawn)
 
 
-func make_vendor(pos: Vector2) -> Node:
-	return _make_story_person("vendor", TEX_VENDOR, pos, ["P"])
+func make_vendor(pos: Vector2, resolve_spawn: bool = true) -> Node:
+	return _make_story_person("vendor", TEX_VENDOR, pos, ["P"], resolve_spawn)
 
 
-func make_cook(pos: Vector2) -> Node:
-	return _make_story_person("cook", TEX_COOK, pos, ["K"])
+func make_cook(pos: Vector2, resolve_spawn: bool = true) -> Node:
+	return _make_story_person("cook", TEX_COOK, pos, ["K"], resolve_spawn)
 
 
 func make_story_basket(pos: Vector2, asset_key: String = "") -> Node:
@@ -3449,7 +3495,7 @@ func make_story_basket(pos: Vector2, asset_key: String = "") -> Node:
 	if basket.has_signal("trade"):
 		basket.connect("trade", _on_agent_trade)
 	LevelHelpersRef.sync_agent_occupancy(self, basket)
-	if _is_story_mode() and _story_phase_id >= 5 and normalized_asset == "":
+	if normalized_asset == "" and ((_is_story_mode() and _story_phase_id >= 5) or _is_challenge_dual_village_runtime()):
 		_story_prepare_phase5_basket(basket)
 	return basket
 	

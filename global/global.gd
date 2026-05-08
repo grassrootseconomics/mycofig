@@ -152,7 +152,7 @@ var story_stage_text = {
 	Grow more crops they can harvest.",
 	5: "Phase 5: Help them share!
 	
-	Some people don't have enough money to buy food.
+	Some people don't have enough money to buy things.
 	See if they can use a basket to share their goods and services with eachother.",
 	6: "You did it! 
 	

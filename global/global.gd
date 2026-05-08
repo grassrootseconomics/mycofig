@@ -143,19 +143,20 @@ var story_stage_text = {
 	(see the minimap).
 
 	Tap to check what crops need to grow.
-	The plants can help eachother.
-	and mushrooms connect them.",
+	The plants can help eachother,
+	and mushrooms connect them!",
 	4: "Phase 4 - You reached a village! 
 	
-	Looks like they need food. 
+	It looks like they need food. 
 	
 	Grow more crops they can harvest.",
 	5: "Phase 5: Help them share!
 	
-	Try giving them a basket. They can use that to share their goods and services with eachother.",
+	Some people don't have enough money to buy food.
+	See if they can use a basket to share their goods and services with eachother.",
 	6: "You did it! 
 	
-	You restored soil health and helped the village recover. 
+	You restored soil health and helped the village recover its social soil. 
 	
 	Well done! You are ready for Challenge Mode."
 }

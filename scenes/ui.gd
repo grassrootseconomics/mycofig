@@ -44,6 +44,8 @@ const INVENTORY_SELECTED_OUTLINE_COLOR := Color(0.98, 0.96, 0.58, 0.98)
 const INVENTORY_DRAG_PREVIEW_OUTLINE_COLOR := Color(0.98, 0.96, 0.58, 0.95)
 const INVENTORY_PHASE1_SPARKLE_COLOR := Color(1.0, 0.98, 0.58, 0.95)
 const INVENTORY_PHASE1_SPARKLE_PULSE_SPEED := 4.6
+const INVENTORY_PHASE5_BASKET_STAR_COUNT := 8
+const INVENTORY_PHASE5_BASKET_STAR_COLOR := Color(1.0, 0.92, 0.24, 1.0)
 const TUTORIAL_PANEL_EXPANDED_SIZE := Vector2(372, 178)
 const TUTORIAL_PANEL_COLLAPSED_SIZE := Vector2(44, 44)
 const INVENTORY_ICON_PAD_DEFAULT := 4.0
@@ -71,7 +73,7 @@ const STORY_FACTS_SPARKLE_DURATION := 0.70
 const STORY_FACTS_TEXT := {
 	1: "Growing plants require healthy soil.\n\nFungi help make the soil healthy and alive.",
 	2: "Birds deserve to eat too. So plant more to feed them.\n\nBirds like seeds.",
-	3: "Beans help fix nitrogen (Green) in the soil.\nSquash bring shade and potassium (Orange).\nMaize brings Phosphorus (Pink).\nTrees are helping bring in water (Blue).\n\nBelow the Mushrooms is Mycorrhizal fungi which form a relationship with plant roots, acting as an extension of the root system to enhance nutrient and water absorption.",
+	3: "Beans help fix nitrogen (Green) in the soil.\nSquash bring shade and potassium (Orange).\nMaize brings Phosphorus (Pink).\nTrees are helping bring in water (Blue).\n\nBelow the Mushrooms are Mycorrhizal fungi which form a relationship with plant roots, acting as an extension of the root system to enhance nutrient and water absorption.",
 	4: "Healthy people need healthy soil.",
 	5: "People can exchange, lend, borrow, rotate and share their goods and services fairly even without money.",
 	6: "This was the easy part. Now try Challenge Mode!"
@@ -82,6 +84,9 @@ const STORY_GUIDE_ARROW_WIDTH := 7.0
 const STORY_GUIDE_ARROW_SHADOW_WIDTH := 12.0
 const STORY_GUIDE_ARROW_HEAD_LENGTH := 32.0
 const STORY_GUIDE_ARROW_HEAD_WIDTH := 30.0
+const STORY_GUIDE_ARROW_LAYER_Z_INDEX := 85
+const TUTORIAL_PANEL_Z_INDEX := 110
+const TUTORIAL_TOGGLE_BUTTON_Z_INDEX := 120
 const QUIT_DIALOG_PANEL_COLOR := Color(0.00, 0.13, 0.47, 0.57)
 const QUIT_DIALOG_BORDER_COLOR := Color(0.035, 0.071, 0.149, 0.78)
 const QUIT_DIALOG_SHADOW_COLOR := Color(0.0, 0.0, 0.0, 0.25)
@@ -115,6 +120,7 @@ var _slot_backplates: Dictionary = {}
 var _slot_lock_glyphs: Dictionary = {}
 var _slot_selection_frames: Dictionary = {}
 var _slot_sparkle_rings: Dictionary = {}
+var _slot_phase5_sparkle_stars: Dictionary = {}
 var _back_confirm_dialog: ConfirmationDialog = null
 var _minimap_drag_locked := false
 var _tutorial_toggle_button: Button = null
@@ -497,6 +503,20 @@ func _make_inventory_sparkle_ring_style() -> StyleBoxFlat:
 	return style
 
 
+func _make_inventory_phase5_basket_sparkle_ring_style() -> StyleBoxFlat:
+	var style := _make_inventory_sparkle_ring_style()
+	style.border_width_left = 5
+	style.border_width_top = 5
+	style.border_width_right = 5
+	style.border_width_bottom = 5
+	style.border_color = INVENTORY_PHASE5_BASKET_STAR_COLOR
+	style.expand_margin_left = 6.0
+	style.expand_margin_top = 6.0
+	style.expand_margin_right = 6.0
+	style.expand_margin_bottom = 6.0
+	return style
+
+
 func _make_quit_dialog_panel_style() -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
 	style.bg_color = QUIT_DIALOG_PANEL_COLOR
@@ -700,6 +720,46 @@ func _ensure_slot_sparkle_ring(icon: TextureRect, host: Panel) -> void:
 	_slot_sparkle_rings[icon] = ring
 
 
+func _ensure_slot_phase5_sparkle_stars(icon: TextureRect, host: Panel) -> void:
+	if not is_instance_valid(icon) or not is_instance_valid(host):
+		return
+	var layer: Control = host.get_node_or_null("Phase5BasketStarSparkles") as Control
+	if not is_instance_valid(layer):
+		layer = Control.new()
+		layer.name = "Phase5BasketStarSparkles"
+		layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		layer.anchors_preset = Control.PRESET_FULL_RECT
+		layer.anchor_right = 1.0
+		layer.anchor_bottom = 1.0
+		layer.offset_left = 0.0
+		layer.offset_top = 0.0
+		layer.offset_right = 0.0
+		layer.offset_bottom = 0.0
+		layer.z_index = 18
+		host.add_child(layer)
+	var stars: Array = []
+	for idx in range(INVENTORY_PHASE5_BASKET_STAR_COUNT):
+		var sparkle: Label = layer.get_node_or_null(str("Star", idx)) as Label
+		if not is_instance_valid(sparkle):
+			sparkle = Label.new()
+			sparkle.name = str("Star", idx)
+			sparkle.text = "*"
+			sparkle.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			sparkle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			sparkle.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			sparkle.custom_minimum_size = Vector2(18, 18)
+			sparkle.size = Vector2(18, 18)
+			sparkle.add_theme_font_size_override("font_size", 24)
+			sparkle.add_theme_color_override("font_color", INVENTORY_PHASE5_BASKET_STAR_COLOR)
+			sparkle.add_theme_color_override("font_outline_color", Color(0.10, 0.05, 0.0, 1.0))
+			sparkle.add_theme_constant_override("outline_size", 3)
+			layer.add_child(sparkle)
+		sparkle.visible = false
+		stars.append(sparkle)
+	layer.visible = false
+	_slot_phase5_sparkle_stars[icon] = stars
+
+
 func _ensure_slot_selection_frame(icon: TextureRect, host: Panel) -> void:
 	if not is_instance_valid(icon) or not is_instance_valid(host):
 		return
@@ -753,6 +813,12 @@ func _refresh_inventory_phase1_sparkle_visuals() -> void:
 			continue
 		ring.visible = false
 		ring.modulate = Color(1, 1, 1, 0.0)
+		var stars: Array = _slot_phase5_sparkle_stars.get(icon, [])
+		for star in stars:
+			if is_instance_valid(star):
+				star.visible = false
+				if is_instance_valid(star.get_parent()):
+					star.get_parent().visible = false
 		if not icon.visible:
 			continue
 		if not icon.has_meta("item_name"):
@@ -765,7 +831,42 @@ func _refresh_inventory_phase1_sparkle_visuals() -> void:
 			continue
 		var show_phase1 = _story_phase1_sparkle_active and bool(_story_phase1_pending_types.get(item_name, false))
 		var show_phase5_basket = _story_phase5_basket_sparkle_active and item_name == "basket"
+		if show_phase5_basket:
+			ring.add_theme_stylebox_override("panel", _make_inventory_phase5_basket_sparkle_ring_style())
+			for star in stars:
+				if is_instance_valid(star):
+					star.visible = true
+					if is_instance_valid(star.get_parent()):
+						star.get_parent().visible = true
+		elif show_phase1:
+			ring.add_theme_stylebox_override("panel", _make_inventory_sparkle_ring_style())
 		ring.visible = show_phase1 or show_phase5_basket
+
+
+func _update_inventory_phase5_basket_star_animation(icon: TextureRect, _delta: float) -> void:
+	var stars: Array = _slot_phase5_sparkle_stars.get(icon, [])
+	if stars.is_empty():
+		return
+	var host = _slot_backplates.get(icon, null)
+	if not (host is Panel):
+		return
+	var host_size = host.size
+	if host_size.x <= 1.0 or host_size.y <= 1.0:
+		host_size = host.custom_minimum_size
+	var center = host_size * 0.5
+	var radius = maxf(host_size.x, host_size.y) * 0.58
+	var base_angle = _story_phase1_sparkle_time * 2.35
+	for star_idx in range(stars.size()):
+		var sparkle: Label = stars[star_idx]
+		if not is_instance_valid(sparkle) or not sparkle.visible:
+			continue
+		var orbit = base_angle + (float(star_idx) / float(maxi(stars.size(), 1))) * TAU
+		var shimmer = 0.5 + 0.5 * sin(_story_phase1_sparkle_time * 7.4 + float(star_idx) * 1.37)
+		var star_size = Vector2(20, 20)
+		sparkle.size = star_size
+		sparkle.position = center + Vector2(cos(orbit) * radius, sin(orbit) * radius) - star_size * 0.5
+		sparkle.scale = Vector2.ONE * (0.78 + shimmer * 0.62)
+		sparkle.modulate = Color(1.0, 0.88 + shimmer * 0.12, 0.18 + shimmer * 0.22, 0.62 + shimmer * 0.38)
 
 
 func _update_inventory_phase1_sparkle_animation(delta: float) -> void:
@@ -780,8 +881,13 @@ func _update_inventory_phase1_sparkle_animation(delta: float) -> void:
 		if not is_instance_valid(ring) or not ring.visible:
 			continue
 		var phase_offset = float(idx) * 0.42
-		var pulse = 0.42 + 0.58 * (0.5 + 0.5 * sin(_story_phase1_sparkle_time * INVENTORY_PHASE1_SPARKLE_PULSE_SPEED + phase_offset))
+		var is_phase5_basket = icon.has_meta("item_name") and str(icon.get_meta("item_name")) == "basket" and _story_phase5_basket_sparkle_active
+		var min_alpha = 0.70 if is_phase5_basket else 0.42
+		var pulse_span = 0.30 if is_phase5_basket else 0.58
+		var pulse = min_alpha + pulse_span * (0.5 + 0.5 * sin(_story_phase1_sparkle_time * INVENTORY_PHASE1_SPARKLE_PULSE_SPEED + phase_offset))
 		ring.modulate = Color(1, 1, 1, pulse)
+		if is_phase5_basket:
+			_update_inventory_phase5_basket_star_animation(icon, delta)
 
 
 func set_story_inventory_sparkle_targets(phase1_active: bool, phase1_pending_types: Dictionary, phase5_basket_active: bool, ignore_counts: bool = false) -> void:
@@ -806,6 +912,7 @@ func _ensure_inventory_backplates() -> void:
 	_slot_lock_glyphs.clear()
 	_slot_selection_frames.clear()
 	_slot_sparkle_rings.clear()
+	_slot_phase5_sparkle_stars.clear()
 	for icon in _slot_icons:
 		if not is_instance_valid(icon):
 			continue
@@ -813,6 +920,7 @@ func _ensure_inventory_backplates() -> void:
 		if existing_parent is Panel and bool(existing_parent.get_meta("inventory_backplate", false)):
 			_slot_backplates[icon] = existing_parent
 			_ensure_slot_sparkle_ring(icon, existing_parent)
+			_ensure_slot_phase5_sparkle_stars(icon, existing_parent)
 			_ensure_slot_selection_frame(icon, existing_parent)
 			continue
 		var host := Panel.new()
@@ -834,6 +942,7 @@ func _ensure_inventory_backplates() -> void:
 		_apply_inventory_icon_slot_layout(icon, "")
 		_slot_backplates[icon] = host
 		_ensure_slot_sparkle_ring(icon, host)
+		_ensure_slot_phase5_sparkle_stars(icon, host)
 		_ensure_slot_selection_frame(icon, host)
 
 
@@ -967,7 +1076,7 @@ func _ensure_story_phase1_arrow_overlay() -> void:
 	_story_phase1_arrow_layer.name = "StoryPhase1GuideArrows"
 	_story_phase1_arrow_layer.process_mode = Node.PROCESS_MODE_ALWAYS
 	_story_phase1_arrow_layer.z_as_relative = false
-	_story_phase1_arrow_layer.z_index = 85
+	_story_phase1_arrow_layer.z_index = STORY_GUIDE_ARROW_LAYER_Z_INDEX
 	add_child(_story_phase1_arrow_layer)
 	for idx in range(2):
 		var shadow := Line2D.new()
@@ -1603,6 +1712,8 @@ func _ensure_tutorial_panel_toggle() -> void:
 		return
 	tutorial.clip_contents = true
 	tutorial.process_mode = Node.PROCESS_MODE_ALWAYS
+	tutorial.z_as_relative = false
+	tutorial.z_index = TUTORIAL_PANEL_Z_INDEX
 	if not is_instance_valid(_tutorial_toggle_button):
 		_tutorial_toggle_button = Button.new()
 		_tutorial_toggle_button.name = "ToggleButton"
@@ -1611,7 +1722,7 @@ func _ensure_tutorial_panel_toggle() -> void:
 		_tutorial_toggle_button.focus_mode = Control.FOCUS_NONE
 		_tutorial_toggle_button.process_mode = Node.PROCESS_MODE_ALWAYS
 		_tutorial_toggle_button.z_as_relative = false
-		_tutorial_toggle_button.z_index = 120
+		_tutorial_toggle_button.z_index = TUTORIAL_TOGGLE_BUTTON_Z_INDEX
 		_tutorial_toggle_button.add_theme_font_size_override("font_size", 14)
 		_tutorial_toggle_button.pressed.connect(_on_tutorial_toggle_pressed)
 		add_child(_tutorial_toggle_button)
@@ -1937,7 +2048,7 @@ func _get_story_facts_phase() -> int:
 
 
 func _get_story_facts_button_text(phase_id: int) -> String:
-	return str("Phase ", clampi(phase_id, 1, 6), ". Facts!")
+	return str("Phase ", clampi(phase_id, 1, 6), ". Fun Facts!")
 
 
 func _story_facts_should_sparkle() -> bool:
@@ -2707,14 +2818,15 @@ func _flash_invalid_selected_tile_hint(screen_pos: Vector2) -> void:
 		world.set_drag_tile_hint(coord, false, secondary_coord, show_secondary)
 
 
-func _update_selected_tile_hint(screen_pos: Vector2) -> void:
+func _update_selected_tile_hint(screen_pos: Vector2, update_connection_preview: bool = true) -> void:
 	if _selected_inventory_item == "":
 		_clear_world_tile_hint()
 		return
 	var tile_data = _get_world_tile_drop_data(screen_pos)
 	if not bool(tile_data.get("ok", false)):
 		_clear_world_tile_hint()
-		emit_signal("inventory_drag_preview", _selected_inventory_item, Vector2.ZERO, false)
+		if update_connection_preview:
+			emit_signal("inventory_drag_preview", _selected_inventory_item, Vector2.ZERO, false)
 		return
 	var world = _get_world_foundation()
 	if not is_instance_valid(world) or not world.has_method("set_drag_tile_hint"):
@@ -2728,13 +2840,17 @@ func _update_selected_tile_hint(screen_pos: Vector2) -> void:
 		secondary_coord = coord + Vector2i(0, -1)
 		show_secondary = true
 	world.set_drag_tile_hint(coord, can_place, secondary_coord, show_secondary)
-	_emit_inventory_drag_preview(_selected_inventory_item, screen_pos, true)
+	if update_connection_preview:
+		_emit_inventory_drag_preview(_selected_inventory_item, screen_pos, true)
 
 
 func _update_selected_inventory_hover_hint() -> void:
 	if _selected_inventory_item == "":
 		return
 	if _pointer_drag_active:
+		if _pointer_is_down:
+			_update_inventory_drag(_last_pointer_pos)
+			_update_selected_tile_hint(_last_pointer_pos, false)
 		return
 	_update_selected_tile_hint(_last_pointer_pos)
 

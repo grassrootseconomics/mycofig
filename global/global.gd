@@ -2,6 +2,8 @@ extends Node
 
 var score := 0
 var high_score := 0
+var last_score := 0
+var last_rank_key := 0
 const HIGH_SCORE_SAVE_PATH := "user://high_score.cfg"
 
 var move_rate = 1 #4 #6
@@ -353,17 +355,25 @@ func load_high_score() -> void:
 	var err := cfg.load(HIGH_SCORE_SAVE_PATH)
 	if err == OK:
 		high_score = max(0, int(cfg.get_value("scores", "high_score", 0)))
+		last_score = max(0, int(cfg.get_value("scores", "last_score", 0)))
+		last_rank_key = int(cfg.get_value("scores", "last_rank_key", get_rank_threshold(last_score)))
 	else:
 		high_score = 0
+		last_score = 0
+		last_rank_key = 0
 
 
 func save_high_score() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("scores", "high_score", max(0, high_score))
+	cfg.set_value("scores", "last_score", max(0, last_score))
+	cfg.set_value("scores", "last_rank_key", last_rank_key)
 	cfg.save(HIGH_SCORE_SAVE_PATH)
 
 
 func update_high_score(score_value: int = -1) -> bool:
+	if str(mode) == "story":
+		return false
 	var checked_score := score if score_value < 0 else score_value
 	if checked_score <= high_score:
 		return false
@@ -372,7 +382,24 @@ func update_high_score(score_value: int = -1) -> bool:
 	return true
 
 
+func record_last_score(score_value: int = -1) -> bool:
+	if str(mode) == "story":
+		return false
+	var checked_score := score if score_value < 0 else score_value
+	if checked_score <= 0:
+		return false
+	last_score = checked_score
+	last_rank_key = get_rank_threshold(checked_score)
+	var new_high_score = checked_score > high_score
+	if new_high_score:
+		high_score = checked_score
+	save_high_score()
+	return new_high_score
+
+
 func add_score(amount: int) -> int:
+	if str(mode) == "story":
+		return score
 	score += amount
 	update_high_score(score)
 	return score

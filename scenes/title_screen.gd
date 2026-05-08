@@ -3,8 +3,33 @@ extends Control
 const TITLE_COMPACT_SHORT_EDGE := 640.0
 const TITLE_TINY_SHORT_EDGE := 500.0
 const GE_LOGO_PATH := "res://graphics/ge-logo-horizontal-text.png"
+const TITLE_SCORE_STAR_COUNT := 12
+const TITLE_BIRD_FRAME_PATHS := [
+	"res://graphics/bird1.png",
+	"res://graphics/bird2.png",
+	"res://graphics/bird3.png",
+	"res://graphics/bird4.png"
+]
+const TITLE_TUKTUK_TEXTURE_PATH := "res://graphics/tuktuk.png"
+const TITLE_BASKET_TEXTURE_PATH := "res://graphics/basket.png"
+const TITLE_BIRD_FLYBY_SECONDS := 4.8
+const TITLE_BASKET_DROP_SECONDS := 1.05
+const TITLE_TUKTUK_FLYBY_SECONDS := 4.2
+const TITLE_FLYBY_WAIT_SECONDS := 1.5
 
 var _ge_logo_texture: Texture2D = null
+var _last_score_label: Label = null
+var _high_score_label: Label = null
+var _title_score_star_layer: Control = null
+var _title_score_stars: Array[Label] = []
+var _title_score_sparkle_target: Label = null
+var _title_score_sparkle_time := 0.0
+var _title_flyby_layer: Node2D = null
+var _title_bird_sprite: AnimatedSprite2D = null
+var _title_bird_basket_sprite: Sprite2D = null
+var _title_tuktuk_node: Node2D = null
+var _title_tuktuk_basket_sprite: Sprite2D = null
+var _title_flyby_running := false
 
 
 func _get_ge_logo_texture() -> Texture2D:
@@ -97,6 +122,305 @@ func _setup_version_label() -> void:
 	version_label.add_theme_color_override("font_color", Color(0.08, 0.16, 0.1, 0.86))
 	version_label.add_theme_color_override("font_outline_color", Color(1.0, 0.98, 0.84, 0.7))
 	version_label.add_theme_constant_override("outline_size", 2)
+
+
+func _style_title_score_label(label: Label, font_size: int) -> void:
+	if not is_instance_valid(label):
+		return
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", Color(0.035, 0.13, 0.07, 1.0))
+	label.add_theme_color_override("font_outline_color", Color(1.0, 0.82, 0.24, 0.96))
+	label.add_theme_color_override("font_shadow_color", Color(0.03, 0.02, 0.01, 0.45))
+	label.add_theme_constant_override("outline_size", 5)
+	label.add_theme_constant_override("shadow_offset_x", 2)
+	label.add_theme_constant_override("shadow_offset_y", 3)
+
+
+func _ensure_title_score_widgets() -> void:
+	if not is_instance_valid(_last_score_label):
+		_last_score_label = Label.new()
+		_last_score_label.name = "LastScoreLabel"
+		_last_score_label.z_as_relative = false
+		_last_score_label.z_index = 35
+		add_child(_last_score_label)
+	if not is_instance_valid(_high_score_label):
+		_high_score_label = Label.new()
+		_high_score_label.name = "TitleHighScoreLabel"
+		_high_score_label.z_as_relative = false
+		_high_score_label.z_index = 35
+		add_child(_high_score_label)
+	if not is_instance_valid(_title_score_star_layer):
+		_title_score_star_layer = Control.new()
+		_title_score_star_layer.name = "TitleScoreStars"
+		_title_score_star_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_title_score_star_layer.z_as_relative = false
+		_title_score_star_layer.z_index = 38
+		add_child(_title_score_star_layer)
+	while _title_score_stars.size() < TITLE_SCORE_STAR_COUNT:
+		var star := Label.new()
+		star.name = str("ScoreStar", _title_score_stars.size())
+		star.text = "*"
+		star.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		star.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		star.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		star.custom_minimum_size = Vector2(24, 24)
+		star.size = Vector2(24, 24)
+		star.add_theme_font_size_override("font_size", 24)
+		star.add_theme_color_override("font_color", Color(1.0, 0.92, 0.20, 1.0))
+		star.add_theme_color_override("font_outline_color", Color(0.08, 0.04, 0.0, 1.0))
+		star.add_theme_constant_override("outline_size", 3)
+		_title_score_star_layer.add_child(star)
+		_title_score_stars.append(star)
+
+
+func _get_last_rank_text() -> String:
+	var rank_key = int(Global.last_rank_key)
+	if not Global.ranks.has(rank_key):
+		rank_key = Global.get_rank_threshold(Global.last_score)
+	return str(Global.ranks.get(rank_key, "Sporeling"))
+
+
+func _update_title_score_widgets(view_size: Vector2, compact: bool, tiny: bool) -> void:
+	_ensure_title_score_widgets()
+	var has_last_score = int(Global.last_score) > 0
+	var has_high_score = int(Global.high_score) > 0
+	var show_scores = has_last_score or has_high_score
+	var label_width = clampf(view_size.x - 32.0, 250.0, 430.0)
+	var last_size = Vector2(label_width, 66.0 if tiny else (72.0 if compact else 78.0))
+	var high_size = Vector2(label_width, 42.0 if tiny else (48.0 if compact else 54.0))
+	_style_title_score_label(_last_score_label, 22 if tiny else (24 if compact else 27))
+	_style_title_score_label(_high_score_label, 22 if tiny else (24 if compact else 27))
+	if is_instance_valid(_last_score_label):
+		_last_score_label.visible = has_last_score
+		_last_score_label.custom_minimum_size = last_size
+		_last_score_label.size = last_size
+		_last_score_label.text = str("Last Score: ", Global.format_score_value(Global.last_score), "\nLast Rank: ", _get_last_rank_text())
+	if is_instance_valid(_high_score_label):
+		_high_score_label.visible = has_high_score
+		_high_score_label.custom_minimum_size = high_size
+		_high_score_label.size = high_size
+		_high_score_label.text = str("High Score: ", Global.format_score_value(Global.high_score))
+	var basket: Sprite2D = get_node_or_null("CenterContainer/Basket") as Sprite2D
+	var basket_center = basket.global_position if is_instance_valid(basket) else Vector2(view_size.x * 0.5, view_size.y * 0.72)
+	if is_instance_valid(_last_score_label):
+		var last_y = basket_center.y - (98.0 if tiny else (108.0 if compact else 122.0))
+		var link: LinkButton = $CenterContainer/VBoxContainer/LinkButton
+		if is_instance_valid(link):
+			var link_rect = link.get_global_rect()
+			last_y = maxf(last_y, link_rect.position.y + link_rect.size.y + 8.0)
+		_last_score_label.position = Vector2(round(basket_center.x - last_size.x * 0.5), round(last_y))
+	if is_instance_valid(_high_score_label):
+		var high_y = basket_center.y + (34.0 if tiny else (40.0 if compact else 48.0))
+		_high_score_label.position = Vector2(round(basket_center.x - high_size.x * 0.5), round(high_y))
+	_title_score_sparkle_target = null
+	if show_scores and has_last_score and int(Global.last_score) == int(Global.high_score):
+		_title_score_sparkle_target = _last_score_label
+	elif show_scores and has_high_score:
+		_title_score_sparkle_target = _high_score_label
+	_update_title_score_sparkles(0.0)
+
+
+func _update_title_score_sparkles(delta: float) -> void:
+	_title_score_sparkle_time += maxf(delta, 0.0)
+	var show_stars = is_instance_valid(_title_score_sparkle_target) and _title_score_sparkle_target.visible
+	if is_instance_valid(_title_score_star_layer):
+		_title_score_star_layer.visible = show_stars
+	if not show_stars:
+		for star in _title_score_stars:
+			if is_instance_valid(star):
+				star.visible = false
+		return
+	var target_rect = _title_score_sparkle_target.get_global_rect()
+	var center = target_rect.get_center()
+	var radius_x = target_rect.size.x * 0.52 + 14.0
+	var radius_y = target_rect.size.y * 0.50 + 10.0
+	for idx in range(_title_score_stars.size()):
+		var star = _title_score_stars[idx]
+		if not is_instance_valid(star):
+			continue
+		var phase = (idx * TAU) / max(TITLE_SCORE_STAR_COUNT, 1)
+		var shimmer = 0.5 + 0.5 * sin(_title_score_sparkle_time * 4.2 + idx * 0.91)
+		var orbit = phase + sin(_title_score_sparkle_time * 0.9 + idx) * 0.08
+		star.visible = true
+		star.modulate.a = 0.38 + shimmer * 0.62
+		star.scale = Vector2.ONE * (0.82 + shimmer * 0.36)
+		star.position = center + Vector2(cos(orbit) * radius_x, sin(orbit) * radius_y) - star.size * 0.5
+
+
+func _make_title_bird_frames() -> SpriteFrames:
+	var frames := SpriteFrames.new()
+	if not frames.has_animation(&"default"):
+		frames.add_animation(&"default")
+	frames.set_animation_loop(&"default", true)
+	frames.set_animation_speed(&"default", 5.0)
+	for path in TITLE_BIRD_FRAME_PATHS:
+		var texture: Resource = load(str(path))
+		if texture is Texture2D:
+			frames.add_frame(&"default", texture as Texture2D)
+	return frames
+
+
+func _ensure_title_flyby_nodes() -> void:
+	if not is_instance_valid(_title_flyby_layer):
+		_title_flyby_layer = Node2D.new()
+		_title_flyby_layer.name = "TitleFlybys"
+		_title_flyby_layer.z_as_relative = false
+		_title_flyby_layer.z_index = 44
+		add_child(_title_flyby_layer)
+	if not is_instance_valid(_title_bird_sprite):
+		_title_bird_sprite = AnimatedSprite2D.new()
+		_title_bird_sprite.name = "TitleBird"
+		_title_bird_sprite.sprite_frames = _make_title_bird_frames()
+		_title_bird_sprite.animation = &"default"
+		_title_bird_sprite.scale = Vector2(1.25, 1.25)
+		_title_bird_sprite.visible = false
+		_title_flyby_layer.add_child(_title_bird_sprite)
+		_title_bird_basket_sprite = Sprite2D.new()
+		_title_bird_basket_sprite.name = "BeakBasket"
+		var bird_basket_texture: Resource = load(TITLE_BASKET_TEXTURE_PATH)
+		if bird_basket_texture is Texture2D:
+			_title_bird_basket_sprite.texture = bird_basket_texture as Texture2D
+		_title_bird_basket_sprite.position = Vector2(34.0, 4.0)
+		_title_bird_basket_sprite.scale = Vector2(0.44, 0.44)
+		_title_bird_basket_sprite.z_index = 1
+		_title_bird_basket_sprite.visible = false
+		_title_bird_sprite.add_child(_title_bird_basket_sprite)
+	if not is_instance_valid(_title_tuktuk_node):
+		_title_tuktuk_node = Node2D.new()
+		_title_tuktuk_node.name = "TitleTuktuk"
+		_title_tuktuk_node.scale = Vector2(1.18, 1.18)
+		_title_tuktuk_node.visible = false
+		_title_flyby_layer.add_child(_title_tuktuk_node)
+		var tuktuk_sprite := Sprite2D.new()
+		tuktuk_sprite.name = "Sprite2D"
+		var tuktuk_texture: Resource = load(TITLE_TUKTUK_TEXTURE_PATH)
+		if tuktuk_texture is Texture2D:
+			tuktuk_sprite.texture = tuktuk_texture as Texture2D
+		_title_tuktuk_node.add_child(tuktuk_sprite)
+		_title_tuktuk_basket_sprite = Sprite2D.new()
+		_title_tuktuk_basket_sprite.name = "CarriedBasket"
+		var basket_texture: Resource = load(TITLE_BASKET_TEXTURE_PATH)
+		if basket_texture is Texture2D:
+			_title_tuktuk_basket_sprite.texture = basket_texture as Texture2D
+		_title_tuktuk_basket_sprite.position = Vector2(-28.0, -8.0)
+		_title_tuktuk_basket_sprite.scale = Vector2(0.72, 0.72)
+		_title_tuktuk_basket_sprite.visible = false
+		_title_tuktuk_node.add_child(_title_tuktuk_basket_sprite)
+
+
+func _get_title_bird_flyby_y(view_size: Vector2) -> float:
+	var title_label: Label = $CenterContainer/VBoxContainer/RegenerationLabel
+	if is_instance_valid(title_label):
+		var title_rect = title_label.get_global_rect()
+		return maxf(32.0, title_rect.position.y - 30.0)
+	return view_size.y * 0.16
+
+
+func _get_title_basket_sprite() -> Sprite2D:
+	return get_node_or_null("CenterContainer/Basket") as Sprite2D
+
+
+func _get_title_basket_center(view_size: Vector2) -> Vector2:
+	var basket = _get_title_basket_sprite()
+	if is_instance_valid(basket):
+		return basket.global_position
+	return Vector2(view_size.x * 0.5, view_size.y * 0.72)
+
+
+func _play_title_bird_flyby() -> void:
+	_ensure_title_flyby_nodes()
+	if not is_instance_valid(_title_bird_sprite):
+		return
+	var view_size = get_viewport_rect().size
+	var y = _get_title_bird_flyby_y(view_size)
+	var basket = _get_title_basket_sprite()
+	var basket_rest = _get_title_basket_center(view_size)
+	if is_instance_valid(basket):
+		basket.global_position = basket_rest
+		basket.visible = false
+	var start_pos = Vector2(-98.0, y)
+	var drop_pos = Vector2(view_size.x * 0.5 - 38.0, y - 4.0)
+	var exit_pos = Vector2(view_size.x + 98.0, y - 12.0)
+	_title_bird_sprite.position = start_pos
+	_title_bird_sprite.visible = true
+	_title_bird_sprite.play(&"default")
+	if is_instance_valid(_title_bird_basket_sprite):
+		_title_bird_basket_sprite.visible = true
+	var inbound_duration = TITLE_BIRD_FLYBY_SECONDS * 0.48
+	var outbound_duration = TITLE_BIRD_FLYBY_SECONDS - inbound_duration
+	var inbound_tween := create_tween()
+	inbound_tween.tween_property(_title_bird_sprite, "position", drop_pos, inbound_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	await inbound_tween.finished
+	var drop_start = _title_bird_sprite.position + Vector2(42.0, 5.0)
+	if is_instance_valid(_title_bird_basket_sprite):
+		drop_start = _title_bird_basket_sprite.global_position
+		_title_bird_basket_sprite.visible = false
+	if is_instance_valid(basket):
+		basket.global_position = drop_start
+		basket.visible = true
+	var drop_tween := create_tween()
+	drop_tween.set_parallel(true)
+	drop_tween.tween_property(_title_bird_sprite, "position", exit_pos, outbound_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	if is_instance_valid(basket):
+		drop_tween.tween_property(basket, "global_position", basket_rest, TITLE_BASKET_DROP_SECONDS).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
+	await drop_tween.finished
+	if is_instance_valid(_title_bird_sprite):
+		_title_bird_sprite.visible = false
+
+
+func _play_title_tuktuk_flyby() -> void:
+	_ensure_title_flyby_nodes()
+	if not is_instance_valid(_title_tuktuk_node):
+		return
+	var view_size = get_viewport_rect().size
+	var basket = _get_title_basket_sprite()
+	var basket_center = _get_title_basket_center(view_size)
+	var start_x = -96.0
+	var pickup_x = basket_center.x - 24.0
+	var exit_x = view_size.x + 112.0
+	var total_distance = maxf(exit_x - start_x, 1.0)
+	var pickup_duration = clampf(((pickup_x - start_x) / total_distance) * TITLE_TUKTUK_FLYBY_SECONDS, 0.55, TITLE_TUKTUK_FLYBY_SECONDS * 0.72)
+	var exit_duration = maxf(TITLE_TUKTUK_FLYBY_SECONDS - pickup_duration, 0.75)
+	_title_tuktuk_node.position = Vector2(start_x, basket_center.y)
+	_title_tuktuk_node.visible = true
+	if is_instance_valid(_title_tuktuk_basket_sprite):
+		_title_tuktuk_basket_sprite.visible = false
+	if is_instance_valid(basket):
+		basket.global_position = basket_center
+		basket.visible = true
+	var pickup_tween := create_tween()
+	pickup_tween.tween_property(_title_tuktuk_node, "position", Vector2(pickup_x, basket_center.y), pickup_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	await pickup_tween.finished
+	if is_instance_valid(basket):
+		basket.visible = false
+	if is_instance_valid(_title_tuktuk_basket_sprite):
+		_title_tuktuk_basket_sprite.visible = true
+	var exit_tween := create_tween()
+	exit_tween.tween_property(_title_tuktuk_node, "position", Vector2(exit_x, basket_center.y), exit_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	await exit_tween.finished
+	if is_instance_valid(_title_tuktuk_node):
+		_title_tuktuk_node.visible = false
+	if is_instance_valid(_title_tuktuk_basket_sprite):
+		_title_tuktuk_basket_sprite.visible = false
+
+
+func _start_title_flyby_cycle() -> void:
+	if _title_flyby_running:
+		return
+	_title_flyby_running = true
+	_run_title_flyby_cycle()
+
+
+func _run_title_flyby_cycle() -> void:
+	await get_tree().process_frame
+	while is_inside_tree() and _title_flyby_running:
+		await _play_title_bird_flyby()
+		await get_tree().create_timer(TITLE_FLYBY_WAIT_SECONDS).timeout
+		await _play_title_tuktuk_flyby()
+		await get_tree().create_timer(TITLE_FLYBY_WAIT_SECONDS).timeout
 
 
 func _connect_viewport_resize_signal() -> void:
@@ -237,8 +561,10 @@ func _apply_responsive_layout() -> void:
 			small_shroom.scale = Vector2(0.42, 0.42)
 		small_shroom.position = Vector2(270.0, 522.0) if compact else Vector2(269.5, 541.5)
 	if is_instance_valid(basket):
-		basket.visible = true
 		basket.position = Vector2(268.5, 520.0) if compact else Vector2(268.5, 534.5)
+		if not _title_flyby_running:
+			basket.visible = true
+	_update_title_score_widgets(view_size, compact, tiny)
 	if is_instance_valid(title):
 		var title_height = 122.0 if tiny else (134.0 if compact else 160.0)
 		var fallback_top = 22.0 if compact else 68.0
@@ -289,7 +615,7 @@ func _reset_run_state() -> void:
 
 func _ready():
 	DisplayServer.window_set_title("Social Soil Gardening")
-	Global.update_high_score()
+	Global.record_last_score()
 	Global.score = 0
 	$CenterContainer/BG.modulate.a = 1
 	$CenterContainer/BG2.modulate.a = 0
@@ -297,9 +623,23 @@ func _ready():
 	$CenterContainer/VBoxContainer/HBoxContainer.visible = false
 	_setup_primary_buttons()
 	_setup_version_label()
+	_ensure_title_score_widgets()
+	_ensure_title_flyby_nodes()
 	_connect_viewport_resize_signal()
 	_apply_responsive_layout()
+	_start_title_flyby_cycle()
 	Global.social_mode = false
+
+
+func _process(delta: float) -> void:
+	_update_title_score_sparkles(delta)
+
+
+func _exit_tree() -> void:
+	_title_flyby_running = false
+	var basket = _get_title_basket_sprite()
+	if is_instance_valid(basket):
+		basket.visible = true
 		
 
 func _on_tutorial_pressed() -> void:

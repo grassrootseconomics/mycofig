@@ -837,6 +837,9 @@ func _on_area_entered(ztrade: Area2D) -> void:
 				_add_villager_family_energy(VILLAGER_FAMILY_ENERGY_MISSING_NUTRIENT)
 			if _villager_has_complete_nutrients():
 				_add_villager_family_energy(VILLAGER_FAMILY_ENERGY_COMPLETE_NPK)
+		var level_root = _story_farmer_get_level_root()
+		if is_instance_valid(level_root) and level_root.has_method("notify_story_phase5_trade_received"):
+			level_root.call("notify_story_phase5_trade_received", self, ztrade)
 		ztrade.call_deferred("queue_free")
 
 

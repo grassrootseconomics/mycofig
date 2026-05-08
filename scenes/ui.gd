@@ -1271,8 +1271,8 @@ func _update_story_instruction_arrows() -> void:
 		var villager_result = _get_phase5_nontrading_villagers_arrow_target()
 		if bool(villager_result.get("ok", false)):
 			var villager_target = villager_result.get("pos", Vector2.ZERO)
-			var villager_start = Vector2(label_rect.position.x + label_rect.size.x * 0.54, label_rect.position.y + label_rect.size.y + 10.0)
-			var villager_control = (villager_start + villager_target) * 0.5 + Vector2(-86.0, 92.0)
+			var villager_start = Vector2(label_rect.position.x + label_rect.size.x * 0.24, label_rect.position.y + label_rect.size.y * 0.56)
+			var villager_control = (villager_start + villager_target) * 0.5 + Vector2(-118.0, 68.0)
 			_set_story_arrow_shape(1, villager_start, villager_control, villager_target)
 		else:
 			_set_story_arrow_visible(1, false)
@@ -1898,22 +1898,34 @@ func refresh_score_rank_display() -> void:
 
 
 func _update_score_rank_display(animate_rank_change: bool = true) -> void:
-	Global.update_high_score(Global.score)
 	var story_mode := _is_story_instruction_mode()
+	if story_mode:
+		if is_instance_valid(_score_label):
+			_score_label.visible = false
+		if is_instance_valid(_high_score_container):
+			_high_score_container.visible = false
+		if is_instance_valid(_rank_label):
+			_rank_label.visible = false
+		_sync_story_facts_button_state()
+		if is_instance_valid(_endgame_container):
+			_endgame_container.visible = is_instance_valid(_story_facts_button) and _story_facts_button.visible
+		return
+
+	Global.update_high_score(Global.score)
 	if is_instance_valid(_score_label):
-		_score_label.visible = not story_mode
+		_score_label.visible = true
 		_score_label.text = Global.format_score_value(Global.score)
 	if is_instance_valid(_high_score_container):
-		_high_score_container.visible = not story_mode
+		_high_score_container.visible = true
 	if is_instance_valid(_high_score_value_label):
 		_high_score_value_label.text = Global.format_score_value(Global.high_score)
 	if is_instance_valid(_rank_label):
-		_rank_label.visible = not story_mode
+		_rank_label.visible = true
 		var rank_key := Global.get_rank_threshold(Global.score)
 		var rank_changed: bool = _last_rank_key >= 0 and rank_key != _last_rank_key
 		_rank_label.text = "Rank: " + str(Global.ranks.get(rank_key, ""))
 		_last_rank_key = rank_key
-		if not story_mode and animate_rank_change and rank_changed:
+		if animate_rank_change and rank_changed:
 			_play_rank_change_attention()
 	_sync_story_facts_button_state()
 	if is_instance_valid(_endgame_container):

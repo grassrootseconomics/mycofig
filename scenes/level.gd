@@ -47,7 +47,8 @@ const STORY_PHASE2_BIRD_WAVE_COUNT := 3
 const CHALLENGE_FARMER_N_AUTOFILL_INTERVAL := 0.20
 const BIRD_FORWARD_TARGET_MIN_X_DELTA := 8.0
 const BASKET_NEAR_PERSON_MAX_TILES := 4
-const STORY_PHASE5_BASKET_R_LIQUIDITY := STORY_VILLAGER_COUNT_PER_ROLE * 3 * 2
+const STORY_PHASE5_REQUIRED_TRADE_CYCLES := 2
+const STORY_PHASE5_BASKET_R_LIQUIDITY := STORY_VILLAGER_COUNT_PER_ROLE * 3 * STORY_PHASE5_REQUIRED_TRADE_CYCLES
 const STORY_PHASE5_FORCED_BASKET_LINK_META := "story_force_phase5_basket_link"
 const STORY_VILLAGE_PERMANENT_REVEAL_BUFFER := 4
 const STORY_PHASE5_OBJECTIVE_KEY := "village_everyone_trading"
@@ -155,7 +156,8 @@ var _story_phase4_reserved_crop_to_farmer_ids: Dictionary = {}
 var _story_phase4_returned_to_myco := false
 var _bird_reserved_crop_to_bird_ids: Dictionary = {}
 var _story_phase5_target_villager_ids: Dictionary = {}
-var _story_phase5_traded_villager_ids: Dictionary = {}
+var _story_phase5_sent_trade_counts: Dictionary = {}
+var _story_phase5_received_trade_counts: Dictionary = {}
 var _story_phase5_all_villagers_trading := false
 var _story_phase5_basket_placed := false
 var _tuktuk_villager_last_trade_seconds: Dictionary = {}
@@ -573,7 +575,8 @@ func _story_reset_phase_state() -> void:
 	_story_phase4_returned_to_myco = false
 	_bird_reserved_crop_to_bird_ids.clear()
 	_story_phase5_target_villager_ids.clear()
-	_story_phase5_traded_villager_ids.clear()
+	_story_phase5_sent_trade_counts.clear()
+	_story_phase5_received_trade_counts.clear()
 	_story_phase5_all_villagers_trading = false
 	_story_phase5_basket_placed = false
 	_tuktuk_villager_last_trade_seconds.clear()
@@ -1180,7 +1183,8 @@ func _can_place_basket_near_person(world_pos: Vector2) -> bool:
 
 func _story_reset_phase5_trading_progress() -> void:
 	_story_phase5_target_villager_ids = _story_collect_villager_ids()
-	_story_phase5_traded_villager_ids.clear()
+	_story_phase5_sent_trade_counts.clear()
+	_story_phase5_received_trade_counts.clear()
 	_story_phase5_all_villagers_trading = false
 	Global.village_objective_flags[STORY_PHASE5_OBJECTIVE_KEY] = false
 
@@ -1308,7 +1312,7 @@ func get_story_phase5_nontrading_lower_villagers_center_world() -> Dictionary:
 		if _is_tuktuk_protected_story_villager(agent):
 			continue
 		var agent_id = int(agent.get_instance_id())
-		if bool(_story_phase5_traded_villager_ids.get(agent_id, false)):
+		if _story_phase5_villager_has_required_cycles(agent_id):
 			continue
 		positions.append(agent.global_position)
 	if positions.is_empty():
@@ -1356,13 +1360,42 @@ func _is_tuktuk_villager_inactive_long_enough(agent: Variant) -> bool:
 	return (_tuktuk_trade_clock - last_trade) >= TUKTUK_MIN_NONTRADING_SECONDS
 
 
-func _story_mark_phase5_villager_trade(agent: Variant) -> void:
+func _story_get_phase5_villager_id(agent: Variant) -> int:
 	if not _is_story_villager(agent):
-		return
+		return 0
 	var key = int(agent.get_instance_id())
 	if not bool(_story_phase5_target_villager_ids.get(key, false)):
+		return 0
+	return key
+
+
+func _story_increment_phase5_count(counts: Dictionary, villager_id: int) -> void:
+	if villager_id == 0:
 		return
-	_story_phase5_traded_villager_ids[key] = true
+	counts[villager_id] = int(counts.get(villager_id, 0)) + 1
+
+
+func _story_mark_phase5_villager_trade_sent(agent: Variant) -> void:
+	_story_increment_phase5_count(_story_phase5_sent_trade_counts, _story_get_phase5_villager_id(agent))
+
+
+func _story_mark_phase5_villager_trade_received(agent: Variant) -> void:
+	_story_increment_phase5_count(_story_phase5_received_trade_counts, _story_get_phase5_villager_id(agent))
+
+
+func _story_phase5_villager_has_required_cycles(villager_id: int) -> bool:
+	if villager_id == 0:
+		return false
+	var sent_count = int(_story_phase5_sent_trade_counts.get(villager_id, 0))
+	var received_count = int(_story_phase5_received_trade_counts.get(villager_id, 0))
+	return sent_count >= STORY_PHASE5_REQUIRED_TRADE_CYCLES and received_count >= STORY_PHASE5_REQUIRED_TRADE_CYCLES
+
+
+func notify_story_phase5_trade_received(receiver: Node, _trade_packet: Area2D) -> void:
+	if not _is_story_mode() or _story_phase_id < 5:
+		return
+	_story_mark_phase5_villager_trade_received(receiver)
+	_story_try_advance_phase_milestones()
 
 
 func _story_update_phase5_trading_completion() -> void:
@@ -1373,7 +1406,7 @@ func _story_update_phase5_trading_completion() -> void:
 	if _story_phase5_target_villager_ids.is_empty():
 		return
 	for villager_id in _story_phase5_target_villager_ids.keys():
-		if not bool(_story_phase5_traded_villager_ids.get(villager_id, false)):
+		if not _story_phase5_villager_has_required_cycles(int(villager_id)):
 			return
 	_story_phase5_all_villagers_trading = true
 	Global.village_objective_flags[STORY_PHASE5_OBJECTIVE_KEY] = true
@@ -2595,8 +2628,7 @@ func _on_agent_trade(path_dict) -> void:
 		_mark_tuktuk_villager_trade_activity(from_agent)
 		_mark_tuktuk_villager_trade_activity(to_agent)
 		if _is_story_mode() and _story_phase_id >= 5:
-			_story_mark_phase5_villager_trade(from_agent)
-			_story_mark_phase5_villager_trade(to_agent)
+			_story_mark_phase5_villager_trade_sent(from_agent)
 			_story_try_advance_phase_milestones()
 	call_deferred("_spawn_trade", path_dict)
 

@@ -64,6 +64,10 @@ func _has_complete_nutrient_set() -> bool:
 	return true
 
 
+func _is_dead_resource_bar_visual() -> bool:
+	return myco_stage == MycoGrowthStage.DEAD or super._is_dead_resource_bar_visual()
+
+
 func _load_myco_texture(path: String) -> Texture2D:
 	if not ResourceLoader.exists(path):
 		return null
@@ -163,6 +167,7 @@ func _has_supporting_neighbors() -> bool:
 	var agents_root = get_node_or_null("../../Agents")
 	if not is_instance_valid(agents_root):
 		return false
+	var level_root = _get_level_root()
 	for child in agents_root.get_children():
 		if not is_instance_valid(child):
 			continue
@@ -175,7 +180,9 @@ func _has_supporting_neighbors() -> bool:
 			continue
 		if not _can_share_story_trade_network(child):
 			continue
-		if global_position.distance_to(child.global_position) <= buddy_radius:
+		if LevelHelpersRef.are_agents_in_tile_reach(level_root, self, child, false):
+			return true
+		if not LevelHelpersRef._supports_tile_world(level_root) and global_position.distance_to(child.global_position) <= buddy_radius:
 			return true
 	return false
 
@@ -188,6 +195,7 @@ func _set_myco_stage(new_stage: int, force: bool = false) -> void:
 	myco_harvest_ready = myco_stage == MycoGrowthStage.POD_READY
 	draggable = myco_stage != MycoGrowthStage.DEAD
 	if myco_stage == MycoGrowthStage.DEAD:
+		_hide_resource_bars()
 		_clear_active_selection_if_self()
 
 	if is_instance_valid(sprite_myco):
@@ -460,7 +468,7 @@ func set_variables(a_dict) -> void:
 	setup_resource_bars(["N", "P", "K", "R"])
 	
 
-# Search for things to trade with in a radius
+# Search for things to trade with in tile reach
 func generate_buddies() -> void:
 	var agents_root = get_node_or_null("../../Agents")
 	trade_buddies = LevelHelpersRef.query_trade_hubs_near_agent(_get_level_root(), agents_root, self, num_buddies, false)

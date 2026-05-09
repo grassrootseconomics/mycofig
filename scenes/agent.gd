@@ -306,6 +306,16 @@ func setup_resource_bars(asset_keys: Array = [], force_hidden: bool = false) -> 
 	_update_bar_positions()
 
 
+func _hide_resource_bars() -> void:
+	_hover_visual_focus = false
+	if is_instance_valid(bar_canvas):
+		bar_canvas.visible = false
+
+
+func _is_dead_resource_bar_visual() -> bool:
+	return _is_bean_lifecycle_enabled() and bean_stage == BeanGrowthStage.DEAD
+
+
 func _is_selected_agent() -> bool:
 	if not is_instance_valid(Global.active_agent):
 		return false
@@ -315,7 +325,7 @@ func _is_selected_agent() -> bool:
 func _should_show_resource_bars() -> bool:
 	if not is_instance_valid(bar_canvas):
 		return false
-	if dead or caught_by != null:
+	if dead or caught_by != null or _is_dead_resource_bar_visual():
 		return false
 	if _resource_bars_overlap_core_ui():
 		return false
@@ -1169,14 +1179,19 @@ func _get_lifecycle_spawn_anchor() -> Variant:
 		return null
 	if not _can_share_story_trade_network(anchor):
 		return null
-	var reach = anchor.get("buddy_radius")
-	var max_dist := 0.0
-	if typeof(reach) == TYPE_FLOAT or typeof(reach) == TYPE_INT:
-		max_dist = maxf(float(reach), 0.0)
-	if max_dist <= 0.0:
-		return null
-	if global_position.distance_to(anchor.global_position) > max_dist:
-		return null
+	var level_root = _get_level_root()
+	if LevelHelpersRef._supports_tile_world(level_root):
+		if not LevelHelpersRef.are_agents_in_tile_reach(level_root, self, anchor, true):
+			return null
+	else:
+		var reach = anchor.get("buddy_radius")
+		var max_dist := 0.0
+		if typeof(reach) == TYPE_FLOAT or typeof(reach) == TYPE_INT:
+			max_dist = maxf(float(reach), 0.0)
+		if max_dist <= 0.0:
+			return null
+		if global_position.distance_to(anchor.global_position) > max_dist:
+			return null
 	return anchor
 
 
@@ -1509,6 +1524,7 @@ func _set_bean_stage(new_stage: int, force: bool = false) -> void:
 		bean_residue_emitted = false
 	draggable = bean_stage != BeanGrowthStage.DEAD
 	if bean_stage == BeanGrowthStage.DEAD:
+		_hide_resource_bars()
 		if not bean_death_preserve_stage_visual:
 			bean_death_visual_stage = BeanGrowthStage.DEAD
 		elif bean_death_visual_stage == BeanGrowthStage.DEAD:
@@ -2185,6 +2201,8 @@ func logistics():
 func kill_it():
 	#new_alpha = low_alpha
 	#self.queue_free()
+	self.dead = true
+	_hide_resource_bars()
 	_clear_drag_tile_hint()
 	_tile_snap_in_progress = false
 	_harvest_drag_only = false
@@ -2194,7 +2212,6 @@ func kill_it():
 		Global.is_dragging = false
 	LevelHelpersRef.unregister_agent_occupancy(_get_level_root(), self)
 	self.call_deferred("queue_free")
-	self.dead = true
 	_refresh_tree_harvest_acorn_visual()
 	set_hover_focus(false)
 	var level_root = _get_level_root()
@@ -2225,6 +2242,7 @@ func kill_it():
 
 
 func _exit_tree() -> void:
+	_hide_resource_bars()
 	_clear_drag_tile_hint()
 	_end_harvest_drag_proxy()
 	LevelHelpersRef.unregister_agent_occupancy(_get_level_root(), self)
@@ -2482,7 +2500,7 @@ func _process(delta: float) -> void:
 
 
 
-# Search for things to trade with in a radius
+# Search for things to trade with in tile reach
 func generate_buddies() -> void:
 	var agents_root = get_node_or_null("../../Agents")
 	trade_buddies = LevelHelpersRef.query_trade_hubs_near_agent(_get_level_root(), agents_root, self, num_buddies, true)

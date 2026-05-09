@@ -33,7 +33,7 @@ func set_variables(a_dict) -> void:
 	setup_resource_bars(assets.keys())
 
 
-# Search for things to trade with in a radius
+# Search for things to trade with in tile reach
 func generate_buddies() -> void:
 	num_connectors = 0
 	var agents_root = get_node_or_null("../../Agents")
@@ -306,9 +306,10 @@ func _on_area_entered(trade: Area2D) -> void:
 func kill_it():
 	#new_alpha = low_alpha
 	#self.queue_free()
+	self.dead = true
+	_hide_resource_bars()
 	LevelHelpersRef.unregister_agent_occupancy(get_node_or_null("../.."), self)
 	self.call_deferred("queue_free")
-	self.dead = true
 	if Global.active_agent != null:
 		if is_instance_valid(Global.active_agent) and Global.active_agent.name == self.name:
 			LevelHelpersRef.clear_focus_outline_if_owner(get_node_or_null("../.."), self)

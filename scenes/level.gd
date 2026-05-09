@@ -1292,13 +1292,10 @@ func _should_link_village_person_to_basket(agent: Node, basket: Node) -> bool:
 		return true
 	if not _is_challenge_dual_village_runtime():
 		return false
-	var agent_radius = agent.get("buddy_radius")
-	var basket_radius = basket.get("buddy_radius")
-	var reach := float(Global.social_buddy_radius)
-	if typeof(agent_radius) == TYPE_FLOAT or typeof(agent_radius) == TYPE_INT:
-		reach = maxf(reach, float(agent_radius))
-	if typeof(basket_radius) == TYPE_FLOAT or typeof(basket_radius) == TYPE_INT:
-		reach = maxf(reach, float(basket_radius))
+	if LevelHelpersRef._supports_tile_world(self):
+		return LevelHelpersRef.are_agents_in_shared_tile_reach(self, agent, basket)
+	var reach := maxf(float(Global.social_buddy_radius), LevelHelpersRef._get_agent_interaction_radius(agent))
+	reach = maxf(reach, LevelHelpersRef._get_agent_interaction_radius(basket))
 	return agent.global_position.distance_to(basket.global_position) <= reach
 
 

@@ -954,16 +954,90 @@ static func _is_village_bank_trade_hub(seeker: Variant, candidate: Variant) -> b
 	return _is_village_person_actor(seeker)
 
 
-static func _append_trade_hub_candidate(results: Array, seen: Dictionary, seeker: Node, candidate: Variant, use_candidate_radius: bool, max_results: int) -> bool:
+static func are_agents_in_neighboring_tiles(level_root: Node, agent_a: Variant, agent_b: Variant, max_tile_delta: int = 1) -> bool:
+	if not _supports_tile_world(level_root):
+		return false
+	if not is_instance_valid(agent_a) or not is_instance_valid(agent_b):
+		return false
+	var tiles_a = get_agent_occupied_tiles(level_root, agent_a)
+	var tiles_b = get_agent_occupied_tiles(level_root, agent_b)
+	if tiles_a.is_empty() or tiles_b.is_empty():
+		return false
+	var max_delta = maxi(max_tile_delta, 0)
+	for coord_a_variant in tiles_a:
+		var coord_a = Vector2i(coord_a_variant)
+		for coord_b_variant in tiles_b:
+			var coord_b = Vector2i(coord_b_variant)
+			if maxi(abs(coord_a.x - coord_b.x), abs(coord_a.y - coord_b.y)) <= max_delta:
+				return true
+	return false
+
+
+static func get_tile_reach_delta_for_radius(level_root: Node, radius_px: float) -> int:
+	if not _supports_tile_world(level_root):
+		return 0
+	var world = _get_world_foundation(level_root)
+	var tile_size = float(world.get("tile_size"))
+	if tile_size <= 0.0:
+		tile_size = 64.0
+	return maxi(1, int(floor((maxf(radius_px, 0.0) / tile_size) + 0.001)))
+
+
+static func get_agent_tile_reach_delta(level_root: Node, agent: Variant) -> int:
+	if not is_instance_valid(agent):
+		return 0
+	return get_tile_reach_delta_for_radius(level_root, _get_agent_interaction_radius(agent))
+
+
+static func are_agents_in_tile_reach(level_root: Node, seeker: Variant, candidate: Variant, use_candidate_reach: bool = true) -> bool:
+	if not _supports_tile_world(level_root):
+		return false
+	var reach_agent = candidate if use_candidate_reach else seeker
+	var max_tile_delta = get_agent_tile_reach_delta(level_root, reach_agent)
+	return are_agents_in_neighboring_tiles(level_root, seeker, candidate, max_tile_delta)
+
+
+static func are_agents_in_shared_tile_reach(level_root: Node, agent_a: Variant, agent_b: Variant) -> bool:
+	if not _supports_tile_world(level_root):
+		return false
+	var max_tile_delta = maxi(get_agent_tile_reach_delta(level_root, agent_a), get_agent_tile_reach_delta(level_root, agent_b))
+	return are_agents_in_neighboring_tiles(level_root, agent_a, agent_b, max_tile_delta)
+
+
+static func is_world_pos_in_agent_tile_reach(level_root: Node, world_pos: Vector2, agent: Variant, max_tile_delta: int = -1) -> bool:
+	if not _supports_tile_world(level_root):
+		return false
+	if not is_instance_valid(agent):
+		return false
+	var world = _get_world_foundation(level_root)
+	var anchor_coord = Vector2i(world.world_to_tile(world_pos))
+	if world.has_method("in_bounds") and not world.in_bounds(anchor_coord):
+		return false
+	var reach_delta = max_tile_delta
+	if reach_delta < 0:
+		reach_delta = get_agent_tile_reach_delta(level_root, agent)
+	var agent_tiles = get_agent_occupied_tiles(level_root, agent)
+	for coord_variant in agent_tiles:
+		var coord = Vector2i(coord_variant)
+		if maxi(abs(anchor_coord.x - coord.x), abs(anchor_coord.y - coord.y)) <= reach_delta:
+			return true
+	return false
+
+
+static func _append_trade_hub_candidate(results: Array, seen: Dictionary, seeker: Node, candidate: Variant, use_candidate_radius: bool, max_results: int, level_root: Node) -> bool:
 	if not _is_trade_hub_candidate(seeker, candidate):
 		return false
 	var candidate_id = int(candidate.get_instance_id())
 	if seen.has(candidate_id):
 		return false
 	seen[candidate_id] = true
-	var reach = _get_agent_interaction_radius(candidate) if use_candidate_radius else _get_agent_interaction_radius(seeker)
-	if seeker.global_position.distance_to(candidate.global_position) > reach:
-		return false
+	if _supports_tile_world(level_root):
+		if not are_agents_in_tile_reach(level_root, seeker, candidate, use_candidate_radius):
+			return false
+	else:
+		var reach = _get_agent_interaction_radius(candidate) if use_candidate_radius else _get_agent_interaction_radius(seeker)
+		if seeker.global_position.distance_to(candidate.global_position) > reach:
+			return false
 	results.append(candidate)
 	return max_results > 0 and results.size() >= max_results
 
@@ -1003,14 +1077,14 @@ static func query_trade_hubs_near_agent(level_root: Node, agents_root: Node, see
 				if typeof(occupants_variant) != TYPE_ARRAY:
 					continue
 				for candidate in occupants_variant:
-					_append_trade_hub_candidate(results, seen, seeker, candidate, use_candidate_radius, 0)
+					_append_trade_hub_candidate(results, seen, seeker, candidate, use_candidate_radius, 0, level_root)
 		if not results.is_empty():
 			return _trim_trade_hub_results(results, seeker, max_results)
 
 	if not is_instance_valid(agents_root):
 		return results
 	for candidate in agents_root.get_children():
-		_append_trade_hub_candidate(results, seen, seeker, candidate, use_candidate_radius, 0)
+		_append_trade_hub_candidate(results, seen, seeker, candidate, use_candidate_radius, 0, level_root)
 	return _trim_trade_hub_results(results, seeker, max_results)
 
 
@@ -1090,6 +1164,9 @@ static func _append_unique_buddy(agent: Node, buddy: Node) -> void:
 static func _is_within_anchor_radius(spawned_agent: Node, anchor: Node) -> bool:
 	if not is_instance_valid(spawned_agent) or not is_instance_valid(anchor):
 		return false
+	var level_root = spawned_agent.get_node_or_null("../..")
+	if _supports_tile_world(level_root):
+		return are_agents_in_tile_reach(level_root, spawned_agent, anchor, true)
 	return spawned_agent.global_position.distance_to(anchor.global_position) <= _get_agent_interaction_radius(anchor)
 
 
@@ -1153,9 +1230,17 @@ static func _mark_nearby_agents_dirty_from_occupancy(level_root: Node, agents_ro
 					if seen.has(agent_id):
 						continue
 					seen[agent_id] = true
-					var pair_reach = maxf(moved_reach, _get_agent_interaction_radius(agent)) + 48.0
-					var near_old = agent.global_position.distance_to(old_pos) <= pair_reach
-					var near_new = agent.global_position.distance_to(new_pos) <= pair_reach
+					var near_old := false
+					var near_new := false
+					if _supports_tile_world(level_root):
+						var moved_delta = get_tile_reach_delta_for_radius(level_root, moved_reach)
+						var pair_delta = maxi(moved_delta, get_agent_tile_reach_delta(level_root, agent)) + 1
+						near_old = is_world_pos_in_agent_tile_reach(level_root, old_pos, agent, pair_delta)
+						near_new = is_world_pos_in_agent_tile_reach(level_root, new_pos, agent, pair_delta)
+					else:
+						var pair_reach = maxf(moved_reach, _get_agent_interaction_radius(agent)) + 48.0
+						near_old = agent.global_position.distance_to(old_pos) <= pair_reach
+						near_new = agent.global_position.distance_to(new_pos) <= pair_reach
 					if near_old or near_new:
 						_queue_agent_dirty(level_root, agent, true, true, false)
 	return true
@@ -1177,9 +1262,17 @@ static func mark_agents_dirty_for_movement(level_root: Node, agents_root: Node, 
 			continue
 		if str(agent.get("type")) == "cloud":
 			continue
-		var pair_reach = maxf(moved_reach, _get_agent_interaction_radius(agent)) + 48.0
-		var near_old = agent.global_position.distance_to(old_pos) <= pair_reach
-		var near_new = agent.global_position.distance_to(new_pos) <= pair_reach
+		var near_old := false
+		var near_new := false
+		if _supports_tile_world(level_root):
+			var moved_delta = get_tile_reach_delta_for_radius(level_root, moved_reach)
+			var pair_delta = maxi(moved_delta, get_agent_tile_reach_delta(level_root, agent)) + 1
+			near_old = is_world_pos_in_agent_tile_reach(level_root, old_pos, agent, pair_delta)
+			near_new = is_world_pos_in_agent_tile_reach(level_root, new_pos, agent, pair_delta)
+		else:
+			var pair_reach = maxf(moved_reach, _get_agent_interaction_radius(agent)) + 48.0
+			near_old = agent.global_position.distance_to(old_pos) <= pair_reach
+			near_new = agent.global_position.distance_to(new_pos) <= pair_reach
 		if near_old or near_new:
 			_queue_agent_dirty(level_root, agent, true, true, false)
 
@@ -1201,8 +1294,15 @@ static func mark_agents_dirty_for_spawn(level_root: Node, agents_root: Node, spa
 			continue
 		if str(agent.get("type")) == "cloud":
 			continue
-		var pair_reach = maxf(spawn_reach, _get_agent_interaction_radius(agent)) + 48.0
-		if agent.global_position.distance_to(spawn_pos) <= pair_reach:
+		var near_spawn := false
+		if _supports_tile_world(level_root):
+			var spawn_delta = get_tile_reach_delta_for_radius(level_root, spawn_reach)
+			var pair_delta = maxi(spawn_delta, get_agent_tile_reach_delta(level_root, agent)) + 1
+			near_spawn = is_world_pos_in_agent_tile_reach(level_root, spawn_pos, agent, pair_delta)
+		else:
+			var pair_reach = maxf(spawn_reach, _get_agent_interaction_radius(agent)) + 48.0
+			near_spawn = agent.global_position.distance_to(spawn_pos) <= pair_reach
+		if near_spawn:
 			_queue_agent_dirty(level_root, agent, true, true, false)
 
 
@@ -2137,6 +2237,7 @@ static func update_inventory_connection_preview(level_root: Node, agents_root: N
 	var preview_is_basket = safe_type == "basket"
 	var preview_is_village_actor = _is_preview_village_item_type(safe_type)
 	var myco_radius = _get_preview_myco_radius(agents_root)
+	var preview_myco_tile_delta = get_tile_reach_delta_for_radius(level_root, myco_radius)
 	for agent in agents_root.get_children():
 		if not _is_preview_candidate(agent):
 			continue
@@ -2148,28 +2249,41 @@ static func update_inventory_connection_preview(level_root: Node, agents_root: N
 		if preview_is_basket and _is_village_runtime():
 			if not _is_preview_village_basket_target(agent):
 				continue
-			var basket_reach = myco_radius
-			var reach = agent.get("buddy_radius")
-			if typeof(reach) == TYPE_FLOAT or typeof(reach) == TYPE_INT:
-				basket_reach = maxf(basket_reach, float(reach))
-			if anchor_world.distance_to(agent.global_position) > basket_reach:
-				continue
+			var basket_reach_delta = maxi(preview_myco_tile_delta, get_agent_tile_reach_delta(level_root, agent))
+			if _supports_tile_world(level_root):
+				if not is_world_pos_in_agent_tile_reach(level_root, anchor_world, agent, basket_reach_delta):
+					continue
+			else:
+				var basket_reach = myco_radius
+				var reach = agent.get("buddy_radius")
+				if typeof(reach) == TYPE_FLOAT or typeof(reach) == TYPE_INT:
+					basket_reach = maxf(basket_reach, float(reach))
+				if anchor_world.distance_to(agent.global_position) > basket_reach:
+					continue
 			_add_preview_l_pair(lines_root, preview_lines, anchor_world, agent.global_position, preview_color)
 		elif preview_is_myco:
 			if agent_type == "myco" or agent_type == "cloud":
 				continue
-			if anchor_world.distance_to(agent.global_position) > myco_radius:
-				continue
+			if _supports_tile_world(level_root):
+				if not is_world_pos_in_agent_tile_reach(level_root, anchor_world, agent, preview_myco_tile_delta):
+					continue
+			else:
+				if anchor_world.distance_to(agent.global_position) > myco_radius:
+					continue
 			_add_preview_l_pair(lines_root, preview_lines, anchor_world, agent.global_position, preview_color)
 		else:
 			if agent_type != "myco":
 				continue
-			var reach = agent.get("buddy_radius")
-			var buddy_radius = myco_radius
-			if typeof(reach) == TYPE_FLOAT or typeof(reach) == TYPE_INT:
-				buddy_radius = max(float(reach), 24.0)
-			if anchor_world.distance_to(agent.global_position) > buddy_radius:
-				continue
+			if _supports_tile_world(level_root):
+				if not is_world_pos_in_agent_tile_reach(level_root, anchor_world, agent):
+					continue
+			else:
+				var reach = agent.get("buddy_radius")
+				var buddy_radius = myco_radius
+				if typeof(reach) == TYPE_FLOAT or typeof(reach) == TYPE_INT:
+					buddy_radius = max(float(reach), 24.0)
+				if anchor_world.distance_to(agent.global_position) > buddy_radius:
+					continue
 			_add_preview_l_pair(lines_root, preview_lines, agent.global_position, anchor_world, preview_color)
 
 

@@ -1,5 +1,6 @@
 extends Agent
 
+const SocialLevelHelpersRef = preload("res://scenes/level_helpers.gd")
 const STORY_FARMER_HARVEST_IDLE := "idle"
 const STORY_FARMER_HARVEST_MOVING_TO_CROP := "moving_to_crop"
 const STORY_FARMER_HARVEST_RETURNING_HOME := "returning_home"
@@ -18,8 +19,7 @@ const VILLAGER_FAMILY_ENERGY_MISSING_NUTRIENT := 2
 const VILLAGER_FAMILY_ENERGY_COMPLETE_NPK := 1
 const VILLAGER_FAMILY_RETRY_TICKS := 24
 const VILLAGER_NUTRIENTS := ["N", "P", "K"]
-const DEFAULT_WORLD_TILE_SIZE := 64.0
-const DIRECT_PERSON_TRADE_RADIUS_TILE_REDUCTION := 1.0
+const DIRECT_PERSON_TRADE_TILE_REDUCTION := 1
 
 var trade_queue = []
 var is_trading = false
@@ -589,27 +589,24 @@ func _person_has_return_surplus(person: Variant, requested_res: String, amount: 
 	return float(person.assets[requested_res]) - float(person.needs[requested_res]) >= float(amount)
 
 
-func _get_direct_person_trade_tile_size() -> float:
-	var tile_size := DEFAULT_WORLD_TILE_SIZE
+func _get_direct_person_trade_reach_delta(target: Variant) -> int:
 	var level_root = _story_farmer_get_level_root()
-	if is_instance_valid(level_root) and level_root.has_method("_get_world_foundation"):
-		var world: Variant = level_root.call("_get_world_foundation")
-		if typeof(world) == TYPE_OBJECT and is_instance_valid(world):
-			var raw_tile_size = world.get("tile_size")
-			if typeof(raw_tile_size) == TYPE_FLOAT or typeof(raw_tile_size) == TYPE_INT:
-				tile_size = maxf(float(raw_tile_size), 1.0)
-	return tile_size
+	var self_delta = SocialLevelHelpersRef.get_agent_tile_reach_delta(level_root, self)
+	var target_delta = SocialLevelHelpersRef.get_agent_tile_reach_delta(level_root, target)
+	return maxi(1, int(min(self_delta, target_delta)) - DIRECT_PERSON_TRADE_TILE_REDUCTION)
 
 
-func _get_direct_person_trade_reach(target: Variant) -> float:
+func _can_reach_direct_person_trade(target: Variant) -> bool:
+	var level_root = _story_farmer_get_level_root()
+	if SocialLevelHelpersRef._supports_tile_world(level_root):
+		return SocialLevelHelpersRef.are_agents_in_neighboring_tiles(level_root, self, target, _get_direct_person_trade_reach_delta(target))
 	var self_reach = float(buddy_radius)
 	var target_reach = self_reach
 	if is_instance_valid(target):
 		var target_radius = target.get("buddy_radius")
 		if typeof(target_radius) == TYPE_FLOAT or typeof(target_radius) == TYPE_INT:
 			target_reach = float(target_radius)
-	var tile_reduction = _get_direct_person_trade_tile_size() * DIRECT_PERSON_TRADE_RADIUS_TILE_REDUCTION
-	return maxf(minf(self_reach, target_reach) - tile_reduction, 1.0)
+	return global_position.distance_to(target.global_position) <= minf(self_reach, target_reach)
 
 
 func _try_send_direct_person_liquidity_swap(requested_res: String, debug_mode: bool = false) -> bool:
@@ -631,7 +628,7 @@ func _try_send_direct_person_liquidity_swap(requested_res: String, debug_mode: b
 			continue
 		if bool(child.get("dead")):
 			continue
-		if global_position.distance_to(child.global_position) > _get_direct_person_trade_reach(child):
+		if not _can_reach_direct_person_trade(child):
 			continue
 		if not _person_can_accept_r_for_swap(child, 1):
 			continue

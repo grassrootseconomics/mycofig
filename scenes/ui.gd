@@ -21,6 +21,7 @@ var inventory_spawn_rng := RandomNumberGenerator.new()
 const INVENTORY_DRAG_THRESHOLD_MOUSE := 8.0
 const INVENTORY_DRAG_THRESHOLD_TOUCH := 18.0
 const INVENTORY_TOUCH_MOUSE_SUPPRESS_MSEC := 550
+const INVENTORY_MOBILE_SELECT_PROTECT_MSEC := 1400
 const AUTO_SPAWN_ATTEMPTS := 96
 const AUTO_SPAWN_SWEEP_STEPS := 48
 const PARENT_BOUNDED_AUTO_ATTEMPTS := 96
@@ -124,6 +125,7 @@ var _slot_items: Array = []
 var _inventory_texture_cache: Dictionary = {}
 var _active_touch_drag_id := -1
 var _inventory_touch_mouse_suppress_until_msec := 0
+var _inventory_mobile_select_protect_until_msec := 0
 var _slot_backplates: Dictionary = {}
 var _slot_lock_glyphs: Dictionary = {}
 var _slot_selection_frames: Dictionary = {}
@@ -2510,6 +2512,17 @@ func _is_emulated_mouse_after_touch_suppressed() -> bool:
 	return Time.get_ticks_msec() < _inventory_touch_mouse_suppress_until_msec
 
 
+func _protect_mobile_inventory_selection() -> void:
+	_inventory_mobile_select_protect_until_msec = maxi(
+		_inventory_mobile_select_protect_until_msec,
+		Time.get_ticks_msec() + INVENTORY_MOBILE_SELECT_PROTECT_MSEC
+	)
+
+
+func _is_mobile_inventory_selection_protected() -> bool:
+	return Time.get_ticks_msec() < _inventory_mobile_select_protect_until_msec
+
+
 func _start_inventory_drag(agent_name: String, mouse_pos: Vector2) -> void:
 	_ensure_drag_preview()
 	var icon: TextureRect = null
@@ -3161,6 +3174,8 @@ func _on_inventory_pointer_pressed(screen_pos: Vector2, from_touch: bool = false
 		if _selected_inventory_item != selected:
 			_select_inventory_item(selected)
 			_pointer_press_selection_changed = true
+			if from_touch or Global.is_mobile_platform:
+				_protect_mobile_inventory_selection()
 	if _selected_inventory_item != "":
 		_update_selected_tile_hint(screen_pos)
 		_update_minimap_input_lock()
@@ -3200,6 +3215,11 @@ func _on_inventory_pointer_released(screen_pos: Vector2, from_touch: bool = fals
 	if pressed_item != "" and pressed_item == active_item and not selection_changed:
 		var released_item = _get_inventory_agent_at(screen_pos)
 		if released_item == active_item:
+			if (from_touch or Global.is_mobile_platform) and _is_mobile_inventory_selection_protected():
+				_refresh_inventory_selection_visuals()
+				_update_selected_tile_hint(screen_pos)
+				_update_minimap_input_lock()
+				return
 			_clear_inventory_selection()
 			return
 	if pressed_item != "" and pressed_item == active_item and selection_changed:

@@ -82,7 +82,7 @@ Fungi help plant roots find water and nutrients. Strong communities work in a si
 A healthy garden grows enough to feed people, seeds, and wildlife. If something gets eaten, plant again and keep the garden growing.",
 	3: "Different plants bring different strengths.
 
-Beans help the soil. Squash shades the ground. Maize feeds people. Trees help with water and shelter.
+Beans help fix nitrogen (Green). Squash shades the ground and provide Potassium (Organge). Maize provides phosphorous (Poink) and structure for the beans to climb. Trees help with water (Blue) and shelter.
 
 Mushroom roots (fungi) connect plants so they can share water and nutrients.
 ",
@@ -3395,10 +3395,10 @@ func _on_quit_button_pressed() -> void:
 
 func _on_pause_button_pressed() -> void:
 	if is_instance_valid(_story_facts_panel) and _story_facts_panel.visible:
-		set_pause_state(true)
+		_on_story_facts_close_pressed()
 		return
 	if _is_guidance_instruction_mode() and is_instance_valid(_tutorial_panel) and _tutorial_panel.visible and not _tutorial_collapsed:
-		set_pause_state(true)
+		_on_tutorial_continue_pressed()
 		return
 	var next_paused = not get_tree().paused
 	set_pause_state(next_paused)

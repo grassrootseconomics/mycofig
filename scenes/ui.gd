@@ -82,7 +82,7 @@ Fungi help plant roots find water and nutrients. Strong communities work in a si
 A healthy garden grows enough to feed people, seeds, and wildlife. If something gets eaten, plant again and keep the garden growing.",
 	3: "Different plants bring different strengths.
 
-Beans help fix nitrogen (Green). Squash shades the ground and provide potassium (Organge). Maize provides phosphorous (Poink) and structure for the beans to climb. Trees help with water (Blue) and shelter.
+Beans help fix nitrogen (Green). Squash shades the ground and provide potassium (Organge). Maize provides phosphorous (Pink) and structure for the beans to climb. Trees help with water (Blue) and shelter.
 
 Mushroom roots (fungi) connect plants so they can share water and nutrients.
 ",

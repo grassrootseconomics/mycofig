@@ -88,7 +88,7 @@ Mushroom roots (fungi) connect plants so they can share water and nutrients.
 ",
 	4: "Healthy people need healthy soil.
 
-In the village, farmers grow food (Green), vendors share goods (Orange), cooks make meals (Pink), and the bank has money (Bank). A real community works best when all these parts can help each other.",
+In the village, farmers grow food, vendors share goods, cooks make meals, and the bank has money. A real community works best when all these parts can help each other.",
 	5: "People can fairly exchange, lend, borrow, rotate, gift, pool and share their goods and services - 
 	 even without money!
 

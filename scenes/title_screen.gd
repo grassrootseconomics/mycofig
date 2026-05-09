@@ -3,6 +3,8 @@ extends Control
 const TITLE_COMPACT_SHORT_EDGE := 640.0
 const TITLE_TINY_SHORT_EDGE := 500.0
 const GE_LOGO_PATH := "res://graphics/ge-logo-horizontal-text.png"
+const TITLE_SOIL_BACKGROUND_PATH := "res://graphics/soil_end.jpeg"
+const TITLE_ART_BACKGROUND_PATH := "res://graphics/social.png"
 const TITLE_SCORE_STAR_COUNT := 12
 const TITLE_BIRD_FRAME_PATHS := [
 	"res://graphics/bird1.png",
@@ -18,6 +20,9 @@ const TITLE_TUKTUK_FLYBY_SECONDS := 4.2
 const TITLE_FLYBY_WAIT_SECONDS := 1.5
 
 var _ge_logo_texture: Texture2D = null
+var _title_soil_background: TextureRect = null
+var _title_art_background: TextureRect = null
+var _title_pending_layout_frames := 0
 var _last_score_label: Label = null
 var _high_score_label: Label = null
 var _title_score_star_layer: Control = null
@@ -544,25 +549,85 @@ func _connect_viewport_resize_signal() -> void:
 
 func _on_viewport_size_changed() -> void:
 	_apply_responsive_layout()
+	_request_title_layout_refresh(3)
 
 
-func _fit_title_background(bg: Sprite2D, view_size: Vector2) -> void:
-	if not is_instance_valid(bg) or not is_instance_valid(bg.texture):
+func _request_title_layout_refresh(frames: int = 3) -> void:
+	_title_pending_layout_frames = maxi(_title_pending_layout_frames, frames)
+	call_deferred("_apply_responsive_layout")
+
+
+func _load_title_texture(path: String) -> Texture2D:
+	var texture: Resource = load(path)
+	if texture is Texture2D:
+		return texture as Texture2D
+	return null
+
+
+func _configure_title_background_rect(rect: TextureRect, z_index: int, texture_path: String) -> void:
+	if not is_instance_valid(rect):
 		return
-	var texture_size = bg.texture.get_size()
-	if texture_size.x <= 0.0 or texture_size.y <= 0.0:
-		return
-	var cover_scale = maxf(view_size.x / texture_size.x, view_size.y / texture_size.y)
-	bg.scale = Vector2.ONE * cover_scale
-	var parent_control = bg.get_parent() as Control
-	var parent_global_pos = parent_control.global_position if is_instance_valid(parent_control) else Vector2.ZERO
-	bg.position = view_size * 0.5 - parent_global_pos
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rect.z_as_relative = false
+	rect.z_index = z_index
+	rect.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	rect.offset_left = 0.0
+	rect.offset_top = 0.0
+	rect.offset_right = 0.0
+	rect.offset_bottom = 0.0
+	var texture = _load_title_texture(texture_path)
+	if is_instance_valid(texture):
+		rect.texture = texture
+
+
+func _ensure_responsive_background_nodes() -> void:
+	if not is_instance_valid(_title_soil_background):
+		_title_soil_background = TextureRect.new()
+		_title_soil_background.name = "ResponsiveSoilBackground"
+		add_child(_title_soil_background)
+		_configure_title_background_rect(_title_soil_background, -120, TITLE_SOIL_BACKGROUND_PATH)
+	if not is_instance_valid(_title_art_background):
+		_title_art_background = TextureRect.new()
+		_title_art_background.name = "ResponsiveTitleArt"
+		add_child(_title_art_background)
+		_configure_title_background_rect(_title_art_background, -110, TITLE_ART_BACKGROUND_PATH)
+	move_child(_title_soil_background, 0)
+	move_child(_title_art_background, 1)
+	_hide_legacy_background_nodes()
+
+
+func _hide_legacy_background_nodes() -> void:
+	for path in ["CenterContainer/BG", "CenterContainer/BG2"]:
+		var bg := get_node_or_null(path) as Sprite2D
+		if is_instance_valid(bg):
+			bg.visible = false
+
+
+func _layout_responsive_background(view_size: Vector2) -> void:
+	_ensure_responsive_background_nodes()
+	if is_instance_valid(_title_soil_background):
+		_title_soil_background.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_title_soil_background.offset_left = 0.0
+		_title_soil_background.offset_top = 0.0
+		_title_soil_background.offset_right = 0.0
+		_title_soil_background.offset_bottom = 0.0
+		_title_soil_background.visible = true
+		_title_soil_background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		_title_soil_background.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	if is_instance_valid(_title_art_background):
+		var art_size = maxf(view_size.y, 1.0)
+		_title_art_background.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		_title_art_background.position = Vector2(round((view_size.x - art_size) * 0.5), 0.0)
+		_title_art_background.size = Vector2(art_size, art_size)
+		_title_art_background.visible = true
+		_title_art_background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		_title_art_background.stretch_mode = TextureRect.STRETCH_SCALE
 
 
 func _apply_responsive_layout() -> void:
 	var view_size = get_viewport_rect().size
-	_fit_title_background($CenterContainer/BG, view_size)
-	_fit_title_background($CenterContainer/BG2, view_size)
+	_layout_responsive_background(view_size)
 	var short_edge = minf(view_size.x, view_size.y)
 	var compact = Global.is_mobile_platform or short_edge <= TITLE_COMPACT_SHORT_EDGE
 	var tiny = short_edge <= TITLE_TINY_SHORT_EDGE
@@ -727,9 +792,7 @@ func _ready():
 	DisplayServer.window_set_title("Social Soil")
 	Global.record_last_score()
 	Global.score = 0
-	$CenterContainer/BG.modulate.a = 1
-	$CenterContainer/BG2.modulate.a = 0
-	$CenterContainer/BG2.visible = false
+	_ensure_responsive_background_nodes()
 	$CenterContainer/VBoxContainer/HBoxContainer.visible = false
 	_setup_primary_buttons()
 	_setup_version_label()
@@ -737,11 +800,15 @@ func _ready():
 	_ensure_title_flyby_nodes()
 	_connect_viewport_resize_signal()
 	_apply_responsive_layout()
-	_start_title_flyby_cycle()
+	_request_title_layout_refresh(4)
+	call_deferred("_start_title_flyby_cycle")
 	Global.social_mode = false
 
 
 func _process(delta: float) -> void:
+	if _title_pending_layout_frames > 0:
+		_title_pending_layout_frames -= 1
+		_apply_responsive_layout()
 	_update_title_score_sparkles(delta)
 	_update_title_flyby(delta)
 

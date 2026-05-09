@@ -21,6 +21,10 @@ const VILLAGE_TRADE_VISUAL_CLOSE_SECONDS := 0.35
 const VILLAGE_TRADE_TRAIL_CAP := 80
 const VILLAGE_TRADE_TRAIL_WIDTH := 1.25
 const VILLAGE_TRADE_TRAIL_COLOR := Color(1.0, 1.0, 1.0, 0.82)
+const TILE_REACH_NONE := 0
+const TILE_REACH_ADJACENT := 1
+const TILE_REACH_LOCAL_HUB := 2
+const TILE_REACH_BANK := 3
 
 
 static func _is_pressed_key(event: InputEvent, keycodes: Array) -> bool:
@@ -983,9 +987,51 @@ static func get_tile_reach_delta_for_radius(level_root: Node, radius_px: float) 
 	return maxi(1, int(floor((maxf(radius_px, 0.0) / tile_size) + 0.001)))
 
 
+static func _is_actual_myco_agent(agent: Variant) -> bool:
+	return is_instance_valid(agent) and str(agent.get("type")) == "myco" and agent.has_method("_has_complete_nutrient_set")
+
+
+static func _is_basket_agent(agent: Variant) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	var agent_type = str(agent.get("type"))
+	if agent_type == "basket":
+		return true
+	if agent_type != "myco":
+		return false
+	if str(agent.get_meta("story_kind", "")).begins_with("basket"):
+		return true
+	return not _is_actual_myco_agent(agent)
+
+
+static func _get_configured_agent_tile_reach_delta(agent: Variant) -> int:
+	if not is_instance_valid(agent):
+		return -1
+	var agent_type = str(agent.get("type"))
+	if agent_type == "cloud":
+		return TILE_REACH_NONE
+	if agent_type == "bean" or agent_type == "squash" or agent_type == "maize" or agent_type == "tree":
+		return TILE_REACH_NONE
+	if _is_basket_agent(agent):
+		return TILE_REACH_LOCAL_HUB
+	if _is_actual_myco_agent(agent):
+		var stage_value = agent.get("myco_stage")
+		if typeof(stage_value) == TYPE_INT and int(stage_value) == 2:
+			return TILE_REACH_LOCAL_HUB
+		return TILE_REACH_ADJACENT
+	if agent_type == "bank":
+		return TILE_REACH_BANK
+	if agent_type == "farmer" or agent_type == "vendor" or agent_type == "cook":
+		return TILE_REACH_LOCAL_HUB
+	return -1
+
+
 static func get_agent_tile_reach_delta(level_root: Node, agent: Variant) -> int:
 	if not is_instance_valid(agent):
 		return 0
+	var configured_delta = _get_configured_agent_tile_reach_delta(agent)
+	if configured_delta >= 0:
+		return configured_delta
 	return get_tile_reach_delta_for_radius(level_root, _get_agent_interaction_radius(agent))
 
 
@@ -1233,7 +1279,7 @@ static func _mark_nearby_agents_dirty_from_occupancy(level_root: Node, agents_ro
 					var near_old := false
 					var near_new := false
 					if _supports_tile_world(level_root):
-						var moved_delta = get_tile_reach_delta_for_radius(level_root, moved_reach)
+						var moved_delta = get_agent_tile_reach_delta(level_root, moved_agent)
 						var pair_delta = maxi(moved_delta, get_agent_tile_reach_delta(level_root, agent)) + 1
 						near_old = is_world_pos_in_agent_tile_reach(level_root, old_pos, agent, pair_delta)
 						near_new = is_world_pos_in_agent_tile_reach(level_root, new_pos, agent, pair_delta)
@@ -1265,7 +1311,7 @@ static func mark_agents_dirty_for_movement(level_root: Node, agents_root: Node, 
 		var near_old := false
 		var near_new := false
 		if _supports_tile_world(level_root):
-			var moved_delta = get_tile_reach_delta_for_radius(level_root, moved_reach)
+			var moved_delta = get_agent_tile_reach_delta(level_root, moved_agent)
 			var pair_delta = maxi(moved_delta, get_agent_tile_reach_delta(level_root, agent)) + 1
 			near_old = is_world_pos_in_agent_tile_reach(level_root, old_pos, agent, pair_delta)
 			near_new = is_world_pos_in_agent_tile_reach(level_root, new_pos, agent, pair_delta)
@@ -1296,7 +1342,7 @@ static func mark_agents_dirty_for_spawn(level_root: Node, agents_root: Node, spa
 			continue
 		var near_spawn := false
 		if _supports_tile_world(level_root):
-			var spawn_delta = get_tile_reach_delta_for_radius(level_root, spawn_reach)
+			var spawn_delta = get_agent_tile_reach_delta(level_root, spawned_agent)
 			var pair_delta = maxi(spawn_delta, get_agent_tile_reach_delta(level_root, agent)) + 1
 			near_spawn = is_world_pos_in_agent_tile_reach(level_root, spawn_pos, agent, pair_delta)
 		else:
@@ -2161,7 +2207,7 @@ static func _is_preview_village_basket_target(agent: Variant) -> bool:
 
 static func _get_preview_myco_radius(agents_root: Node) -> float:
 	if not is_instance_valid(agents_root):
-		return 200.0
+		return 128.0
 	for agent in agents_root.get_children():
 		if not _is_preview_candidate(agent):
 			continue
@@ -2170,7 +2216,7 @@ static func _get_preview_myco_radius(agents_root: Node) -> float:
 		var reach = agent.get("buddy_radius")
 		if typeof(reach) == TYPE_FLOAT or typeof(reach) == TYPE_INT:
 			return max(float(reach), 24.0)
-	return 200.0
+	return 128.0
 
 
 static func _resolve_preview_anchor(level_root: Node, world_pos: Vector2) -> Variant:
@@ -2237,7 +2283,8 @@ static func update_inventory_connection_preview(level_root: Node, agents_root: N
 	var preview_is_basket = safe_type == "basket"
 	var preview_is_village_actor = _is_preview_village_item_type(safe_type)
 	var myco_radius = _get_preview_myco_radius(agents_root)
-	var preview_myco_tile_delta = get_tile_reach_delta_for_radius(level_root, myco_radius)
+	var preview_myco_tile_delta = TILE_REACH_LOCAL_HUB
+	var preview_basket_tile_delta = TILE_REACH_LOCAL_HUB
 	for agent in agents_root.get_children():
 		if not _is_preview_candidate(agent):
 			continue
@@ -2249,7 +2296,7 @@ static func update_inventory_connection_preview(level_root: Node, agents_root: N
 		if preview_is_basket and _is_village_runtime():
 			if not _is_preview_village_basket_target(agent):
 				continue
-			var basket_reach_delta = maxi(preview_myco_tile_delta, get_agent_tile_reach_delta(level_root, agent))
+			var basket_reach_delta = maxi(preview_basket_tile_delta, get_agent_tile_reach_delta(level_root, agent))
 			if _supports_tile_world(level_root):
 				if not is_world_pos_in_agent_tile_reach(level_root, anchor_world, agent, basket_reach_delta):
 					continue

@@ -8,7 +8,7 @@ const HIGH_SCORE_SAVE_PATH := "user://high_score.cfg"
 
 var move_rate = 1 #4 #6
 var movement_speed = 50 #100 #200
-var social_buddy_radius = 200
+var social_buddy_radius = 128
 var num_connectors = 4
 var active_agent = null
 var is_mobile_platform = false
@@ -344,8 +344,8 @@ func _ready() -> void:
 		randomize()
 	is_mobile_platform = OS.has_feature("mobile") or OS.get_name() == "Android" or OS.get_name() == "iOS"
 	if is_mobile_platform:
-		# Smaller radius reduces partner scans and line churn on phones.
-		social_buddy_radius = 170
+		# Tile-ring village reach stays at 2 rings on mobile too.
+		social_buddy_radius = 128
 	reset_trade_dispatch_budgets()
 
 

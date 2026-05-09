@@ -20,6 +20,7 @@ var minimap_panel: Control = null
 var inventory_spawn_rng := RandomNumberGenerator.new()
 const INVENTORY_DRAG_THRESHOLD_MOUSE := 8.0
 const INVENTORY_DRAG_THRESHOLD_TOUCH := 18.0
+const INVENTORY_TOUCH_MOUSE_SUPPRESS_MSEC := 550
 const AUTO_SPAWN_ATTEMPTS := 96
 const AUTO_SPAWN_SWEEP_STEPS := 48
 const PARENT_BOUNDED_AUTO_ATTEMPTS := 96
@@ -122,6 +123,7 @@ var _slot_labels: Array = []
 var _slot_items: Array = []
 var _inventory_texture_cache: Dictionary = {}
 var _active_touch_drag_id := -1
+var _inventory_touch_mouse_suppress_until_msec := 0
 var _slot_backplates: Dictionary = {}
 var _slot_lock_glyphs: Dictionary = {}
 var _slot_selection_frames: Dictionary = {}
@@ -2490,11 +2492,22 @@ func _get_inventory_agent_at(mouse_pos: Vector2) -> String:
 		if not icon.has_meta("item_name"):
 			continue
 		var touch_rect = icon.get_global_rect()
-		if Global.is_mobile_platform:
+		if Global.is_mobile_platform or _pointer_is_touch:
 			touch_rect = touch_rect.grow(14.0)
 		if touch_rect.has_point(mouse_pos):
 			return str(icon.get_meta("item_name"))
 	return ""
+
+
+func _suppress_emulated_mouse_after_touch() -> void:
+	_inventory_touch_mouse_suppress_until_msec = maxi(
+		_inventory_touch_mouse_suppress_until_msec,
+		Time.get_ticks_msec() + INVENTORY_TOUCH_MOUSE_SUPPRESS_MSEC
+	)
+
+
+func _is_emulated_mouse_after_touch_suppressed() -> bool:
+	return Time.get_ticks_msec() < _inventory_touch_mouse_suppress_until_msec
 
 
 func _start_inventory_drag(agent_name: String, mouse_pos: Vector2) -> void:
@@ -3211,13 +3224,13 @@ func _input(event):
 	if get_tree().paused:
 		return
 	if event is InputEventMouseMotion:
-		if Global.is_mobile_platform:
+		if Global.is_mobile_platform or _is_emulated_mouse_after_touch_suppressed():
 			return
 		_on_inventory_pointer_moved(event.position)
 		return
 
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		if Global.is_mobile_platform:
+		if Global.is_mobile_platform or _is_emulated_mouse_after_touch_suppressed():
 			return
 		if event.pressed:
 			_on_inventory_pointer_pressed(event.position, false)
@@ -3226,6 +3239,7 @@ func _input(event):
 		return
 
 	if event is InputEventScreenTouch:
+		_suppress_emulated_mouse_after_touch()
 		if event.pressed:
 			if _active_touch_drag_id != -1 and event.index != _active_touch_drag_id:
 				return
@@ -3239,6 +3253,7 @@ func _input(event):
 		return
 
 	if event is InputEventScreenDrag:
+		_suppress_emulated_mouse_after_touch()
 		if event.index != _active_touch_drag_id:
 			return
 		_on_inventory_pointer_moved(event.position)

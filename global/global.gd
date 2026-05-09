@@ -149,7 +149,7 @@ The farmers need healthy food.
 Grow crops near the village so the farmers can harvest and recover.",
 	5: "Phase 5: Help them share!
 	
-	Some villagers have goods and skills, but not enough money.
+	Some villagers have goods, skills, time or services, but not enough money.
 
 	Place a basket near the village so people can trade with eachother.",
 	6: "You Did It!

@@ -3224,18 +3224,18 @@ func _input(event):
 	if get_tree().paused:
 		return
 	if event is InputEventMouseMotion:
-		if Global.is_mobile_platform or _is_emulated_mouse_after_touch_suppressed():
+		if _is_emulated_mouse_after_touch_suppressed():
 			return
 		_on_inventory_pointer_moved(event.position)
 		return
 
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		if Global.is_mobile_platform or _is_emulated_mouse_after_touch_suppressed():
+		if _is_emulated_mouse_after_touch_suppressed():
 			return
 		if event.pressed:
-			_on_inventory_pointer_pressed(event.position, false)
+			_on_inventory_pointer_pressed(event.position, Global.is_mobile_platform)
 		else:
-			_on_inventory_pointer_released(event.position, false)
+			_on_inventory_pointer_released(event.position, Global.is_mobile_platform)
 		return
 
 	if event is InputEventScreenTouch:

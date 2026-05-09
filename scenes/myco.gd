@@ -23,7 +23,7 @@ const MYCO_HARVEST_BIRTH_ATTEMPTS := 32
 const MYCO_INITIAL_RADIUS_TILES := 1.5
 const MYCO_MATURE_RADIUS_TILES := 3.0
 const MYCO_RHIZO_ALPHA_LIVE := 0.32
-const MYCO_STARVATION_REVERT_TICKS := 26
+const MYCO_STARVATION_REVERT_TICKS := 48
 const MYCO_STARVATION_SHRINK_LERP := 0.06
 const MYCO_DEAD_MUSHROOM_SHRINK_LERP := 0.08
 const MYCO_DEAD_RHIZO_SHRINK_LERP := 0.07
@@ -55,6 +55,13 @@ var myco_tile_span := 64.0
 
 func _challenge_myco_death_enabled() -> bool:
 	return str(Global.mode) == "challenge" and bool(Global.is_killing)
+
+
+func _has_complete_nutrient_set() -> bool:
+	for res in assets:
+		if assets[res] <= 0:
+			return false
+	return true
 
 
 func _load_myco_texture(path: String) -> Texture2D:
@@ -177,7 +184,7 @@ func _set_myco_stage(new_stage: int, force: bool = false) -> void:
 	if not force and myco_stage == new_stage:
 		return
 	myco_stage = new_stage
-	dead = myco_stage == MycoGrowthStage.DEAD
+	dead = false
 	myco_harvest_ready = myco_stage == MycoGrowthStage.POD_READY
 	draggable = myco_stage != MycoGrowthStage.DEAD
 	if myco_stage == MycoGrowthStage.DEAD:
@@ -598,12 +605,14 @@ func _on_area_entered(trade: Area2D) -> void:
 
 
 func _on_growth_timer_timeout() -> void:
-	var all_in = true
-	for res in assets:
-		if assets[res] <= 0:
-			all_in = false
+	var all_in = _has_complete_nutrient_set()
 
 	if myco_stage == MycoGrowthStage.DEAD:
+		if _challenge_myco_death_enabled() and all_in and _has_supporting_neighbors():
+			myco_dead_ticks = 0
+			myco_starvation_ticks = 0
+			_set_myco_stage(MycoGrowthStage.SPORE)
+			return
 		myco_dead_ticks += 1
 		if is_instance_valid(sprite):
 			var dead_body_scale = _get_texture_fit_scale(myco_rhizo_texture, myco_tile_span * MYCO_DEAD_RHIZO_BODY_CELL_RATIO)

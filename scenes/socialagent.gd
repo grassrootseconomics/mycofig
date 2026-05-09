@@ -58,6 +58,16 @@ func _story_farmer_auto_harvest_enabled(level_root: Node) -> bool:
 	return bool(level_root.call("story_farmer_auto_harvest_is_enabled", self))
 
 
+func _story_farmer_harvest_trip_active() -> bool:
+	return _is_story_farmer_actor() and _story_farmer_harvest_state != STORY_FARMER_HARVEST_IDLE
+
+
+func is_trade_locked_by_user_move() -> bool:
+	if super.is_trade_locked_by_user_move():
+		return true
+	return _story_farmer_harvest_trip_active()
+
+
 func _story_farmer_stop_harvest_tween() -> void:
 	if is_instance_valid(_story_farmer_harvest_move_tween):
 		_story_farmer_harvest_move_tween.kill()
@@ -272,6 +282,7 @@ func _story_farmer_begin_harvest_trip(level_root: Node) -> bool:
 	_story_farmer_harvest_target_pos = crop_target.global_position
 	_story_farmer_harvest_state = STORY_FARMER_HARVEST_MOVING_TO_CROP
 	_story_farmer_stop_harvest_tween()
+	_story_farmer_refresh_trade_network(level_root)
 	var tween = get_tree().create_tween()
 	_story_farmer_harvest_move_tween = tween
 	tween.tween_property(self, "global_position", crop_target.global_position, STORY_FARMER_MOVE_TO_CROP_SECONDS)

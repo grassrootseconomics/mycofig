@@ -29,6 +29,7 @@ var liquidity_cycle_origin_id := 0
 var village_ephemeral_trade_visual := false
 var _village_trail_line: Line2D = null
 var _village_trail_finalized := false
+var _village_trail_start := Vector2.ZERO
 
 const DROP_FADE_SECONDS := 0.12
 const TRADE_REFERENCE_FPS := 60.0
@@ -36,7 +37,7 @@ const TRADE_AXIS_EPSILON := 0.001
 const AGGREGATE_LABEL_MIN_AMOUNT := 2
 const AGGREGATE_LABEL_FONT_SIZE := 14
 const AGGREGATE_LABEL_COLOR := Color(1.0, 1.0, 1.0, 0.95)
-const VILLAGE_TRAIL_POINT_MIN_DISTANCE := 5.0
+const VILLAGE_TRAIL_POINT_EPSILON := 0.5
 
 
 func set_variables(path_dict) -> void:
@@ -59,6 +60,7 @@ func set_variables(path_dict) -> void:
 	liquidity_cycle_origin_id = int(path_dict.get("liquidity_cycle_origin_id", 0))
 	village_ephemeral_trade_visual = bool(path_dict.get("village_ephemeral_trade_visual", false))
 	position = start_agent.global_position
+	_village_trail_start = global_position
 	_refresh_trade_amount_visual()
 	#print("Created trade: ", start_agent, end_agent, trade_path)
 
@@ -86,6 +88,7 @@ func _reset_village_trail_state() -> void:
 	village_ephemeral_trade_visual = false
 	_village_trail_line = null
 	_village_trail_finalized = false
+	_village_trail_start = Vector2.ZERO
 
 
 func _get_village_lines_root() -> Node:
@@ -101,37 +104,34 @@ func _ensure_village_trail_line() -> void:
 	if not is_instance_valid(lines_root):
 		return
 	_village_trail_line = LevelHelpersRef.create_village_trade_trail_line(lines_root)
-	if is_instance_valid(_village_trail_line):
-		_village_trail_line.add_point(global_position)
 
 
-func _append_village_trail_point(point: Vector2) -> void:
+func _set_village_trail_points_to(point: Vector2) -> void:
 	_ensure_village_trail_line()
 	if not is_instance_valid(_village_trail_line):
 		return
-	var point_count = _village_trail_line.get_point_count()
-	if point_count <= 0:
+	var start = _village_trail_start
+	var elbow = Vector2(point.x, start.y)
+	_village_trail_line.clear_points()
+	_village_trail_line.add_point(start)
+	if start.distance_to(elbow) > VILLAGE_TRAIL_POINT_EPSILON and elbow.distance_to(point) > VILLAGE_TRAIL_POINT_EPSILON:
+		_village_trail_line.add_point(elbow)
+	if start.distance_to(point) > VILLAGE_TRAIL_POINT_EPSILON:
 		_village_trail_line.add_point(point)
-		return
-	var last_point = _village_trail_line.get_point_position(point_count - 1)
-	if last_point.distance_to(point) >= VILLAGE_TRAIL_POINT_MIN_DISTANCE:
-		_village_trail_line.add_point(point)
-	else:
-		_village_trail_line.set_point_position(point_count - 1, point)
 
 
 func _update_village_trade_trail() -> void:
 	if village_ephemeral_trade_visual and not _village_trail_finalized:
-		_append_village_trail_point(global_position)
+		_set_village_trail_points_to(global_position)
 
 
 func _finalize_village_trade_trail() -> void:
 	if _village_trail_finalized:
 		return
+	_set_village_trail_points_to(global_position)
 	_village_trail_finalized = true
 	if not is_instance_valid(_village_trail_line):
 		return
-	_append_village_trail_point(global_position)
 	var lines_root = _get_village_lines_root()
 	if is_instance_valid(lines_root):
 		LevelHelpersRef.start_village_trade_trail_fade(lines_root, _village_trail_line)

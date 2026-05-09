@@ -2230,6 +2230,16 @@ func _exit_tree() -> void:
 	LevelHelpersRef.unregister_agent_occupancy(_get_level_root(), self)
 
 
+func _is_trade_dispatch_endpoint_locked(agent: Variant) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	if bool(agent.get("dead")):
+		return false
+	if agent.has_method("is_trade_locked_by_user_move"):
+		return bool(agent.call("is_trade_locked_by_user_move"))
+	return false
+
+
 func _emit_trade_with_budget(path_dict: Dictionary) -> bool:
 	if typeof(path_dict) != TYPE_DICTIONARY:
 		return false
@@ -2240,6 +2250,8 @@ func _emit_trade_with_budget(path_dict: Dictionary) -> bool:
 	if is_instance_valid(from_agent) and str(from_agent.get("type")) == "cloud" and trade_asset == "R":
 		if _is_story_village_person_node(to_agent):
 			return false
+	if _is_trade_dispatch_endpoint_locked(from_agent) or _is_trade_dispatch_endpoint_locked(to_agent):
+		return false
 	if not Global.allow_trade_dispatch(from_agent, to_agent):
 		return false
 	emit_signal("trade", path_dict)

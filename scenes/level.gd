@@ -72,6 +72,9 @@ const DYNAMIC_BIRD_INTERVAL_MAX_SEC := 20.0
 const DYNAMIC_BIRD_INTERVAL_MIN_SEC := 9.0
 const DYNAMIC_BIRD_WAVE_MAX := 3
 const DYNAMIC_BIRD_ACTIVE_CAP := 5
+const STORY_DYNAMIC_BIRD_INTERVAL_MAX_SEC := 42.0
+const STORY_DYNAMIC_BIRD_INTERVAL_MIN_SEC := 28.0
+const STORY_DYNAMIC_BIRD_ACTIVE_CAP := 2
 const DYNAMIC_PREDATOR_STAGGER_SECONDS := 2.2
 const DYNAMIC_TUKTUK_INTERVAL_MAX_SEC := 24.0
 const DYNAMIC_TUKTUK_INTERVAL_MIN_SEC := 8.0
@@ -2798,6 +2801,14 @@ func _count_live_ecology_plants_for_predators() -> int:
 	return count
 
 
+func _count_harvestable_crops_for_birds() -> int:
+	var count := 0
+	for agent in $Agents.get_children():
+		if _is_harvestable_crop_target(agent):
+			count += 1
+	return count
+
+
 func _count_live_challenge_garden_life() -> int:
 	var count := 0
 	for agent in $Agents.get_children():
@@ -2920,6 +2931,11 @@ func _compute_dynamic_bird_wave_count(plant_count: int) -> int:
 	return clampi(1 + scaled, 1, DYNAMIC_BIRD_WAVE_MAX)
 
 
+func _compute_story_dynamic_bird_interval_seconds(harvestable_count: int) -> float:
+	var pressure = clampf((float(harvestable_count) - 1.0) / 7.0, 0.0, 1.0)
+	return lerpf(STORY_DYNAMIC_BIRD_INTERVAL_MAX_SEC, STORY_DYNAMIC_BIRD_INTERVAL_MIN_SEC, pressure)
+
+
 func _compute_dynamic_tuktuk_interval_seconds(vulnerable_villagers: int) -> float:
 	if vulnerable_villagers <= 0:
 		return DYNAMIC_TUKTUK_INTERVAL_MAX_SEC
@@ -2950,8 +2966,32 @@ func _mark_dynamic_predator_type_spawned(predator_type: String) -> void:
 	_dynamic_predator_stagger_timer = DYNAMIC_PREDATOR_STAGGER_SECONDS
 
 
+func _update_story_bird_pressure(delta: float) -> void:
+	_dynamic_tuktuk_spawn_accum = 0.0
+	_dynamic_predator_stagger_timer = 0.0
+	_dynamic_predator_blocked_type = ""
+	if not Global.is_birding or _story_phase_id < 2:
+		_dynamic_bird_spawn_accum = 0.0
+		return
+	var harvestable_count = _count_harvestable_crops_for_birds()
+	if harvestable_count <= 0:
+		_dynamic_bird_spawn_accum = 0.0
+		return
+	if _count_active_bird_predators() >= STORY_DYNAMIC_BIRD_ACTIVE_CAP:
+		return
+	var bird_interval = _compute_story_dynamic_bird_interval_seconds(harvestable_count)
+	_dynamic_bird_spawn_accum += maxf(delta, 0.0)
+	if _dynamic_bird_spawn_accum < bird_interval:
+		return
+	_dynamic_bird_spawn_accum = 0.0
+	_spawn_predators(1, true)
+
+
 func _update_dynamic_predator_pressure(delta: float) -> void:
 	if Global.mode == "tutorial":
+		return
+	if _is_story_mode():
+		_update_story_bird_pressure(delta)
 		return
 	if not _is_challenge_dual_village_runtime():
 		_dynamic_bird_spawn_accum = 0.0

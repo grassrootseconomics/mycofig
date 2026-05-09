@@ -17,6 +17,7 @@ const HOTKEY_CONNECTORS_5 := [KEY_5]
 const FOCUS_NEIGHBOR_SPRITE_OVERLAP_PENALTY := 100000000.0
 const FOCUS_TILE_FALLBACK_PENALTY := 1000000000.0
 const VILLAGE_TRADE_VISUAL_FADE_SECONDS := 5.0
+const VILLAGE_TRADE_VISUAL_CLOSE_SECONDS := 0.35
 const VILLAGE_TRADE_TRAIL_CAP := 80
 const VILLAGE_TRADE_TRAIL_WIDTH := 1.25
 const VILLAGE_TRADE_TRAIL_COLOR := Color(1.0, 1.0, 1.0, 0.82)
@@ -922,6 +923,8 @@ static func _can_share_trade_network(seeker: Variant, candidate: Variant) -> boo
 static func _is_trade_hub_candidate(seeker: Variant, candidate: Variant) -> bool:
 	if not is_instance_valid(candidate):
 		return false
+	if _is_agent_trade_locked(seeker) or _is_agent_trade_locked(candidate):
+		return false
 	if is_instance_valid(seeker) and candidate == seeker:
 		return false
 	if bool(candidate.get("dead")):
@@ -1619,6 +1622,8 @@ static func pulse_village_trade_pair_line(lines_root: Node, endpoint_a: Variant,
 		return
 	if not is_village_trade_visual_endpoint(endpoint_a) or not is_village_trade_visual_endpoint(endpoint_b):
 		return
+	if _is_agent_trade_locked(endpoint_a) or _is_agent_trade_locked(endpoint_b):
+		return
 	if endpoint_a == endpoint_b:
 		return
 	var pair_key = _line_pair_key(endpoint_a, endpoint_b)
@@ -1841,6 +1846,12 @@ static func _refresh_village_pair_lines(lines_root: Node, now_ms: int) -> void:
 		if not is_village_trade_visual_endpoint(endpoint_a) or not is_village_trade_visual_endpoint(endpoint_b):
 			keys_to_remove.append(pair_key)
 			continue
+		var locked = _is_agent_trade_locked(endpoint_a) or _is_agent_trade_locked(endpoint_b)
+		if locked and not bool(meta.get("closing", false)):
+			meta["closing"] = true
+			meta["started_msec"] = now_ms
+			meta["duration_msec"] = maxi(roundi(VILLAGE_TRADE_VISUAL_CLOSE_SECONDS * 1000.0), 1)
+			pair_meta[pair_key] = meta
 		var started_ms = int(meta.get("started_msec", now_ms))
 		var duration_ms = maxi(int(meta.get("duration_msec", 1)), 1)
 		var t = clampf(float(now_ms - started_ms) / float(duration_ms), 0.0, 1.0)
@@ -1863,7 +1874,8 @@ static func _refresh_village_pair_lines(lines_root: Node, now_ms: int) -> void:
 				continue
 			var line: Line2D = line_variant
 			var route_mode = str(line.get_meta("route_mode", "x_then_y"))
-			_set_l_line_points(line, endpoint_a, endpoint_b, route_mode)
+			if not locked:
+				_set_l_line_points(line, endpoint_a, endpoint_b, route_mode)
 			line.modulate = faded_color
 	for pair_key_variant in keys_to_remove:
 		_release_village_pair(lines_root, pair_store, pair_meta, str(pair_key_variant))

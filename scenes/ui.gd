@@ -73,16 +73,29 @@ const STORY_FACTS_BUTTON_BG_PRESSED := Color(0.62, 0.23, 0.06, 1.0)
 const STORY_FACTS_SPARKLE_INTERVAL := 0.72
 const STORY_FACTS_SPARKLE_DURATION := 0.70
 const STORY_FACTS_TEXT := {
-	1: "Growing plants require healthy soil.\n\nFungi help make the soil healthy and alive.",
-	2: "Birds deserve to eat too. So plant more to feed them.\n\nBirds like seeds.",
-	3: "Beans help fix nitrogen (Green) in the soil.\nSquash bring shade and potassium (Orange).\nMaize brings Phosphorus (Pink).\nTrees are helping bring in water (Blue).\n\nBelow the Mushrooms are Mycorrhizal fungi which form a relationship with plant roots, acting as an extension of the root system to enhance nutrient and water absorption.",
+	1: "Healthy soil is alive.
+
+Fungi help plant roots find water and nutrients. Strong communities work in a similar way: people stay healthier when they are connected and can help each other.
+",
+	2: "Birds are part of the garden too.
+
+A healthy garden grows enough to feed people, seeds, and wildlife. If something gets eaten, plant again and keep the garden growing.",
+	3: "Different plants bring different strengths.
+
+Beans help the soil. Squash shades the ground. Maize feeds people. Trees help with water and shelter.
+
+Mushroom roots (fungi) connect plants so they can share water and nutrients.
+",
 	4: "Healthy people need healthy soil.
-	
-	In this village we have, Vendors selling things (Orange), Cooks cooking (Pink)
-	and a Bank with money (Blue) - and now you are brining healthy soil for Farmers can harvest healthy food (Green).",
-	5: "People can fairly exchange, lend, borrow, rotate, gift and share their goods and services - 
-	 even without money!",
-	6: "This was the easy part. Now try Challenge Mode!"
+
+In the village, farmers grow food (Green), vendors share goods (Orange), cooks make meals (Pink), and the bank has money (Bank). A real community works best when all these parts can help each other.",
+	5: "People can fairly exchange, lend, borrow, rotate, gift, pool and share their goods and services - 
+	 even without money!
+
+A basket is like a shared agreement: “I can offer this, and I can receive that.” This helps farmers, vendors, and cooks keep trading even when money is hard to find.",
+	6: "Challenge Mode adds more pressure. 
+
+The big idea stays the same: keep soil healthy, keep people connected, and keep resources moving."
 }
 const STORY_GUIDE_ARROW_COLOR := Color(1.0, 0.74, 0.16, 0.96)
 const STORY_GUIDE_ARROW_SHADOW_COLOR := Color(0.12, 0.05, 0.02, 0.42)

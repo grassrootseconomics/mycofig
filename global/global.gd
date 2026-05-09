@@ -129,36 +129,34 @@ var assets_social = { #list of assets -
 	}
 
 var story_stage_text = {
-	1: "Phase 1 - This is your Garden! 
-	
-	Below is your harvest basket of crops you can plant.
-	
-	Tap on them and try to plant one of each of your crops.",
-	2: "Phase 2 - Harvest time!
-	
-	Harvest your crops by tapping on them, before the birds eat them.",
-	3: "Phase 3 - Grow your garden 
-	
-	Grow more crops in the right direction. 
-	(see the minimap).
+	1: "Phase 1 - Start Your Garden!
 
-	Tap to check what crops need to grow.
-	The plants can help eachother,
-	and mushrooms connect them!",
-	4: "Phase 4 - You reached a village! 
+Your basket below has beans, squash, maize, tree seeds, and mushrooms.
+
+Tap to plant one of each.",
+	2: "Phase 2 - Harvest Time!
+
+Tap ready plants to harvest them before the birds do.
+
+Try to collect one of each garden item.",
+	3: "Phase 3 - Grow your garden!
 	
-	It looks like they need food. 
-	
-	Grow more crops they can harvest.",
+	Tap plants to check their need. Plant mushrooms so nearby plants can share help through the network.",
+	4: "Phase 4 - You Found a Village!
+
+The farmers need healthy food.
+
+Grow crops near the village so the farmers can harvest and recover.",
 	5: "Phase 5: Help them share!
 	
-	Some people don't have enough money to buy things.
-	See if they can use a basket to share their goods and services with eachother.",
-	6: "You did it! 
-	
-	You restored soil health and helped the village recover its social soil. 
-	
-	Well done! You are ready for Challenge Mode."
+	Some villagers have goods and skills, but not enough money.
+
+	Place a basket near the village so people can trade with eachother.",
+	6: "You Did It!
+
+You helped the garden grow and helped the village share again.
+
+You restored healthy soil and strong village connections. Ready for Challenge Mode?"
 }
 	
 var assets_plant = { #list of assets - 

@@ -82,7 +82,7 @@ Fungi help plant roots find water and nutrients. Strong communities work in a si
 A healthy garden grows enough to feed people, seeds, and wildlife. If something gets eaten, plant again and keep the garden growing.",
 	3: "Different plants bring different strengths.
 
-Beans help fix nitrogen (Green). Squash shades the ground and provide Potassium (Organge). Maize provides phosphorous (Poink) and structure for the beans to climb. Trees help with water (Blue) and shelter.
+Beans help fix nitrogen (Green). Squash shades the ground and provide potassium (Organge). Maize provides phosphorous (Poink) and structure for the beans to climb. Trees help with water (Blue) and shelter.
 
 Mushroom roots (fungi) connect plants so they can share water and nutrients.
 ",
@@ -104,12 +104,14 @@ const STORY_GUIDE_ARROW_SHADOW_WIDTH := 12.0
 const STORY_GUIDE_ARROW_HEAD_LENGTH := 32.0
 const STORY_GUIDE_ARROW_HEAD_WIDTH := 30.0
 const STORY_GUIDE_ARROW_LAYER_Z_INDEX := 85
+const STORY_PHASE3_DIRECTION_PROMPT_INITIAL_DELAY := 3.0
 const STORY_PHASE3_DIRECTION_PROMPT_INTERVAL := 20.0
 const STORY_PHASE3_DIRECTION_PROMPT_DURATION := 2.0
-const STORY_PHASE3_DIRECTION_PROMPT_TEXT := "plant in this direction!"
-const STORY_PHASE3_DIRECTION_PROMPT_LABEL_SIZE := Vector2(230, 42)
-const STORY_PHASE3_DIRECTION_PROMPT_ARROW_LENGTH := 96.0
+const STORY_PHASE3_DIRECTION_PROMPT_TEXT := "Plant over here!"
+const STORY_PHASE3_DIRECTION_PROMPT_LABEL_SIZE := Vector2(460, 84)
+const STORY_PHASE3_DIRECTION_PROMPT_ARROW_LENGTH := 192.0
 const STORY_PHASE3_DIRECTION_PROMPT_MARGIN := 64.0
+const STORY_PHASE3_DIRECTION_PROMPT_SCALE := 2.0
 const TUTORIAL_PANEL_Z_INDEX := 110
 const TUTORIAL_TOGGLE_BUTTON_Z_INDEX := 120
 const QUIT_DIALOG_PANEL_COLOR := Color(0.00, 0.13, 0.47, 0.57)
@@ -198,6 +200,7 @@ var _story_phase3_direction_label: Label = null
 var _story_phase3_direction_interval_elapsed := 0.0
 var _story_phase3_direction_visible_elapsed := 0.0
 var _story_phase3_direction_is_visible := false
+var _story_phase3_direction_prompt_has_shown := false
 var _inventory_side_controls_embedded := false
 var _inventory_panel: MarginContainer = null
 var _tutorial_panel: Control = null
@@ -1255,7 +1258,7 @@ func _ensure_story_phase3_direction_prompt() -> void:
 
 	_story_phase3_direction_shadow = Line2D.new()
 	_story_phase3_direction_shadow.name = "ArrowShadow"
-	_story_phase3_direction_shadow.width = STORY_GUIDE_ARROW_SHADOW_WIDTH
+	_story_phase3_direction_shadow.width = STORY_GUIDE_ARROW_SHADOW_WIDTH * STORY_PHASE3_DIRECTION_PROMPT_SCALE
 	_story_phase3_direction_shadow.default_color = STORY_GUIDE_ARROW_SHADOW_COLOR
 	_story_phase3_direction_shadow.antialiased = true
 	_story_phase3_direction_shadow.round_precision = 12
@@ -1263,7 +1266,7 @@ func _ensure_story_phase3_direction_prompt() -> void:
 
 	_story_phase3_direction_line = Line2D.new()
 	_story_phase3_direction_line.name = "ArrowLine"
-	_story_phase3_direction_line.width = STORY_GUIDE_ARROW_WIDTH
+	_story_phase3_direction_line.width = STORY_GUIDE_ARROW_WIDTH * STORY_PHASE3_DIRECTION_PROMPT_SCALE
 	_story_phase3_direction_line.default_color = STORY_GUIDE_ARROW_COLOR
 	_story_phase3_direction_line.antialiased = true
 	_story_phase3_direction_line.round_precision = 12
@@ -1271,7 +1274,7 @@ func _ensure_story_phase3_direction_prompt() -> void:
 
 	_story_phase3_direction_head_shadow = Line2D.new()
 	_story_phase3_direction_head_shadow.name = "ArrowHeadShadow"
-	_story_phase3_direction_head_shadow.width = STORY_GUIDE_ARROW_SHADOW_WIDTH
+	_story_phase3_direction_head_shadow.width = STORY_GUIDE_ARROW_SHADOW_WIDTH * STORY_PHASE3_DIRECTION_PROMPT_SCALE
 	_story_phase3_direction_head_shadow.default_color = STORY_GUIDE_ARROW_SHADOW_COLOR
 	_story_phase3_direction_head_shadow.antialiased = true
 	_story_phase3_direction_head_shadow.round_precision = 12
@@ -1279,7 +1282,7 @@ func _ensure_story_phase3_direction_prompt() -> void:
 
 	_story_phase3_direction_head = Line2D.new()
 	_story_phase3_direction_head.name = "ArrowHead"
-	_story_phase3_direction_head.width = STORY_GUIDE_ARROW_WIDTH
+	_story_phase3_direction_head.width = STORY_GUIDE_ARROW_WIDTH * STORY_PHASE3_DIRECTION_PROMPT_SCALE
 	_story_phase3_direction_head.default_color = STORY_GUIDE_ARROW_COLOR
 	_story_phase3_direction_head.antialiased = true
 	_story_phase3_direction_head.round_precision = 12
@@ -1292,7 +1295,7 @@ func _ensure_story_phase3_direction_prompt() -> void:
 	_story_phase3_direction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_story_phase3_direction_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_story_phase3_direction_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_story_phase3_direction_label.add_theme_font_size_override("font_size", 20)
+	_story_phase3_direction_label.add_theme_font_size_override("font_size", 40)
 	_story_phase3_direction_label.add_theme_color_override("font_color", Color(1.0, 0.96, 0.45, 1.0))
 	_story_phase3_direction_label.add_theme_color_override("font_outline_color", Color(0.12, 0.05, 0.02, 0.92))
 	_story_phase3_direction_label.add_theme_constant_override("outline_size", 5)
@@ -1362,7 +1365,9 @@ func _layout_story_phase3_direction_prompt() -> void:
 
 	var local_start = start_pos - view_rect.position
 	var local_tip = tip_pos - view_rect.position
-	var local_body_tip = local_tip - direction * (STORY_GUIDE_ARROW_HEAD_LENGTH * 0.58)
+	var head_length = STORY_GUIDE_ARROW_HEAD_LENGTH * STORY_PHASE3_DIRECTION_PROMPT_SCALE
+	var head_width = STORY_GUIDE_ARROW_HEAD_WIDTH * STORY_PHASE3_DIRECTION_PROMPT_SCALE
+	var local_body_tip = local_tip - direction * (head_length * 0.58)
 	var body_points := PackedVector2Array()
 	body_points.append(local_start)
 	body_points.append(local_body_tip)
@@ -1374,9 +1379,9 @@ func _layout_story_phase3_direction_prompt() -> void:
 			shadow_points.append(point + Vector2(2, 2))
 		_story_phase3_direction_shadow.points = shadow_points
 	if is_instance_valid(_story_phase3_direction_head):
-		_story_phase3_direction_head.points = _make_story_arrow_head_points(local_tip, local_start, STORY_GUIDE_ARROW_HEAD_LENGTH, STORY_GUIDE_ARROW_HEAD_WIDTH)
+		_story_phase3_direction_head.points = _make_story_arrow_head_points(local_tip, local_start, head_length, head_width)
 	if is_instance_valid(_story_phase3_direction_head_shadow):
-		_story_phase3_direction_head_shadow.points = _make_story_arrow_head_points(local_tip + Vector2(2, 2), local_start + Vector2(2, 2), STORY_GUIDE_ARROW_HEAD_LENGTH + 4.0, STORY_GUIDE_ARROW_HEAD_WIDTH + 5.0)
+		_story_phase3_direction_head_shadow.points = _make_story_arrow_head_points(local_tip + Vector2(2, 2), local_start + Vector2(2, 2), head_length + 8.0, head_width + 10.0)
 
 	if is_instance_valid(_story_phase3_direction_label):
 		var label_size = STORY_PHASE3_DIRECTION_PROMPT_LABEL_SIZE
@@ -1394,6 +1399,7 @@ func _update_story_phase3_direction_prompt(delta: float) -> void:
 	if not _should_run_story_phase3_direction_prompt():
 		_story_phase3_direction_interval_elapsed = 0.0
 		_story_phase3_direction_visible_elapsed = 0.0
+		_story_phase3_direction_prompt_has_shown = false
 		_set_story_phase3_direction_prompt_visible(false)
 		return
 	if _story_phase3_direction_is_visible:
@@ -1404,9 +1410,11 @@ func _update_story_phase3_direction_prompt(delta: float) -> void:
 			_set_story_phase3_direction_prompt_visible(false)
 		return
 	_story_phase3_direction_interval_elapsed += maxf(delta, 0.0)
-	if _story_phase3_direction_interval_elapsed >= STORY_PHASE3_DIRECTION_PROMPT_INTERVAL:
+	var prompt_delay = STORY_PHASE3_DIRECTION_PROMPT_INTERVAL if _story_phase3_direction_prompt_has_shown else STORY_PHASE3_DIRECTION_PROMPT_INITIAL_DELAY
+	if _story_phase3_direction_interval_elapsed >= prompt_delay:
 		_story_phase3_direction_interval_elapsed = 0.0
 		_story_phase3_direction_visible_elapsed = 0.0
+		_story_phase3_direction_prompt_has_shown = true
 		_set_story_phase3_direction_prompt_visible(true)
 
 

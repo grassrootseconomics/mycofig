@@ -57,6 +57,7 @@ const HARVEST_GUIDE_MYCO_RECT := Rect2(0.08, 0.08, 0.84, 0.84)
 const TREE_HARVEST_ACORN_LOCAL_POS := Vector2(0.0, -64.0)
 const TREE_HARVEST_ACORN_HOTSPOT_RADIUS := 24.0
 const STORY_PHASE5_FORCED_BASKET_LINK_META := "story_force_phase5_basket_link"
+const RESOURCE_BAR_UI_CLEARANCE := 14.0
 
 signal trade(pos)
 signal clicked
@@ -316,6 +317,8 @@ func _should_show_resource_bars() -> bool:
 		return false
 	if dead or caught_by != null:
 		return false
+	if _resource_bars_overlap_core_ui():
+		return false
 	if Global.story_force_visible_plant_bars and _is_reposition_subject():
 		var viewport = get_viewport()
 		if viewport != null:
@@ -329,6 +332,39 @@ func _should_show_resource_bars() -> bool:
 	if not _is_hover_bar_subject():
 		return false
 	return _hover_visual_focus
+
+
+func _resource_bars_overlap_core_ui() -> bool:
+	if bars.is_empty():
+		return false
+	var level_root = _get_level_root()
+	if not is_instance_valid(level_root):
+		return false
+	var ui = level_root.get_node_or_null("UI")
+	if not is_instance_valid(ui):
+		return false
+	var avoid_rects: Array[Rect2] = []
+	for node_path in ["MarginContainer", "RestartContainer", "TutorialMarginContainer1"]:
+		var control = ui.get_node_or_null(node_path) as Control
+		if is_instance_valid(control) and control.visible:
+			avoid_rects.append(control.get_global_rect().grow(RESOURCE_BAR_UI_CLEARANCE))
+	if avoid_rects.is_empty():
+		return false
+	var anchor = position
+	if is_instance_valid(bar_canvas) and bar_canvas is CanvasLayer:
+		anchor = Global.world_to_screen(self, position)
+	for bar_key in bars:
+		var bar = bars[bar_key]
+		if not is_instance_valid(bar):
+			continue
+		var bar_size: Vector2 = bar.size
+		if bar_size == Vector2.ZERO:
+			bar_size = Vector2(6.0, 30.0)
+		var bar_rect = Rect2(anchor + bars_offset[bar_key], bar_size)
+		for avoid_rect in avoid_rects:
+			if avoid_rect.intersects(bar_rect):
+				return true
+	return false
 
 
 func refresh_bar_visibility() -> void:

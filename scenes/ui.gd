@@ -2960,6 +2960,22 @@ func is_inventory_placement_active() -> bool:
 	return _selected_inventory_item != ""
 
 
+func should_block_agent_harvest_at_screen_pos(screen_pos: Vector2) -> bool:
+	if _selected_inventory_item == "":
+		return false
+	if int(Global.inventory.get(_selected_inventory_item, 0)) <= 0:
+		return false
+	var tile_data = _get_world_tile_drop_data(screen_pos)
+	if not bool(tile_data.get("ok", false)):
+		return true
+	return _can_place_inventory_item_at_world_pos(_selected_inventory_item, tile_data["pos"])
+
+
+func clear_inventory_selection_for_harvest() -> void:
+	if _selected_inventory_item != "":
+		_clear_inventory_selection()
+
+
 func _get_world_tile_drop_data(screen_pos: Vector2) -> Dictionary:
 	var result := {
 		"ok": false,

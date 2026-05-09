@@ -76,8 +76,12 @@ const STORY_FACTS_TEXT := {
 	1: "Growing plants require healthy soil.\n\nFungi help make the soil healthy and alive.",
 	2: "Birds deserve to eat too. So plant more to feed them.\n\nBirds like seeds.",
 	3: "Beans help fix nitrogen (Green) in the soil.\nSquash bring shade and potassium (Orange).\nMaize brings Phosphorus (Pink).\nTrees are helping bring in water (Blue).\n\nBelow the Mushrooms are Mycorrhizal fungi which form a relationship with plant roots, acting as an extension of the root system to enhance nutrient and water absorption.",
-	4: "Healthy people need healthy soil.",
-	5: "People can exchange, lend, borrow, rotate, gift and share their goods and services fairly even without money.",
+	4: "Healthy people need healthy soil.
+	
+	In this village we have, Vendors selling things (Orange), Cooks cooking (Pink)
+	and a Bank with money (Blue) - and now you are brining healthy soil for Farmers can harvest healthy food (Green).",
+	5: "People can fairly exchange, lend, borrow, rotate, gift and share their goods and services - 
+	 even without money!",
 	6: "This was the easy part. Now try Challenge Mode!"
 }
 const STORY_GUIDE_ARROW_COLOR := Color(1.0, 0.74, 0.16, 0.96)

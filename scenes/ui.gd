@@ -2494,11 +2494,15 @@ func _get_inventory_agent_at(mouse_pos: Vector2) -> String:
 		if not icon.has_meta("item_name"):
 			continue
 		var touch_rect = icon.get_global_rect()
-		if Global.is_mobile_platform or _pointer_is_touch:
+		if _is_mobile_like_inventory_input(_pointer_is_touch):
 			touch_rect = touch_rect.grow(14.0)
 		if touch_rect.has_point(mouse_pos):
 			return str(icon.get_meta("item_name"))
 	return ""
+
+
+func _is_mobile_like_inventory_input(from_touch: bool = false) -> bool:
+	return from_touch or Global.is_mobile_platform or _is_compact_ui()
 
 
 func _suppress_emulated_mouse_after_touch() -> void:
@@ -3174,7 +3178,7 @@ func _on_inventory_pointer_pressed(screen_pos: Vector2, from_touch: bool = false
 		if _selected_inventory_item != selected:
 			_select_inventory_item(selected)
 			_pointer_press_selection_changed = true
-			if from_touch or Global.is_mobile_platform:
+			if _is_mobile_like_inventory_input(from_touch):
 				_protect_mobile_inventory_selection()
 	if _selected_inventory_item != "":
 		_update_selected_tile_hint(screen_pos)
@@ -3215,7 +3219,7 @@ func _on_inventory_pointer_released(screen_pos: Vector2, from_touch: bool = fals
 	if pressed_item != "" and pressed_item == active_item and not selection_changed:
 		var released_item = _get_inventory_agent_at(screen_pos)
 		if released_item == active_item:
-			if (from_touch or Global.is_mobile_platform) and _is_mobile_inventory_selection_protected():
+			if _is_mobile_like_inventory_input(from_touch) or _is_mobile_inventory_selection_protected():
 				_refresh_inventory_selection_visuals()
 				_update_selected_tile_hint(screen_pos)
 				_update_minimap_input_lock()
@@ -3253,9 +3257,9 @@ func _input(event):
 		if _is_emulated_mouse_after_touch_suppressed():
 			return
 		if event.pressed:
-			_on_inventory_pointer_pressed(event.position, Global.is_mobile_platform)
+			_on_inventory_pointer_pressed(event.position, _is_compact_ui())
 		else:
-			_on_inventory_pointer_released(event.position, Global.is_mobile_platform)
+			_on_inventory_pointer_released(event.position, _is_compact_ui())
 		return
 
 	if event is InputEventScreenTouch:

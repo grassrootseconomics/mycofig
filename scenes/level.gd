@@ -50,6 +50,7 @@ const BASKET_NEAR_PERSON_MAX_TILES := 4
 const STORY_PHASE5_REQUIRED_TRADE_CYCLES := 2
 const STORY_PHASE5_BASKET_R_LIQUIDITY := STORY_VILLAGER_COUNT_PER_ROLE * 3 * STORY_PHASE5_REQUIRED_TRADE_CYCLES
 const STORY_PHASE5_FORCED_BASKET_LINK_META := "story_force_phase5_basket_link"
+const STORY_PHASE5_INTRO_VENDOR_META := "story_phase5_intro_pickup_vendor"
 const STORY_VILLAGE_PERMANENT_REVEAL_BUFFER := 4
 const STORY_PHASE5_OBJECTIVE_KEY := "village_everyone_trading"
 const STORY_BANK_BUDDY_RADIUS := 192.0
@@ -59,6 +60,8 @@ const AMBIENT_TREE_AUDIO_SILENT_DB := -36.0
 const AMBIENT_TREE_AUDIO_FADE_SPEED_DB := 28.0
 const STORY_PHASE4_CAMERA_PROMPT_DELAY_SEC := 2.2
 const STORY_PHASE5_CAMERA_PROMPT_DELAY_SEC := 1.6
+const STORY_PHASE5_INTRO_TUKTUK_TIMEOUT_SEC := 9.0
+const STORY_PHASE5_INTRO_TUKTUK_POLL_SEC := 0.1
 const STORY_PHASE4_CAMERA_SMOOTHING_SPEED := 3.0
 const STORY_PHASE4_VILLAGE_CAMERA_SMOOTHING_SPEED := 2.25
 const STORY_PHASE4_CAMERA_RESTORE_DELAY_SEC := 1.6
@@ -165,6 +168,7 @@ var _story_phase5_sent_trade_counts: Dictionary = {}
 var _story_phase5_received_trade_counts: Dictionary = {}
 var _story_phase5_all_villagers_trading := false
 var _story_phase5_basket_placed := false
+var _story_phase5_intro_tuktuk_finished := false
 var _tuktuk_villager_last_trade_seconds: Dictionary = {}
 var _tuktuk_trade_clock := 0.0
 var _story_farmer_inbound_wait_started_msec: Dictionary = {}
@@ -584,6 +588,7 @@ func _story_reset_phase_state() -> void:
 	_story_phase5_received_trade_counts.clear()
 	_story_phase5_all_villagers_trading = false
 	_story_phase5_basket_placed = false
+	_story_phase5_intro_tuktuk_finished = false
 	_tuktuk_villager_last_trade_seconds.clear()
 	_tuktuk_trade_clock = 0.0
 	_story_farmer_inbound_wait_started_msec.clear()
@@ -605,6 +610,7 @@ func _set_story_phase(phase_id: int) -> void:
 	Global.story_chapter_id = maxi(Global.story_chapter_id, safe_phase)
 	var fallback = str("Phase ", safe_phase, ": Continue restoring the village ecosystem.")
 	var prompt_text = Global.story_stage_text.get(safe_phase, fallback)
+	var sync_inventory_sparkles := true
 	if previous_phase < 2 and _story_phase_id >= 2:
 		# Birds are intentionally deferred until Phase 2 in story mode.
 		_on_update_score()
@@ -622,15 +628,14 @@ func _set_story_phase(phase_id: int) -> void:
 		_story_phase4_required_farmer_ids = _story_collect_phase4_initial_farmer_ids()
 		_story_show_phase4_prompt_after_camera_pan(prompt_text)
 	elif safe_phase == 5:
+		sync_inventory_sparkles = false
 		_story_phase4_reserved_crop_to_farmer_ids.clear()
-		_story_reset_phase5_trading_progress()
-		_story_prepare_existing_phase5_baskets()
-		_story_refresh_hud()
-		_story_center_camera_on_phase5_nontrading_villagers(false)
-		_story_show_phase5_prompt_after_camera_pan(prompt_text)
+		_story_center_camera_on_phase5_intro_vendor(false)
+		_story_run_phase5_intro_sequence(prompt_text)
 	else:
 		_story_set_prompt(prompt_text, safe_phase)
-	_story_sync_phase1_inventory_sparkle_targets()
+	if sync_inventory_sparkles:
+		_story_sync_phase1_inventory_sparkle_targets()
 
 
 func _story_center_camera_on_village(immediate: bool = false) -> void:
@@ -639,6 +644,18 @@ func _story_center_camera_on_village(immediate: bool = false) -> void:
 		if world.has_method("set_camera_smoothing_speed"):
 			world.set_camera_smoothing_speed(STORY_PHASE4_VILLAGE_CAMERA_SMOOTHING_SPEED)
 		world.set_camera_world_center(_story_village_center_world, immediate)
+
+
+func _story_center_camera_on_phase5_intro_vendor(immediate: bool = false) -> void:
+	var target = _story_find_phase5_intro_vendor()
+	if not is_instance_valid(target):
+		_story_center_camera_on_village(immediate)
+		return
+	var world = _get_world_foundation()
+	if is_instance_valid(world) and world.has_method("set_camera_world_center"):
+		if world.has_method("set_camera_smoothing_speed"):
+			world.set_camera_smoothing_speed(STORY_PHASE4_CAMERA_SMOOTHING_SPEED)
+		world.set_camera_world_center(target.global_position, immediate)
 
 
 func _story_show_phase4_prompt_after_camera_pan(prompt_text: String) -> void:
@@ -652,6 +669,89 @@ func _story_show_phase5_prompt_after_camera_pan(prompt_text: String) -> void:
 	await get_tree().create_timer(STORY_PHASE5_CAMERA_PROMPT_DELAY_SEC, false, false, true).timeout
 	if not _is_story_mode() or _story_phase_id != 5:
 		return
+	var world = _get_world_foundation()
+	if is_instance_valid(world) and world.has_method("reset_camera_smoothing_speed"):
+		world.reset_camera_smoothing_speed()
+	_story_set_prompt(prompt_text, 5)
+
+
+func _on_story_phase5_intro_tuktuk_finished() -> void:
+	_story_phase5_intro_tuktuk_finished = true
+
+
+func _story_find_phase5_intro_vendor() -> Node:
+	for agent in $Agents.get_children():
+		if not _is_story_villager(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if str(agent.get("type")) != "vendor":
+			continue
+		if bool(agent.get_meta(STORY_PHASE5_INTRO_VENDOR_META, false)):
+			return agent
+	return null
+
+
+func _story_get_phase5_intro_tuktuk_spawn_position(target: Node) -> Vector2:
+	var world = _get_world_foundation()
+	if _supports_world_tiles(world) and is_instance_valid(target):
+		var village_rect = _get_runtime_village_rect(world)
+		var target_coord = _world_to_tile_coord(world, target.global_position)
+		var spawn_coord = Vector2i(village_rect.position.x - STORY_TUKTUK_SPAWN_RING_MAX, target_coord.y)
+		return world.tile_to_world_center(_clamp_tile_coord(world, spawn_coord))
+	if is_instance_valid(target):
+		return target.global_position + Vector2(-256.0, 0.0)
+	return _story_village_center_world + Vector2(-256.0, 0.0)
+
+
+func _story_spawn_phase5_intro_tuktuk(target: Node) -> Node:
+	if not is_instance_valid(target):
+		return null
+	var predator = tuktuk_scene.instantiate()
+	if not predator.has_method("configure_scripted_capture"):
+		return null
+	_story_phase5_intro_tuktuk_finished = false
+	predator.configure_scripted_capture(target, _story_get_phase5_intro_tuktuk_spawn_position(target))
+	if predator.has_signal("scripted_capture_finished"):
+		predator.connect("scripted_capture_finished", Callable(self, "_on_story_phase5_intro_tuktuk_finished"))
+	$Animals.add_child(predator)
+	if is_instance_valid(_car_sound_player):
+		_car_sound_player.play()
+	return predator
+
+
+func _story_wait_for_phase5_intro_tuktuk(predator: Node, target: Node) -> void:
+	var elapsed := 0.0
+	while elapsed < STORY_PHASE5_INTRO_TUKTUK_TIMEOUT_SEC:
+		if _story_phase5_intro_tuktuk_finished:
+			return
+		if not is_instance_valid(predator) or predator.is_queued_for_deletion():
+			return
+		await get_tree().create_timer(STORY_PHASE5_INTRO_TUKTUK_POLL_SEC, false, false, true).timeout
+		if not _is_story_mode() or _story_phase_id != 5:
+			return
+		elapsed += STORY_PHASE5_INTRO_TUKTUK_POLL_SEC
+	if is_instance_valid(predator) and not predator.is_queued_for_deletion():
+		if bool(predator.get("caught")) and is_instance_valid(target) and target.has_method("kill_it"):
+			target.kill_it()
+		predator.queue_free()
+
+
+func _story_run_phase5_intro_sequence(prompt_text: String) -> void:
+	await get_tree().create_timer(STORY_PHASE5_CAMERA_PROMPT_DELAY_SEC, false, false, true).timeout
+	if not _is_story_mode() or _story_phase_id != 5:
+		return
+	var pickup_vendor = _story_find_phase5_intro_vendor()
+	if is_instance_valid(pickup_vendor):
+		var intro_tuktuk = _story_spawn_phase5_intro_tuktuk(pickup_vendor)
+		if is_instance_valid(intro_tuktuk):
+			await _story_wait_for_phase5_intro_tuktuk(intro_tuktuk, pickup_vendor)
+			if not _is_story_mode() or _story_phase_id != 5:
+				return
+	_story_reset_phase5_trading_progress()
+	_story_prepare_existing_phase5_baskets()
+	_story_refresh_hud()
+	_story_sync_phase1_inventory_sparkle_targets()
 	var world = _get_world_foundation()
 	if is_instance_valid(world) and world.has_method("reset_camera_smoothing_speed"):
 		world.reset_camera_smoothing_speed()
@@ -1158,7 +1258,8 @@ func _story_get_lower_villager_layout() -> Array:
 		{"role": "farmer", "tile": Vector2i(village_rect.position.x + 4, mini(lower_top_y + 1, lower_bottom_y))},
 		{"role": "vendor", "tile": Vector2i(village_rect.position.x + 6, mini(lower_top_y + 1, lower_bottom_y))},
 		{"role": "cook", "tile": Vector2i(village_rect.position.x + 5, lower_bottom_y)},
-		{"role": "farmer", "tile": Vector2i(village_rect.position.x + 8, lower_bottom_y)}
+		{"role": "farmer", "tile": Vector2i(village_rect.position.x + 8, lower_bottom_y)},
+		{"role": "vendor", "tile": Vector2i(village_rect.position.x + village_rect.size.x - 1, lower_bottom_y), "phase5_intro_pickup": true}
 	]
 
 
@@ -2643,6 +2744,8 @@ func _story_spawn_village_cast() -> void:
 		var spawned_extra = _spawn_story_villager_at_tile(world, person_cfg["tile"], person_cfg["role"], true)
 		if spawned_extra != null:
 			spawned_extra.set_meta("story_protected_from_tuktuk", false)
+			if bool(person_cfg.get("phase5_intro_pickup", false)):
+				spawned_extra.set_meta(STORY_PHASE5_INTRO_VENDOR_META, true)
 			placed += 1
 			spawned_village_actors.append(spawned_extra)
 

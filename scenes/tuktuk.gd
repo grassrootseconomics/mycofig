@@ -1,6 +1,8 @@
 extends CharacterBody2D
 class_name Tuktuk
 
+signal scripted_capture_finished
+
 @export var speed := 250
 const CAPTURE_DISTANCE := 20.0
 var going = Vector2(1, 0)
@@ -11,10 +13,51 @@ var caught = false
 var _captured_target: Node = null
 var _capture_cleanup_done := false
 var _captured_target_offset := Vector2(-20, -8)
+var _scripted_capture_enabled := false
+var _scripted_spawn_pos := Vector2.ZERO
+var _scripted_target: Node = null
+var _scripted_finished_emitted := false
 
 
 func _ready():
-	reset()
+	if _scripted_capture_enabled:
+		_start_scripted_capture()
+	else:
+		reset()
+
+
+func configure_scripted_capture(target: Node, spawn_pos: Vector2) -> void:
+	_scripted_capture_enabled = true
+	_scripted_spawn_pos = spawn_pos
+	_scripted_target = target
+	position = spawn_pos
+
+
+func _emit_scripted_capture_finished() -> void:
+	if not _scripted_capture_enabled:
+		return
+	if _scripted_finished_emitted:
+		return
+	_scripted_finished_emitted = true
+	scripted_capture_finished.emit()
+
+
+func _start_scripted_capture() -> void:
+	quarry_found = false
+	the_quarry = null
+	caught = false
+	_captured_target = null
+	_capture_cleanup_done = false
+	_scripted_finished_emitted = false
+	position = _scripted_spawn_pos
+	set_rotation(0)
+	if not is_instance_valid(_scripted_target) or bool(_scripted_target.get("dead")):
+		_emit_scripted_capture_finished()
+		call_deferred("queue_free")
+		return
+	quarry_found = true
+	the_quarry = _scripted_target
+	quarry_type = str(_scripted_target.get("type"))
 
 
 func reset():
@@ -23,6 +66,7 @@ func reset():
 	caught = false
 	_captured_target = null
 	_capture_cleanup_done = false
+	_scripted_finished_emitted = false
 	var rng := RandomNumberGenerator.new()
 	var world_rect = Global.get_world_rect(self)
 	var level_root = get_node_or_null("../..")
@@ -76,6 +120,7 @@ func _capture_and_exit() -> void:
 	_capture_cleanup_done = true
 	if is_instance_valid(_captured_target) and _captured_target.has_method("kill_it"):
 		_captured_target.kill_it()
+	_emit_scripted_capture_finished()
 	call_deferred("queue_free")
 
 
@@ -110,6 +155,13 @@ func _try_capture_quarry() -> bool:
 
 
 func _physics_process(delta: float) -> void:
+	if _scripted_capture_enabled and not caught and (not is_instance_valid(the_quarry) or bool(the_quarry.get("dead"))):
+		the_quarry = null
+		quarry_found = false
+		_emit_scripted_capture_finished()
+		call_deferred("queue_free")
+		return
+
 	if not is_instance_valid(the_quarry) or bool(the_quarry.get("dead")):
 		the_quarry = null
 		quarry_found = false
@@ -136,6 +188,10 @@ func _on_area_entered(agent: Area2D) -> void:
 	if is_instance_valid(_captured_target):
 		return
 	if not is_instance_valid(agent):
+		return
+	if _scripted_capture_enabled:
+		if quarry_found and agent == the_quarry:
+			_begin_escape_with_capture(agent)
 		return
 	var level_root = get_node_or_null("../..")
 	if is_instance_valid(level_root) and level_root.has_method("is_valid_predator_target"):

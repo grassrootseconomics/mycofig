@@ -151,7 +151,7 @@ Grow crops near the village so the farmers can harvest and recover.",
 	
 	Some villagers have goods, skills, time or services, but not enough money.
 
-	Place a basket near the village so people can trade with eachother.",
+	Place a basket near the village so people can trade with eachother - before more leave the village!",
 	6: "You Did It!
 
 You helped the garden grow and helped the village share again.

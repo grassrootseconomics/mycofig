@@ -65,7 +65,7 @@ const STORY_TUTORIAL_CONTINUE_BUTTON_SIZE := Vector2(132, 40)
 const STORY_TUTORIAL_CHALLENGE_BUTTON_SIZE := Vector2(220, 42)
 const STORY_TUTORIAL_CONTINUE_TEXT := "Let's go!"
 const STORY_TUTORIAL_CHALLENGE_TEXT := "Give me a Challenge!"
-const CHALLENGE_LOSS_CONTINUE_TEXT := "View my score"
+const CHALLENGE_LOSS_CONTINUE_TEXT := "View My Score"
 const STORY_FACTS_BUTTON_SIZE := Vector2(196, 42)
 const STORY_FACTS_PANEL_SIZE := Vector2(640, 430)
 const STORY_FACTS_PANEL_COLOR := Color(0.96, 0.42, 0.08, 0.82)
@@ -226,6 +226,7 @@ var _story_facts_seen_phases: Dictionary = {}
 var _story_facts_current_phase := 0
 var _story_facts_sparkle_elapsed := 0.0
 var _story_facts_sparkle_spawn_elapsed := STORY_FACTS_SPARKLE_INTERVAL
+var _challenge_loss_dialog: AcceptDialog = null
 var _last_rank_key := -1
 var _rank_flash_tween: Tween = null
 var _pause_container_ref: MarginContainer = null
@@ -1095,19 +1096,11 @@ func show_story_instruction(text_value: String, phase_id: int = 0) -> void:
 
 func show_challenge_loss_instruction(text_value: String) -> void:
 	_cache_layout_nodes()
-	_ensure_tutorial_panel_toggle()
-	_ensure_tutorial_continue_button()
 	_challenge_loss_instruction_active = true
 	_story_instruction_phase_id = 0
-	_sync_story_continue_button_text()
-	_apply_responsive_layout()
-	if is_instance_valid(_tutorial_label):
-		_tutorial_label.text = text_value
 	if is_instance_valid(_tutorial_panel):
-		_tutorial_panel.visible = true
-	_tutorial_collapsed = false
-	_tutorial_last_visible = false
-	_tutorial_last_text = text_value
+		_tutorial_panel.visible = false
+	_show_challenge_loss_dialog(text_value)
 	_sync_story_instruction_bar_demo_state()
 	_apply_tutorial_panel_state()
 	_update_story_instruction_arrows()
@@ -2653,6 +2646,67 @@ func _end_inventory_drag() -> void:
 		drag_preview_outline.clear_points()
 
 
+func _style_quit_like_dialog_label(dialog: AcceptDialog) -> void:
+	if not is_instance_valid(dialog):
+		return
+	if not dialog.has_method("get_label"):
+		return
+	var dialog_label = dialog.call("get_label")
+	if dialog_label is Label:
+		var label_node: Label = dialog_label
+		label_node.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label_node.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label_node.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label_node.add_theme_font_size_override("font_size", 22 if _is_compact_ui() else 19)
+		label_node.add_theme_color_override("font_color", Color(1, 1, 1, 0.97))
+
+
+func _ensure_challenge_loss_dialog() -> void:
+	if is_instance_valid(_challenge_loss_dialog):
+		return
+	_challenge_loss_dialog = AcceptDialog.new()
+	_challenge_loss_dialog.name = "ChallengeLossDialog"
+	_challenge_loss_dialog.title = "Game Over"
+	_challenge_loss_dialog.add_theme_stylebox_override("panel", _make_quit_dialog_panel_style())
+	_challenge_loss_dialog.add_theme_color_override("title_color", Color(1, 1, 1, 0.98))
+	_style_quit_like_dialog_label(_challenge_loss_dialog)
+	var ok_button = _challenge_loss_dialog.get_ok_button()
+	if is_instance_valid(ok_button):
+		ok_button.text = CHALLENGE_LOSS_CONTINUE_TEXT
+		ok_button.custom_minimum_size = Vector2(200, 56)
+		ok_button.add_theme_font_size_override("font_size", 18)
+		ok_button.add_theme_color_override("font_color", Color(1, 1, 1, 0.98))
+		ok_button.add_theme_stylebox_override("normal", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG))
+		ok_button.add_theme_stylebox_override("hover", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG_HOVER))
+		ok_button.add_theme_stylebox_override("pressed", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG_PRESSED))
+	_challenge_loss_dialog.confirmed.connect(_on_challenge_loss_dialog_confirmed)
+	_challenge_loss_dialog.canceled.connect(_on_challenge_loss_dialog_confirmed)
+	add_child(_challenge_loss_dialog)
+
+
+func _show_challenge_loss_dialog(text_value: String) -> void:
+	set_pause_state(true)
+	_ensure_challenge_loss_dialog()
+	if not is_instance_valid(_challenge_loss_dialog):
+		return
+	_challenge_loss_dialog.dialog_text = text_value
+	_style_quit_like_dialog_label(_challenge_loss_dialog)
+	var popup_size = Vector2i(460, 200)
+	if _is_compact_ui():
+		popup_size = Vector2i(520, 240)
+	_challenge_loss_dialog.popup_centered(popup_size)
+
+
+func _on_challenge_loss_dialog_confirmed() -> void:
+	if not _challenge_loss_instruction_active:
+		return
+	_challenge_loss_instruction_active = false
+	set_pause_state(false)
+	var level_root = get_parent()
+	if is_instance_valid(level_root) and level_root.has_method("on_challenge_loss_score_continue"):
+		level_root.call("on_challenge_loss_score_continue")
+
+
 func _ensure_back_confirm_dialog() -> void:
 	if is_instance_valid(_back_confirm_dialog):
 		return
@@ -2662,15 +2716,7 @@ func _ensure_back_confirm_dialog() -> void:
 	_back_confirm_dialog.dialog_text = "Are you sure you want to quit?"
 	_back_confirm_dialog.add_theme_stylebox_override("panel", _make_quit_dialog_panel_style())
 	_back_confirm_dialog.add_theme_color_override("title_color", Color(1, 1, 1, 0.98))
-	if _back_confirm_dialog.has_method("get_label"):
-		var dialog_label = _back_confirm_dialog.call("get_label")
-		if dialog_label is Label:
-			var label_node: Label = dialog_label
-			label_node.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			label_node.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-			label_node.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-			label_node.add_theme_font_size_override("font_size", 22 if _is_compact_ui() else 19)
-			label_node.add_theme_color_override("font_color", Color(1, 1, 1, 0.97))
+	_style_quit_like_dialog_label(_back_confirm_dialog)
 	var ok_button = _back_confirm_dialog.get_ok_button()
 	if is_instance_valid(ok_button):
 		ok_button.text = "Yes"

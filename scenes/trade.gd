@@ -162,6 +162,16 @@ func _is_endpoint_locked(agent: Variant) -> bool:
 	return false
 
 
+func _is_village_trade_endpoint(agent: Variant) -> bool:
+	return is_instance_valid(agent) and bool(agent.get_meta("story_village_actor", false))
+
+
+func _should_pause_for_village_endpoint_lock() -> bool:
+	if not bool(liquidity_cycle_trade) and not bool(village_ephemeral_trade_visual):
+		return false
+	return _is_village_trade_endpoint(start_agent) or _is_village_trade_endpoint(end_agent)
+
+
 func _begin_drop() -> void:
 	if _dropping:
 		return
@@ -260,6 +270,9 @@ func _process(delta: float) -> void:
 		return
 
 	if _is_endpoint_locked(start_agent) or _is_endpoint_locked(end_agent):
+		if _should_pause_for_village_endpoint_lock():
+			_update_village_trade_trail()
+			return
 		_begin_drop()
 	if _dropping:
 		_advance_drop(delta)

@@ -41,6 +41,9 @@ var perf_soil_tick_ms_last = 0.0
 var perf_tile_occupancy_queries = 0
 var perf_last_sample = {}
 var perf_run_metadata = {}
+const PERF_DENSITY_TIER1_AGENT_COUNT := 220
+const PERF_DENSITY_TIER2_AGENT_COUNT := 320
+const PERF_OCCUPANCY_TIER2_QUERY_COUNT := 50000
 var minimap_adaptive_redraw_enabled = true
 var ui_layout_cadence_enabled = true
 var trade_dispatch_limit_enabled = true
@@ -501,6 +504,18 @@ func get_effective_perf_tier() -> int:
 
 func set_perf_tier(new_tier: int) -> void:
 	perf_tier = clampi(new_tier, 0, 2)
+
+
+func apply_perf_density_gate(active_agents: int, occupancy_queries: int = 0) -> void:
+	if not perf_adaptive_enabled or perf_quality_override >= 0:
+		return
+	var desired_tier := -1
+	if active_agents > PERF_DENSITY_TIER2_AGENT_COUNT or occupancy_queries >= PERF_OCCUPANCY_TIER2_QUERY_COUNT:
+		desired_tier = 2
+	elif active_agents > PERF_DENSITY_TIER1_AGENT_COUNT:
+		desired_tier = 1
+	if desired_tier > perf_tier:
+		set_perf_tier(desired_tier)
 
 
 func get_line_visual_refresh_interval() -> float:

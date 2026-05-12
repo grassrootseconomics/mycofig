@@ -6,6 +6,7 @@ signal scripted_capture_started
 
 @export var speed := 250
 const CAPTURE_DISTANCE := 20.0
+const TUKTUK_ENTRY_SOUND_VOLUME_DB := -6.0
 var going = Vector2(1, 0)
 var quarry_found = false
 var the_quarry: Node = null
@@ -35,8 +36,9 @@ func _play_entry_sound() -> void:
 	if is_instance_valid(level_root) and level_root.has_method("play_tuktuk_entry_sound"):
 		level_root.call("play_tuktuk_entry_sound")
 		return
-	var car_sound = get_node_or_null("../../CarSound")
-	if is_instance_valid(car_sound) and car_sound.has_method("play"):
+	var car_sound := get_node_or_null("../../CarSound") as AudioStreamPlayer2D
+	if is_instance_valid(car_sound):
+		car_sound.volume_db = TUKTUK_ENTRY_SOUND_VOLUME_DB
 		car_sound.play()
 
 
@@ -154,6 +156,9 @@ func _begin_escape_with_capture(agent: Node) -> void:
 	_captured_target = agent
 	if is_instance_valid(_captured_target):
 		_captured_target.set("dead", true)
+		var level_root = get_node_or_null("../..")
+		if is_instance_valid(level_root) and level_root.has_method("notify_tuktuk_villager_captured"):
+			level_root.call("notify_tuktuk_villager_captured", _captured_target)
 		var captured_shape = _captured_target.get_node_or_null("CollisionShape2D")
 		if is_instance_valid(captured_shape):
 			captured_shape.set_deferred("disabled", true)

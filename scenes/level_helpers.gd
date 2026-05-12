@@ -835,6 +835,31 @@ static func _agent_covers_tile(level_root: Node, agent: Node, coord: Vector2i) -
 	return false
 
 
+static func _is_ecology_soil_agent(agent: Variant) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	var agent_type = str(agent.get("type"))
+	if agent_type == "myco":
+		return agent.has_method("_has_complete_nutrient_set")
+	return agent_type == "bean" or agent_type == "squash" or agent_type == "maize" or agent_type == "tree"
+
+
+static func _can_place_agent_on_soil_tiles(world: Node, candidate_agent: Variant, coords: Array) -> bool:
+	if not _is_ecology_soil_agent(candidate_agent):
+		return true
+	if not is_instance_valid(world) or not world.has_method("can_place_ecology_on_tile"):
+		return true
+	var agent_type = str(candidate_agent.get("type"))
+	for coord_variant in coords:
+		if agent_type == "myco" and world.has_method("can_place_myco_on_tile"):
+			if not bool(world.call("can_place_myco_on_tile", Vector2i(coord_variant))):
+				return false
+			continue
+		if not bool(world.call("can_place_ecology_on_tile", Vector2i(coord_variant))):
+			return false
+	return true
+
+
 static func can_place_agent_on_tile(level_root: Node, agents_root: Node, candidate_agent: Node, target_tile: Vector2i, ignore: Node = null, sprite_scale_override: Variant = null, verify_cached_miss: bool = false) -> bool:
 	if not _supports_tile_world(level_root):
 		return true
@@ -867,6 +892,8 @@ static func can_place_agent_on_tile(level_root: Node, agents_root: Node, candida
 	for coord in candidate_tiles:
 		if not world.in_bounds(coord):
 			return false
+	if not _can_place_agent_on_soil_tiles(world, candidate_agent, candidate_tiles):
+		return false
 
 	var ignore_agent = ignore
 	if not is_instance_valid(ignore_agent):
@@ -934,9 +961,18 @@ static func _is_trade_hub_candidate(seeker: Variant, candidate: Variant) -> bool
 	if bool(candidate.get("dead")):
 		return false
 	var candidate_type = str(candidate.get("type"))
-	if candidate_type != "myco" and not _is_village_bank_trade_hub(seeker, candidate):
+	if candidate_type != "myco" and candidate_type != "basket" and not _is_village_bank_trade_hub(seeker, candidate) and not _is_village_person_trade_hub(seeker, candidate):
 		return false
 	return _can_share_trade_network(seeker, candidate)
+
+
+static func is_trade_hub_index_candidate(candidate: Variant) -> bool:
+	if not is_instance_valid(candidate):
+		return false
+	if bool(candidate.get("dead")):
+		return false
+	var candidate_type = str(candidate.get("type"))
+	return candidate_type == "myco" or candidate_type == "basket" or candidate_type == "bank" or _is_village_person_actor(candidate)
 
 
 static func _is_village_person_actor(agent: Variant) -> bool:
@@ -946,6 +982,19 @@ static func _is_village_person_actor(agent: Variant) -> bool:
 		return false
 	var agent_type = str(agent.get("type"))
 	return agent_type == "farmer" or agent_type == "vendor" or agent_type == "cook"
+
+
+static func _is_village_trade_actor(agent: Variant) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	if not bool(agent.get_meta("story_village_actor", false)):
+		return false
+	var agent_type = str(agent.get("type"))
+	if agent_type == "farmer" or agent_type == "vendor" or agent_type == "cook" or agent_type == "bank" or agent_type == "basket":
+		return true
+	if agent_type != "myco":
+		return false
+	return str(agent.get_meta("story_kind", "")).begins_with("basket")
 
 
 static func _is_village_bank_trade_hub(seeker: Variant, candidate: Variant) -> bool:
@@ -958,13 +1007,21 @@ static func _is_village_bank_trade_hub(seeker: Variant, candidate: Variant) -> b
 	return _is_village_person_actor(seeker)
 
 
+static func _is_village_person_trade_hub(seeker: Variant, candidate: Variant) -> bool:
+	if not _is_village_person_actor(candidate):
+		return false
+	if not is_instance_valid(seeker):
+		return false
+	return bool(seeker.get_meta("story_village_actor", false)) and str(seeker.get("type")) == "bank"
+
+
 static func are_agents_in_neighboring_tiles(level_root: Node, agent_a: Variant, agent_b: Variant, max_tile_delta: int = 1) -> bool:
 	if not _supports_tile_world(level_root):
 		return false
 	if not is_instance_valid(agent_a) or not is_instance_valid(agent_b):
 		return false
-	var tiles_a = get_agent_occupied_tiles(level_root, agent_a)
-	var tiles_b = get_agent_occupied_tiles(level_root, agent_b)
+	var tiles_a = _get_current_agent_occupied_tiles(level_root, agent_a)
+	var tiles_b = _get_current_agent_occupied_tiles(level_root, agent_b)
 	if tiles_a.is_empty() or tiles_b.is_empty():
 		return false
 	var max_delta = maxi(max_tile_delta, 0)
@@ -975,6 +1032,15 @@ static func are_agents_in_neighboring_tiles(level_root: Node, agent_a: Variant, 
 			if maxi(abs(coord_a.x - coord_b.x), abs(coord_a.y - coord_b.y)) <= max_delta:
 				return true
 	return false
+
+
+static func _get_current_agent_occupied_tiles(level_root: Node, agent: Variant) -> Array:
+	var world = _get_world_foundation(level_root)
+	if is_instance_valid(world) and world.has_method("get_agent_footprint_cached"):
+		var cached_variant = world.get_agent_footprint_cached(agent)
+		if typeof(cached_variant) == TYPE_ARRAY and not cached_variant.is_empty():
+			return cached_variant
+	return get_agent_occupied_tiles(level_root, agent)
 
 
 static func get_tile_reach_delta_for_radius(level_root: Node, radius_px: float) -> int:
@@ -1062,7 +1128,7 @@ static func is_world_pos_in_agent_tile_reach(level_root: Node, world_pos: Vector
 	var reach_delta = max_tile_delta
 	if reach_delta < 0:
 		reach_delta = get_agent_tile_reach_delta(level_root, agent)
-	var agent_tiles = get_agent_occupied_tiles(level_root, agent)
+	var agent_tiles = _get_current_agent_occupied_tiles(level_root, agent)
 	for coord_variant in agent_tiles:
 		var coord = Vector2i(coord_variant)
 		if maxi(abs(anchor_coord.x - coord.x), abs(anchor_coord.y - coord.y)) <= reach_delta:
@@ -1078,10 +1144,17 @@ static func _append_trade_hub_candidate(results: Array, seen: Dictionary, seeker
 		return false
 	seen[candidate_id] = true
 	if _supports_tile_world(level_root):
-		if not are_agents_in_tile_reach(level_root, seeker, candidate, use_candidate_radius):
+		var in_reach := false
+		if _is_village_trade_actor(seeker) and _is_village_trade_actor(candidate):
+			in_reach = are_agents_in_shared_tile_reach(level_root, seeker, candidate)
+		else:
+			in_reach = are_agents_in_tile_reach(level_root, seeker, candidate, use_candidate_radius)
+		if not in_reach:
 			return false
 	else:
 		var reach = _get_agent_interaction_radius(candidate) if use_candidate_radius else _get_agent_interaction_radius(seeker)
+		if _is_village_trade_actor(seeker) and _is_village_trade_actor(candidate):
+			reach = maxf(_get_agent_interaction_radius(seeker), _get_agent_interaction_radius(candidate))
 		if seeker.global_position.distance_to(candidate.global_position) > reach:
 			return false
 	results.append(candidate)
@@ -1107,25 +1180,44 @@ static func query_trade_hubs_near_agent(level_root: Node, agents_root: Node, see
 		return results
 	var seen: Dictionary = {}
 	var world = _get_world_foundation(level_root)
-	if is_instance_valid(world) and world.has_method("get_tile_occupants_cached") and world.has_method("world_to_tile") and world.has_method("in_bounds"):
+	if is_instance_valid(world) and world.has_method("world_to_tile") and world.has_method("in_bounds"):
+		var used_cached_tiles = world.has_method("get_trade_hub_occupants_cached") or world.has_method("get_tile_occupants_cached")
 		var tile_size = float(world.get("tile_size"))
 		if tile_size <= 0.0:
 			tile_size = 64.0
-		var search_radius_px = maxf(_get_agent_interaction_radius(seeker), maxf(float(Global.social_buddy_radius), 320.0))
-		var radius_tiles = int(ceil(search_radius_px / tile_size)) + 1
+		var radius_tiles := 0
+		if Global.get_effective_perf_tier() <= 0:
+			var search_radius_px = maxf(_get_agent_interaction_radius(seeker), maxf(float(Global.social_buddy_radius), 320.0))
+			radius_tiles = int(ceil(search_radius_px / tile_size)) + 1
+		else:
+			radius_tiles = maxi(get_agent_tile_reach_delta(level_root, seeker), TILE_REACH_BANK) + 1
+		var collect_limit := 0
+		if max_results > 0 and Global.get_effective_perf_tier() > 0:
+			collect_limit = max_results * (4 if Global.get_effective_perf_tier() == 1 else 2)
 		var center_coord = Vector2i(world.world_to_tile(seeker.global_position))
-		for y in range(center_coord.y - radius_tiles, center_coord.y + radius_tiles + 1):
-			for x in range(center_coord.x - radius_tiles, center_coord.x + radius_tiles + 1):
-				var coord = Vector2i(x, y)
-				if not world.in_bounds(coord):
-					continue
-				var occupants_variant = world.get_tile_occupants_cached(coord, seeker)
-				if typeof(occupants_variant) != TYPE_ARRAY:
-					continue
-				for candidate in occupants_variant:
-					_append_trade_hub_candidate(results, seen, seeker, candidate, use_candidate_radius, 0, level_root)
+		for radius in range(radius_tiles + 1):
+			for dy in range(-radius, radius + 1):
+				for dx in range(-radius, radius + 1):
+					if maxi(abs(dx), abs(dy)) != radius:
+						continue
+					var coord = Vector2i(center_coord.x + dx, center_coord.y + dy)
+					if not world.in_bounds(coord):
+						continue
+					var occupants_variant = []
+					if world.has_method("get_trade_hub_occupants_cached"):
+						occupants_variant = world.get_trade_hub_occupants_cached(coord, seeker)
+					elif world.has_method("get_tile_occupants_cached"):
+						occupants_variant = world.get_tile_occupants_cached(coord, seeker)
+					if typeof(occupants_variant) != TYPE_ARRAY:
+						continue
+					for candidate in occupants_variant:
+						_append_trade_hub_candidate(results, seen, seeker, candidate, use_candidate_radius, 0, level_root)
+			if collect_limit > 0 and results.size() >= collect_limit:
+				return _trim_trade_hub_results(results, seeker, max_results)
 		if not results.is_empty():
 			return _trim_trade_hub_results(results, seeker, max_results)
+		if used_cached_tiles and Global.get_effective_perf_tier() > 0:
+			return results
 
 	if not is_instance_valid(agents_root):
 		return results
@@ -1249,8 +1341,12 @@ static func _mark_nearby_agents_dirty_from_occupancy(level_root: Node, agents_ro
 	var tile_size = float(world.get("tile_size"))
 	if tile_size <= 0.0:
 		tile_size = 64.0
-	var search_radius_px = maxf(moved_reach, maxf(float(Global.social_buddy_radius), 320.0)) + 64.0
-	var radius_tiles = int(ceil(search_radius_px / tile_size)) + 1
+	var radius_tiles := 0
+	if Global.get_effective_perf_tier() <= 0:
+		var search_radius_px = maxf(moved_reach, maxf(float(Global.social_buddy_radius), 320.0)) + 64.0
+		radius_tiles = int(ceil(search_radius_px / tile_size)) + 1
+	else:
+		radius_tiles = maxi(get_agent_tile_reach_delta(level_root, moved_agent), TILE_REACH_BANK) + 1
 	var centers = [old_pos, new_pos]
 	var seen: Dictionary = {}
 	for center_pos in centers:
@@ -1517,6 +1613,8 @@ static func _is_persistent_myco_trade_agent(agent: Variant) -> bool:
 
 
 static func _is_trade_hub_line_agent(agent: Variant) -> bool:
+	if is_village_trade_visual_endpoint(agent):
+		return true
 	if _is_persistent_myco_trade_agent(agent):
 		return true
 	if not _is_trade_line_agent_valid(agent):
@@ -1615,6 +1713,104 @@ static func _should_pair_exist(agent_a: Variant, agent_b: Variant) -> bool:
 	if not (_is_trade_hub_line_agent(agent_a) or _is_trade_hub_line_agent(agent_b)):
 		return false
 	return _has_trade_buddy_link(agent_a, agent_b) or _has_trade_buddy_link(agent_b, agent_a)
+
+
+static func _line_visual_cap_per_hub() -> int:
+	match Global.get_effective_perf_tier():
+		1:
+			return 8
+		2:
+			return 4
+		_:
+			return 0
+
+
+static func _is_priority_line_endpoint(agent: Variant) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	if is_instance_valid(Global.active_agent) and agent == Global.active_agent:
+		return true
+	var dragging_variant = agent.get("is_dragging")
+	if typeof(dragging_variant) == TYPE_BOOL and bool(dragging_variant):
+		return true
+	var keyboard_variant = agent.get("_keyboard_moving")
+	if typeof(keyboard_variant) == TYPE_BOOL and bool(keyboard_variant):
+		return true
+	var hover_variant = agent.get("_hover_visual_focus")
+	return typeof(hover_variant) == TYPE_BOOL and bool(hover_variant)
+
+
+static func _line_pair_has_priority_endpoint(endpoint_a: Variant, endpoint_b: Variant) -> bool:
+	return _is_priority_line_endpoint(endpoint_a) or _is_priority_line_endpoint(endpoint_b)
+
+
+static func _build_visible_line_hub_counts(pair_store: Dictionary, pair_meta: Dictionary) -> Dictionary:
+	var counts: Dictionary = {}
+	for pair_key_variant in pair_store.keys():
+		var pair_key = str(pair_key_variant)
+		if not pair_meta.has(pair_key):
+			continue
+		var meta_variant = pair_meta[pair_key]
+		if typeof(meta_variant) != TYPE_DICTIONARY:
+			continue
+		var meta: Dictionary = meta_variant
+		for endpoint in [meta.get("a", null), meta.get("b", null)]:
+			if not _is_trade_hub_line_agent(endpoint):
+				continue
+			var endpoint_id = int(endpoint.get_instance_id())
+			counts[endpoint_id] = int(counts.get(endpoint_id, 0)) + 1
+	return counts
+
+
+static func _adjust_visible_line_hub_counts(counts: Dictionary, endpoints: Dictionary, delta: int) -> void:
+	for endpoint in [endpoints.get("a", null), endpoints.get("b", null)]:
+		if not _is_trade_hub_line_agent(endpoint):
+			continue
+		var endpoint_id = int(endpoint.get_instance_id())
+		var next_count = int(counts.get(endpoint_id, 0)) + delta
+		if next_count <= 0:
+			counts.erase(endpoint_id)
+		else:
+			counts[endpoint_id] = next_count
+
+
+static func _should_visualize_line_pair(endpoints: Dictionary, visible_hub_counts: Dictionary) -> bool:
+	var cap = _line_visual_cap_per_hub()
+	if cap <= 0:
+		return true
+	if _line_pair_has_priority_endpoint(endpoints.get("a", null), endpoints.get("b", null)):
+		return true
+	var has_hub := false
+	for endpoint in [endpoints.get("a", null), endpoints.get("b", null)]:
+		if not _is_trade_hub_line_agent(endpoint):
+			continue
+		has_hub = true
+		if int(visible_hub_counts.get(int(endpoint.get_instance_id()), 0)) >= cap:
+			return false
+	return has_hub
+
+
+static func _release_pair_visual_only(lines_root: Node, pair_store: Dictionary, pair_key: String) -> void:
+	if not pair_store.has(pair_key):
+		return
+	var pair_variant = pair_store[pair_key]
+	if typeof(pair_variant) == TYPE_ARRAY:
+		var pair_lines: Array = pair_variant
+		for line_variant in pair_lines:
+			_release_trade_line(lines_root, line_variant)
+	pair_store.erase(pair_key)
+
+
+static func _upsert_pair_meta_only(pair_meta: Dictionary, agent_index: Dictionary, pair_key: String, endpoint_a: Node, endpoint_b: Node) -> void:
+	if pair_meta.has(pair_key):
+		var old_meta_variant = pair_meta[pair_key]
+		if typeof(old_meta_variant) == TYPE_DICTIONARY:
+			var old_meta: Dictionary = old_meta_variant
+			_remove_pair_from_agent_index(agent_index, old_meta.get("a", null), pair_key)
+			_remove_pair_from_agent_index(agent_index, old_meta.get("b", null), pair_key)
+	pair_meta[pair_key] = {"a": endpoint_a, "b": endpoint_b}
+	_add_pair_to_agent_index(agent_index, endpoint_a, pair_key)
+	_add_pair_to_agent_index(agent_index, endpoint_b, pair_key)
 
 
 static func _collect_desired_pairs_for_agent(agent: Variant) -> Dictionary:
@@ -1934,6 +2130,7 @@ static func sync_myco_trade_lines(lines_root: Node, agents_root: Node, social_mo
 
 	var desired_pairs: Dictionary = {}
 	var keys_to_process: Dictionary = {}
+	var visible_hub_counts = _build_visible_line_hub_counts(pair_store, pair_meta)
 	for key_variant in dirty_lookup.keys():
 		var agent = dirty_lookup[key_variant]
 		for pair_key_variant in _pair_keys_for_agent(agent_index, agent):
@@ -1948,18 +2145,31 @@ static func sync_myco_trade_lines(lines_root: Node, agents_root: Node, social_mo
 		var pair_key = str(pair_key_variant)
 		var endpoints: Dictionary = {}
 		if desired_pairs.has(pair_key):
-			endpoints = desired_pairs[pair_key]
+			var desired_variant = desired_pairs[pair_key]
+			if typeof(desired_variant) == TYPE_DICTIONARY:
+				endpoints = desired_variant
 		elif pair_meta.has(pair_key):
 			var meta_variant = pair_meta[pair_key]
 			if typeof(meta_variant) == TYPE_DICTIONARY:
-				endpoints = meta_variant
+				var meta: Dictionary = meta_variant
+				endpoints = meta
 		var endpoint_a = endpoints.get("a", null)
 		var endpoint_b = endpoints.get("b", null)
 		if not _should_pair_exist(endpoint_a, endpoint_b):
 			_release_pair_from_stores(lines_root, pair_store, pair_meta, agent_index, pair_key)
 			continue
 		var sorted_endpoints = _sort_pair_endpoints(endpoint_a, endpoint_b)
-		_upsert_pair(lines_root, pair_store, pair_meta, agent_index, pair_key, sorted_endpoints["a"], sorted_endpoints["b"], base_color)
+		if pair_store.has(pair_key) and pair_meta.has(pair_key):
+			var old_meta_variant = pair_meta[pair_key]
+			if typeof(old_meta_variant) == TYPE_DICTIONARY:
+				var old_meta: Dictionary = old_meta_variant
+				_adjust_visible_line_hub_counts(visible_hub_counts, old_meta, -1)
+		if _should_visualize_line_pair(sorted_endpoints, visible_hub_counts):
+			_upsert_pair(lines_root, pair_store, pair_meta, agent_index, pair_key, sorted_endpoints["a"], sorted_endpoints["b"], base_color)
+			_adjust_visible_line_hub_counts(visible_hub_counts, sorted_endpoints, 1)
+		else:
+			_release_pair_visual_only(lines_root, pair_store, pair_key)
+			_upsert_pair_meta_only(pair_meta, agent_index, pair_key, sorted_endpoints["a"], sorted_endpoints["b"])
 
 	_set_line_pairs_store(lines_root, pair_store)
 	_set_line_meta_store(lines_root, pair_meta)

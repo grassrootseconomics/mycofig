@@ -36,7 +36,11 @@ const STORY_WORLD_COLUMNS := 26
 const STORY_WORLD_ROWS := 27
 const STORY_START_TILE := Vector2i(7, 13)
 const STORY_VILLAGE_OFFSET_RIGHT_TILES := 7
+const CHALLENGE_VILLAGE_OFFSET_RIGHT_TILES := 2
 const STORY_VILLAGE_RECT := Rect2i(STORY_START_TILE.x + STORY_VILLAGE_OFFSET_RIGHT_TILES, 9, 10, 10)
+const STORY_VILLAGE_GROUND_LEFT_INSET_TILES := 4
+const STORY_VILLAGE_GROUND_TOP_INSET_TILES := 1
+const STORY_VILLAGE_COBBLE_EXTRA_RIGHT_TILES := 2
 const STORY_HIDDEN_VILLAGE_RECT := Rect2i(STORY_VILLAGE_RECT.position + Vector2i(3, 0), Vector2i(7, 10))
 const CHALLENGE_LAYOUT_CENTER_OFFSET_FROM_START_X := 2
 const STORY_FOG_TICK_SECONDS := 0.25
@@ -91,6 +95,7 @@ var _soil_tick_timer: Timer = null
 var _fog_tick_timer: Timer = null
 var _residue_records: Array = []
 var _occupancy_by_tile: Dictionary = {}
+var _trade_hubs_by_tile: Dictionary = {}
 var _footprint_by_agent: Dictionary = {}
 var _influence_kernel: Array = []
 var _revealed_tiles: PackedByteArray = PackedByteArray()
@@ -153,6 +158,9 @@ func configure_dimensions(new_columns: int, new_rows: int) -> void:
 	_initialize_reveal_data()
 	_build_baseline_pattern()
 	reset_to_baseline()
+	_occupancy_by_tile.clear()
+	_trade_hubs_by_tile.clear()
+	_footprint_by_agent.clear()
 	_sync_global_world_context()
 	_setup_camera()
 	queue_redraw()
@@ -216,6 +224,31 @@ func get_tile_occupants_cached(coord: Vector2i, ignore_agent: Variant = null) ->
 	return cleaned
 
 
+func get_trade_hub_occupants_cached(coord: Vector2i, ignore_agent: Variant = null) -> Array:
+	Global.perf_count_tile_occupancy_query()
+	if not in_bounds(coord):
+		return []
+	var occupants_variant = _trade_hubs_by_tile.get(coord, [])
+	if typeof(occupants_variant) != TYPE_ARRAY:
+		return []
+	var occupants: Array = occupants_variant
+	if occupants.is_empty():
+		return []
+	var cleaned: Array = []
+	for agent in occupants:
+		if not is_instance_valid(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if is_instance_valid(ignore_agent) and agent == ignore_agent:
+			continue
+		if not LevelHelpersRef.is_trade_hub_index_candidate(agent):
+			continue
+		cleaned.append(agent)
+	_trade_hubs_by_tile[coord] = cleaned
+	return cleaned
+
+
 func register_agent_footprint(agent: Variant, coords: Array) -> void:
 	if not is_instance_valid(agent):
 		return
@@ -228,6 +261,8 @@ func register_agent_footprint(agent: Variant, coords: Array) -> void:
 			continue
 		normalized.append(coord)
 		_insert_tile_occupant(coord, agent)
+		if LevelHelpersRef.is_trade_hub_index_candidate(agent):
+			_insert_tile_trade_hub(coord, agent)
 	_footprint_by_agent[key] = normalized
 
 
@@ -249,11 +284,14 @@ func update_agent_footprint(agent: Variant, old_coords: Array, new_coords: Array
 		if new_map.has(coord):
 			continue
 		_remove_tile_occupant(coord, agent)
+		_remove_tile_trade_hub(coord, agent)
 	for coord_variant in new_map.keys():
 		var coord = Vector2i(coord_variant)
 		if old_map.has(coord):
 			continue
 		_insert_tile_occupant(coord, agent)
+		if LevelHelpersRef.is_trade_hub_index_candidate(agent):
+			_insert_tile_trade_hub(coord, agent)
 	var key = int(agent.get_instance_id())
 	_footprint_by_agent[key] = new_map.keys()
 
@@ -270,6 +308,7 @@ func unregister_agent_footprint(agent: Variant) -> void:
 			var coord = Vector2i(coord_variant)
 			if in_bounds(coord):
 				_remove_tile_occupant(coord, agent)
+				_remove_tile_trade_hub(coord, agent)
 	_footprint_by_agent.erase(key)
 
 
@@ -288,6 +327,7 @@ func sync_agent_footprint(level_root: Node, agent: Variant) -> void:
 
 func rebuild_occupancy_cache(level_root: Node, agents_root: Node) -> void:
 	_occupancy_by_tile.clear()
+	_trade_hubs_by_tile.clear()
 	_footprint_by_agent.clear()
 	if not is_instance_valid(agents_root):
 		return
@@ -302,13 +342,42 @@ func rebuild_occupancy_cache(level_root: Node, agents_root: Node) -> void:
 		register_agent_footprint(agent, coords)
 
 
+func get_agent_footprint_cached(agent: Variant) -> Array:
+	if not is_instance_valid(agent):
+		return []
+	var key = int(agent.get_instance_id())
+	var coords_variant = _footprint_by_agent.get(key, [])
+	if typeof(coords_variant) == TYPE_ARRAY:
+		return coords_variant
+	return []
+
+
 func can_place_myco_on_tile(coord: Vector2i) -> bool:
-	if not in_bounds(coord):
+	if not can_place_ecology_on_tile(coord):
 		return false
 	var tile = get_tile(coord)
 	if tile.is_empty():
 		return false
 	return int(tile.get("stage", STAGE_DRY_COMPACTED)) >= STAGE_SEMI_HEALTHY
+
+
+func can_place_ecology_on_tile(coord: Vector2i) -> bool:
+	if not in_bounds(coord):
+		return false
+	if is_village_cobble_tile(coord):
+		return false
+	var tile = get_tile(coord)
+	if tile.is_empty():
+		return false
+	return int(tile.get("stage", STAGE_DRY_COMPACTED)) > STAGE_DRY_COMPACTED
+
+
+func is_village_cobble_tile(coord: Vector2i) -> bool:
+	if not in_bounds(coord):
+		return false
+	if not _uses_village_cobble():
+		return false
+	return _get_runtime_village_cobble_rect().has_point(coord)
 
 
 func register_residue(coord: Vector2i, biomass: float, lifetime_ticks: int = DEFAULT_RESIDUE_LIFETIME_TICKS, source_type: String = "") -> void:
@@ -508,8 +577,11 @@ func _draw() -> void:
 			var idx = _index_for(coord)
 			var stage = int(_tiles[idx]["stage"])
 			var rect = Rect2(Vector2(x * tile_size, y * tile_size), Vector2(tile_size, tile_size))
-			draw_rect(rect, _stage_color(stage), true)
-			_draw_stage_detail(rect, stage)
+			if is_village_cobble_tile(coord):
+				_draw_cobble_tile(rect, coord)
+			else:
+				draw_rect(rect, _stage_color(stage), true)
+				_draw_stage_detail(rect, stage)
 			if debug_overlay_enabled:
 				draw_rect(rect, Color(0, 0, 0, 0.15), false, 1.0, true)
 				var font = ThemeDB.fallback_font
@@ -995,6 +1067,16 @@ func _insert_tile_occupant(coord: Vector2i, agent: Node) -> void:
 	_occupancy_by_tile[coord] = occupants
 
 
+func _insert_tile_trade_hub(coord: Vector2i, agent: Node) -> void:
+	var occupants_variant = _trade_hubs_by_tile.get(coord, [])
+	var occupants: Array = occupants_variant if typeof(occupants_variant) == TYPE_ARRAY else []
+	if occupants.has(agent):
+		_trade_hubs_by_tile[coord] = occupants
+		return
+	occupants.append(agent)
+	_trade_hubs_by_tile[coord] = occupants
+
+
 func _remove_tile_occupant(coord: Vector2i, agent: Node) -> void:
 	if not _occupancy_by_tile.has(coord):
 		return
@@ -1008,6 +1090,21 @@ func _remove_tile_occupant(coord: Vector2i, agent: Node) -> void:
 		_occupancy_by_tile.erase(coord)
 	else:
 		_occupancy_by_tile[coord] = occupants
+
+
+func _remove_tile_trade_hub(coord: Vector2i, agent: Node) -> void:
+	if not _trade_hubs_by_tile.has(coord):
+		return
+	var occupants_variant = _trade_hubs_by_tile.get(coord, [])
+	if typeof(occupants_variant) != TYPE_ARRAY:
+		_trade_hubs_by_tile.erase(coord)
+		return
+	var occupants: Array = occupants_variant
+	occupants.erase(agent)
+	if occupants.is_empty():
+		_trade_hubs_by_tile.erase(coord)
+	else:
+		_trade_hubs_by_tile[coord] = occupants
 
 
 func _falloff_weight(distance: int) -> float:
@@ -1150,6 +1247,31 @@ func _get_gameplay_baseline_center() -> Vector2:
 	return center
 
 
+func _uses_village_cobble() -> bool:
+	if str(Global.mode) == "story":
+		return true
+	if Global.has_method("is_challenge_dual_village_mode") and bool(Global.is_challenge_dual_village_mode()):
+		return true
+	return false
+
+
+func _get_runtime_village_cobble_rect() -> Rect2i:
+	var rect = STORY_VILLAGE_RECT
+	if Global.has_method("is_challenge_dual_village_mode") and bool(Global.is_challenge_dual_village_mode()):
+		var start_x = floori(columns * 0.5) - CHALLENGE_LAYOUT_CENTER_OFFSET_FROM_START_X
+		start_x = clampi(start_x, 0, max(columns - 1, 0))
+		rect.position.x = start_x + CHALLENGE_VILLAGE_OFFSET_RIGHT_TILES
+	rect.position.x += STORY_VILLAGE_GROUND_LEFT_INSET_TILES
+	rect.position.y += STORY_VILLAGE_GROUND_TOP_INSET_TILES
+	rect.size.x = maxi(rect.size.x - STORY_VILLAGE_GROUND_LEFT_INSET_TILES + STORY_VILLAGE_COBBLE_EXTRA_RIGHT_TILES, 1)
+	rect.size.y = maxi(rect.size.y - STORY_VILLAGE_GROUND_TOP_INSET_TILES, 1)
+	var max_x = max(columns - rect.size.x, 0)
+	var max_y = max(rows - rect.size.y, 0)
+	rect.position.x = clampi(rect.position.x, 0, max_x)
+	rect.position.y = clampi(rect.position.y, 0, max_y)
+	return rect
+
+
 func _stage_defaults(stage: int) -> Dictionary:
 	match stage:
 		STAGE_DRY_COMPACTED:
@@ -1185,6 +1307,34 @@ func _draw_stage_detail(rect: Rect2, stage: int) -> void:
 		draw_circle(rect.position + rect.size * 0.67, tile_size * 0.07, Color(0.60, 0.74, 0.55, 0.45))
 	else:
 		draw_circle(rect.position + rect.size * 0.5, tile_size * 0.12, Color(0.64, 0.84, 0.66, 0.45))
+
+
+func _draw_cobble_tile(rect: Rect2, coord: Vector2i) -> void:
+	var variant = int(posmod(coord.x * 17 + coord.y * 31, 5))
+	var base = Color(0.50, 0.42, 0.31, 1.0)
+	var base_shift = float(variant - 2) * 0.025
+	if base_shift >= 0.0:
+		base = base.lightened(base_shift)
+	else:
+		base = base.darkened(absf(base_shift))
+	draw_rect(rect, base, true)
+
+	var inner = Rect2(rect.position + Vector2(1.0, 1.0), rect.size - Vector2(2.0, 2.0))
+	var soft_patch = Color(0.61, 0.52, 0.39, 0.16)
+	var compacted = Color(0.33, 0.27, 0.20, 0.20)
+	var dust = Color(0.72, 0.64, 0.48, 0.22)
+	draw_rect(inner, Color(0.42, 0.34, 0.25, 0.10), true)
+
+	for mark in range(3):
+		var x = inner.position.x + float(posmod(coord.x * 19 + coord.y * 7 + mark * 23, int(tile_size - 18))) + 7.0
+		var y = inner.position.y + float(posmod(coord.y * 13 + coord.x * 11 + mark * 17, int(tile_size - 16))) + 6.0
+		var radius = 2.0 + float(posmod(coord.x + coord.y + mark, 3))
+		draw_circle(Vector2(x, y), radius, soft_patch if mark % 2 == 0 else dust)
+
+	var rut_a_y = inner.position.y + tile_size * (0.32 + float(posmod(coord.x + coord.y, 3)) * 0.04)
+	var rut_b_y = inner.position.y + tile_size * (0.68 - float(posmod(coord.x * 2 + coord.y, 3)) * 0.035)
+	draw_line(Vector2(inner.position.x + 6.0, rut_a_y), Vector2(inner.position.x + inner.size.x - 6.0, rut_a_y + 2.0), compacted, 1.2)
+	draw_line(Vector2(inner.position.x + 8.0, rut_b_y), Vector2(inner.position.x + inner.size.x - 8.0, rut_b_y - 1.0), compacted, 1.0)
 
 
 func _setup_camera() -> void:

@@ -139,6 +139,7 @@ func _collect_sample() -> void:
 	var soil_tiles_touched = Global.perf_consume_soil_tiles_touched()
 	var soil_tick_ms = Global.perf_consume_soil_tick_ms()
 	var occupancy_queries = Global.perf_consume_tile_occupancy_queries()
+	Global.apply_perf_density_gate(active_agents, occupancy_queries)
 	var run_meta: Dictionary = {}
 	if typeof(Global.perf_run_metadata) == TYPE_DICTIONARY:
 		run_meta = Global.perf_run_metadata

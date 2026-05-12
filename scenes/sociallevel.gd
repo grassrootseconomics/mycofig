@@ -10,7 +10,7 @@ const TEX_MAIZE = preload("res://graphics/cook.png")
 const TEX_BEAN = preload("res://graphics/farmer.png")
 const TEX_BASKET = preload("res://graphics/basket.png")
 const TUKTUK_ENTRY_SOUND_PATH := "res://audio/old-car-horn.mp3"
-const TUKTUK_ENTRY_SOUND_VOLUME_DB := 3.0
+const TUKTUK_ENTRY_SOUND_VOLUME_DB := -6.0
 
 var socialagent_scene: PackedScene = load("res://scenes/socialagent.tscn")
 var trade_scene: PackedScene = load("res://scenes/trade.tscn")
@@ -91,8 +91,9 @@ func play_tuktuk_entry_sound() -> void:
 		horn_player.stop()
 		horn_player.play()
 		return
-	var car_sound = get_node_or_null("CarSound")
-	if is_instance_valid(car_sound) and car_sound.has_method("play"):
+	var car_sound := get_node_or_null("CarSound") as AudioStreamPlayer2D
+	if is_instance_valid(car_sound):
+		car_sound.volume_db = TUKTUK_ENTRY_SOUND_VOLUME_DB
 		car_sound.stop()
 		car_sound.play()
 
@@ -488,7 +489,10 @@ func update_bars(path_dict)  -> void:
 
 func _play_predator_alert() -> void:
 	if(Global.social_mode):
-		$CarSound.play()
+		var car_sound := get_node_or_null("CarSound") as AudioStreamPlayer2D
+		if is_instance_valid(car_sound):
+			car_sound.volume_db = TUKTUK_ENTRY_SOUND_VOLUME_DB
+			car_sound.play()
 	else:
 		$BirdSound.play()
 
@@ -581,6 +585,7 @@ func _on_new_agent(agent_dict) -> void:
 		if agent_dict.has("spawn_anchor"):
 			LevelHelpersRef.ensure_spawn_buddy_link(new_agent, agent_dict["spawn_anchor"])
 		LevelHelpersRef.sync_agent_occupancy(self, new_agent)
+		Global.apply_perf_density_gate($Agents.get_child_count())
 		request_all_agents_dirty()
 		new_agent.peak_maturity = 4
 	if(Global.active_agent == null and not Global.prevent_auto_select):

@@ -5,11 +5,11 @@ const PerfMonitorRef = preload("res://scenes/perf_monitor.gd")
 const LevelHelpersRef = preload("res://scenes/level_helpers.gd")
 
 const DIRTY_BUDDY_PROCESS_CAP_T0 := 96
-const DIRTY_BUDDY_PROCESS_CAP_T1 := 64
-const DIRTY_BUDDY_PROCESS_CAP_T2 := 40
+const DIRTY_BUDDY_PROCESS_CAP_T1 := 32
+const DIRTY_BUDDY_PROCESS_CAP_T2 := 16
 const DIRTY_LINE_PROCESS_CAP_T0 := 160
-const DIRTY_LINE_PROCESS_CAP_T1 := 96
-const DIRTY_LINE_PROCESS_CAP_T2 := 64
+const DIRTY_LINE_PROCESS_CAP_T1 := 64
+const DIRTY_LINE_PROCESS_CAP_T2 := 32
 const DIRTY_TILE_HINT_PROCESS_CAP := 24
 
 
@@ -51,28 +51,63 @@ static func _get_dirty_line_process_cap() -> int:
 			return DIRTY_LINE_PROCESS_CAP_T0
 
 
+static func _is_priority_dirty_agent(agent: Variant) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	if is_instance_valid(Global.active_agent) and agent == Global.active_agent:
+		return true
+	var dragging_variant = agent.get("is_dragging")
+	if typeof(dragging_variant) == TYPE_BOOL and bool(dragging_variant):
+		return true
+	var keyboard_variant = agent.get("_keyboard_moving")
+	return typeof(keyboard_variant) == TYPE_BOOL and bool(keyboard_variant)
+
+
 static func _take_dirty_agents(dirty_store: Dictionary, max_count: int, skip_keys: Dictionary = {}) -> Array:
 	var agents: Array = []
 	var processed_keys: Array = []
-	for key in dirty_store.keys():
-		if max_count >= 0 and agents.size() >= max_count:
-			break
-		if skip_keys.has(key):
-			continue
-		var agent = dirty_store[key]
-		processed_keys.append(key)
-		if is_instance_valid(agent) and not bool(agent.get("dead")):
-			agents.append(agent)
+	for priority_pass in [true, false]:
+		for key in dirty_store.keys():
+			if max_count >= 0 and agents.size() >= max_count:
+				break
+			if skip_keys.has(key) or processed_keys.has(key):
+				continue
+			var agent = dirty_store[key]
+			if priority_pass and not _is_priority_dirty_agent(agent):
+				continue
+			if not priority_pass and _is_priority_dirty_agent(agent):
+				continue
+			processed_keys.append(key)
+			if is_instance_valid(agent) and not bool(agent.get("dead")):
+				agents.append(agent)
 	for key in processed_keys:
 		dirty_store.erase(key)
 	return agents
 
 
+static func _count_live_agents(agents_root: Node) -> int:
+	if not is_instance_valid(agents_root):
+		return 0
+	var total := 0
+	for agent in agents_root.get_children():
+		if not is_instance_valid(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if str(agent.get("type")) == "cloud":
+			continue
+		total += 1
+	return total
+
+
 static func process_dirty_queues(level_root: Node, agents_root: Node, lines_root: Node, dirty_buddies: Dictionary, dirty_lines: Dictionary, dirty_tile_hints: Dictionary, social_mode: bool, force_all: bool = false) -> void:
 	if dirty_buddies.is_empty() and dirty_lines.is_empty() and dirty_tile_hints.is_empty():
 		return
-	var buddy_cap = -1 if force_all else _get_dirty_buddy_process_cap()
-	var line_cap = -1 if force_all else _get_dirty_line_process_cap()
+	var active_agents = _count_live_agents(agents_root)
+	Global.apply_perf_density_gate(active_agents)
+	var dense_force = force_all and active_agents > Global.PERF_DENSITY_TIER1_AGENT_COUNT
+	var buddy_cap = -1 if force_all and not dense_force else _get_dirty_buddy_process_cap()
+	var line_cap = -1 if force_all and not dense_force else _get_dirty_line_process_cap()
 	var tile_hint_cap = -1 if force_all else DIRTY_TILE_HINT_PROCESS_CAP
 
 	var buddy_agents = _take_dirty_agents(dirty_buddies, buddy_cap)

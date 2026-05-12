@@ -25,6 +25,8 @@ var _title_art_background: TextureRect = null
 var _title_pending_layout_frames := 0
 var _last_score_label: Label = null
 var _high_score_label: Label = null
+var _last_score_panel: Panel = null
+var _high_score_panel: Panel = null
 var _title_score_star_layer: Control = null
 var _title_score_stars: Array[Label] = []
 var _title_score_sparkle_target: Label = null
@@ -97,6 +99,24 @@ func _make_ge_logo_panel_style() -> StyleBoxFlat:
 	return style
 
 
+func _make_title_score_panel_style() -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.07, 0.16, 0.09, 0.58)
+	style.border_color = Color(1.0, 0.86, 0.32, 0.72)
+	style.border_width_left = 2
+	style.border_width_top = 2
+	style.border_width_right = 2
+	style.border_width_bottom = 2
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_radius_bottom_right = 8
+	style.shadow_color = Color(0.0, 0.0, 0.0, 0.36)
+	style.shadow_size = 5
+	style.shadow_offset = Vector2(0, 2)
+	return style
+
+
 func _style_cta_button(button: Button, base_bg: Color, base_border: Color) -> void:
 	if not is_instance_valid(button):
 		return
@@ -132,7 +152,7 @@ func _setup_version_label() -> void:
 	var version_label: Label = $VersionLabel
 	if not is_instance_valid(version_label):
 		return
-	var version_text = str(ProjectSettings.get_setting("application/config/version", "1.1.3"))
+	var version_text = str(ProjectSettings.get_setting("application/config/version", "1.1.5"))
 	if not version_text.begins_with("v"):
 		version_text = "v" + version_text
 	version_label.text = version_text
@@ -148,21 +168,35 @@ func _style_title_score_label(label: Label, font_size: int) -> void:
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.add_theme_font_size_override("font_size", font_size)
-	label.add_theme_color_override("font_color", Color(0.035, 0.13, 0.07, 1.0))
-	label.add_theme_color_override("font_outline_color", Color(1.0, 0.82, 0.24, 0.96))
+	label.add_theme_color_override("font_color", Color(1.0, 0.92, 0.34, 1.0))
+	label.add_theme_color_override("font_outline_color", Color(0.025, 0.08, 0.035, 0.98))
 	label.add_theme_color_override("font_shadow_color", Color(0.03, 0.02, 0.01, 0.45))
-	label.add_theme_constant_override("outline_size", 5)
+	label.add_theme_constant_override("outline_size", 4)
 	label.add_theme_constant_override("shadow_offset_x", 2)
 	label.add_theme_constant_override("shadow_offset_y", 3)
 
 
 func _ensure_title_score_widgets() -> void:
+	if not is_instance_valid(_last_score_panel):
+		_last_score_panel = Panel.new()
+		_last_score_panel.name = "LastScorePanel"
+		_last_score_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_last_score_panel.z_as_relative = false
+		_last_score_panel.z_index = 34
+		add_child(_last_score_panel)
 	if not is_instance_valid(_last_score_label):
 		_last_score_label = Label.new()
 		_last_score_label.name = "LastScoreLabel"
 		_last_score_label.z_as_relative = false
 		_last_score_label.z_index = 35
 		add_child(_last_score_label)
+	if not is_instance_valid(_high_score_panel):
+		_high_score_panel = Panel.new()
+		_high_score_panel.name = "TitleHighScorePanel"
+		_high_score_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_high_score_panel.z_as_relative = false
+		_high_score_panel.z_index = 34
+		add_child(_high_score_panel)
 	if not is_instance_valid(_high_score_label):
 		_high_score_label = Label.new()
 		_high_score_label.name = "TitleHighScoreLabel"
@@ -200,12 +234,24 @@ func _get_last_rank_text() -> String:
 	return str(Global.ranks.get(rank_key, "Sporeling"))
 
 
+func _layout_title_score_panel(panel: Panel, label: Label, visible: bool) -> void:
+	if not is_instance_valid(panel):
+		return
+	panel.visible = visible and is_instance_valid(label)
+	if not panel.visible:
+		return
+	panel.add_theme_stylebox_override("panel", _make_title_score_panel_style())
+	var label_rect = Rect2(label.position, label.size)
+	panel.position = Vector2(label_rect.position.x - 10.0, label_rect.position.y - 6.0)
+	panel.size = Vector2(label_rect.size.x + 20.0, label_rect.size.y + 12.0)
+
+
 func _update_title_score_widgets(view_size: Vector2, compact: bool, tiny: bool) -> void:
 	_ensure_title_score_widgets()
 	var has_last_score = int(Global.last_score) > 0
 	var has_high_score = int(Global.high_score) > 0
 	var show_scores = has_last_score or has_high_score
-	var label_width = clampf(view_size.x - 32.0, 250.0, 430.0)
+	var label_width = clampf(view_size.x - 96.0, 250.0, 340.0)
 	var last_size = Vector2(label_width, 66.0 if tiny else (72.0 if compact else 78.0))
 	var high_size = Vector2(label_width, 42.0 if tiny else (48.0 if compact else 54.0))
 	_style_title_score_label(_last_score_label, 22 if tiny else (24 if compact else 27))
@@ -231,6 +277,8 @@ func _update_title_score_widgets(view_size: Vector2, compact: bool, tiny: bool) 
 	if is_instance_valid(_high_score_label):
 		var high_y = basket_center.y + (34.0 if tiny else (40.0 if compact else 48.0))
 		_high_score_label.position = Vector2(round(basket_center.x - high_size.x * 0.5), round(high_y))
+	_layout_title_score_panel(_last_score_panel, _last_score_label, has_last_score)
+	_layout_title_score_panel(_high_score_panel, _high_score_label, has_high_score)
 	_title_score_sparkle_target = null
 	if show_scores and has_last_score and int(Global.last_score) == int(Global.high_score):
 		_title_score_sparkle_target = _last_score_label
@@ -647,13 +695,13 @@ func _apply_responsive_layout() -> void:
 	var menu_box: VBoxContainer = $CenterContainer/VBoxContainer
 	if is_instance_valid(menu_box):
 		menu_box.custom_minimum_size = Vector2(minf(view_size.x - 48.0, 420.0), 0.0)
-		menu_box.add_theme_constant_override("separation", 9 if compact else 11)
+		menu_box.add_theme_constant_override("separation", 7 if compact else 9)
 	var cta_width = clampf(view_size.x - 72.0, 220.0, 340.0)
-	var cta_height = 68.0 if compact else 78.0
-	var cta_font_size = 37 if compact else 46
+	var cta_height = 62.0 if compact else 70.0
+	var cta_font_size = 34 if compact else 42
 	if tiny:
-		cta_height = 60.0
-		cta_font_size = 31
+		cta_height = 56.0
+		cta_font_size = 29
 	for button in [$CenterContainer/VBoxContainer/Tutorial, $CenterContainer/VBoxContainer/ChallengeButton]:
 		if not is_instance_valid(button):
 			continue
@@ -698,9 +746,9 @@ func _apply_responsive_layout() -> void:
 			link.add_theme_font_size_override("font_size", 24 if compact else 30)
 	var regen_label: Label = $CenterContainer/VBoxContainer/RegenerationLabel
 	if is_instance_valid(regen_label):
-		var regen_font_size = title_font_size + (24 if tiny else (30 if compact else 36))
+		var regen_font_size = title_font_size + (24 if tiny else (30 if compact else 36)) - 4
 		var title_width = clampf(view_size.x - 48.0, 340.0, 720.0)
-		var title_height_box = 96.0 if tiny else (108.0 if compact else 124.0)
+		var title_height_box = 88.0 if tiny else (98.0 if compact else 112.0)
 		regen_label.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		regen_label.custom_minimum_size = Vector2(title_width, title_height_box)
 		regen_label.text = "Social Soil"
@@ -786,6 +834,11 @@ func _reset_run_state() -> void:
 	Global.story_chapter_id = 1
 	Global.village_revealed = false
 	Global.village_objective_flags = {}
+	Global.perf_tier = 0
+	Global.perf_tile_occupancy_queries = 0
+	Global.perf_last_sample = {}
+	if Global.has_method("reset_trade_dispatch_budgets"):
+		Global.reset_trade_dispatch_budgets()
 
 
 func _ready():

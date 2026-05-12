@@ -38,6 +38,8 @@ const BEAN_POD_BABY_TICK_INTERVAL := 4
 const BEAN_STAGE_CONSUMPTIONS_PER_ADVANCE := 3
 const BEAN_STAGE_ADVANCE_WAIT_TICKS := 1
 const BEAN_HARVEST_YIELD := 3
+const LIFECYCLE_PLANT_BABIES_MIN := 1
+const LIFECYCLE_PLANT_BABIES_MAX := 3
 const LIFECYCLE_POD_BABY_MIN := 0
 const LIFECYCLE_POD_BABY_MAX := 3
 const TREE_STARVATION_DURATION_MULTIPLIER := 3.0
@@ -48,7 +50,7 @@ const BASE_MOVE_RATE_FOR_STARVATION := 6.0
 const BASE_MOVEMENT_SPEED_FOR_STARVATION := 200.0
 const MIN_STARVATION_SPEED_SCALE := 0.2
 const STORY_PREDATOR_DISRUPT_SECONDS := 4.0
-const LIFECYCLE_PARENT_BOUND_TILES := 4
+const LIFECYCLE_PARENT_BOUND_TILES := 3
 const HARVEST_GUIDE_BEAN_RECT := Rect2(0.04, 0.26, 0.50, 0.56)
 const HARVEST_GUIDE_SQUASH_RECT := Rect2(0.02, 0.30, 0.42, 0.52)
 const HARVEST_GUIDE_MAIZE_RECT := Rect2(0.28, 0.20, 0.42, 0.66)
@@ -126,7 +128,7 @@ var current_maturity = 0
 var num_buddies = 5
 var num_connectors = 0
 
-var num_babies = 12
+var num_babies = LIFECYCLE_PLANT_BABIES_MAX
 var current_babies = 0
 
 #var assets = {}
@@ -810,6 +812,20 @@ func _can_place_on_tile(coord: Vector2i, sprite_scale_override: Variant = null) 
 	return LevelHelpersRef.can_place_agent_on_tile(level_root, agents_root, self, clamped_coord, self, sprite_scale_override)
 
 
+func _can_lifecycle_spawn_on_soil(world: Node, coord: Vector2i) -> bool:
+	if not is_instance_valid(world) or not world.has_method("can_place_ecology_on_tile"):
+		return true
+	if not bool(world.call("can_place_ecology_on_tile", coord)):
+		return false
+	if str(type) == "tree":
+		var upper_coord = coord + Vector2i(0, -1)
+		if world.has_method("in_bounds") and not world.in_bounds(upper_coord):
+			return false
+		if not bool(world.call("can_place_ecology_on_tile", upper_coord)):
+			return false
+	return true
+
+
 func _can_expand_to_scale(scale_candidate: Vector2) -> bool:
 	if str(type) != "tree":
 		return true
@@ -1103,6 +1119,23 @@ func _is_story_village_person_node(node: Variant) -> bool:
 	return node_type == "farmer" or node_type == "vendor" or node_type == "cook"
 
 
+func _is_story_village_bank_node(node: Variant) -> bool:
+	if not _is_story_village_actor_node(node):
+		return false
+	return str(node.get("type")) == "bank"
+
+
+func _is_story_village_basket_node(node: Variant) -> bool:
+	if not _is_story_village_actor_node(node):
+		return false
+	var node_type = str(node.get("type"))
+	if node_type == "basket":
+		return true
+	if node_type != "myco":
+		return false
+	return str(node.get_meta("story_kind", "")).begins_with("basket")
+
+
 func _can_share_story_trade_network(candidate: Variant) -> bool:
 	if not is_instance_valid(candidate):
 		return false
@@ -1231,6 +1264,36 @@ func _restore_story_forced_village_basket_buddies() -> void:
 		if not _can_share_story_trade_network(candidate):
 			continue
 		if not _has_trade_buddy_link_to(candidate):
+			trade_buddies.append(candidate)
+
+
+func _restore_in_reach_village_hub_buddies() -> void:
+	if not _is_story_village_person_node(self):
+		return
+	var agents_root = _get_agents_root()
+	if not is_instance_valid(agents_root):
+		return
+	var level_root = _get_level_root()
+	for candidate in agents_root.get_children():
+		if not is_instance_valid(candidate):
+			continue
+		if candidate == self:
+			continue
+		if bool(candidate.get("dead")):
+			continue
+		if not (_is_story_village_bank_node(candidate) or _is_story_village_basket_node(candidate)):
+			continue
+		if not _can_share_story_trade_network(candidate):
+			continue
+		var in_reach := false
+		if LevelHelpersRef._supports_tile_world(level_root):
+			in_reach = LevelHelpersRef.are_agents_in_shared_tile_reach(level_root, self, candidate)
+		else:
+			var candidate_radius = candidate.get("buddy_radius")
+			var candidate_reach = float(candidate_radius) if (typeof(candidate_radius) == TYPE_FLOAT or typeof(candidate_radius) == TYPE_INT) else float(Global.social_buddy_radius)
+			var reach = maxf(float(buddy_radius), candidate_reach)
+			in_reach = global_position.distance_to(candidate.global_position) <= reach
+		if in_reach and not _has_trade_buddy_link_to(candidate):
 			trade_buddies.append(candidate)
 
 
@@ -1617,6 +1680,8 @@ func _reset_bean_lifecycle() -> void:
 	bean_residue_pending = false
 	bean_residue_emitted = false
 	_farmer_harvest_delivery_reserved = false
+	num_babies = random.randi_range(LIFECYCLE_PLANT_BABIES_MIN, LIFECYCLE_PLANT_BABIES_MAX)
+	current_babies = 0
 	bean_stage = BeanGrowthStage.SPROUT
 	_set_bean_stage(BeanGrowthStage.SPROUT, true)
 
@@ -1647,6 +1712,8 @@ func _emit_death_cycle_regrowth_request() -> void:
 	if is_instance_valid(world) and world.has_method("world_to_tile") and world.has_method("tile_to_world_center") and world.has_method("in_bounds"):
 		var coord = Vector2i(world.world_to_tile(_clamp_position_to_world_rect(global_position)))
 		if not world.in_bounds(coord):
+			return
+		if not _can_lifecycle_spawn_on_soil(world, coord):
 			return
 		world_pos = world.tile_to_world_center(coord)
 	parent_anchor = _find_nearby_living_myco_anchor(world_pos, LIFECYCLE_PARENT_BOUND_TILES)
@@ -2535,6 +2602,7 @@ func _process(delta: float) -> void:
 func generate_buddies() -> void:
 	var agents_root = get_node_or_null("../../Agents")
 	trade_buddies = LevelHelpersRef.query_trade_hubs_near_agent(_get_level_root(), agents_root, self, num_buddies, true)
+	_restore_in_reach_village_hub_buddies()
 	_restore_all_in_reach_ecology_myco_buddies()
 	_restore_lifecycle_spawn_anchor_buddy()
 	_restore_story_forced_village_basket_buddies()
@@ -2709,8 +2777,13 @@ func have_babies(force_spawn: bool = false)  -> void:
 	if is_instance_valid(parent_anchor):
 		anchor_pos = parent_anchor.global_position
 	var anchor_coord := Vector2i.ZERO
+	var parent_anchor_coord := Vector2i.ZERO
+	var has_parent_anchor_coord := false
 	if use_tile_sampling:
-		anchor_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(_clamp_position_to_world_rect(anchor_pos))))
+		anchor_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(_clamp_position_to_world_rect(global_position))))
+		if is_instance_valid(parent_anchor):
+			parent_anchor_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(_clamp_position_to_world_rect(anchor_pos))))
+			has_parent_anchor_coord = true
 	var rng = random
 	
 	while(baby_made == false and current_round < max_rounds):
@@ -2727,6 +2800,10 @@ func have_babies(force_spawn: bool = false)  -> void:
 				rng.randi_range(-LIFECYCLE_PARENT_BOUND_TILES, LIFECYCLE_PARENT_BOUND_TILES)
 			)
 			sample_coord = _clamp_tile_coord(world, sample_coord)
+			if has_parent_anchor_coord and maxi(abs(sample_coord.x - parent_anchor_coord.x), abs(sample_coord.y - parent_anchor_coord.y)) > LIFECYCLE_PARENT_BOUND_TILES:
+				continue
+			if not _can_lifecycle_spawn_on_soil(world, sample_coord):
+				continue
 			var sampled_world_pos = world.tile_to_world_center(sample_coord)
 			new_x = sampled_world_pos.x
 			new_y = sampled_world_pos.y

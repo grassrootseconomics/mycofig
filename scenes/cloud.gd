@@ -50,6 +50,27 @@ var bars_offset = { #list of needed assets with need level
 }
 
 
+func _update_bar_positions() -> void:
+	if not is_instance_valid(bar_canvas):
+		return
+	var anchor = position
+	if bar_canvas is CanvasLayer:
+		anchor = Global.world_to_screen(self, position)
+	for bar in bars:
+		if is_instance_valid(bars[bar]):
+			bars[bar].position = anchor + bars_offset[bar]
+
+
+func refresh_bar_visibility() -> void:
+	if not is_instance_valid(bar_canvas):
+		return
+	var should_show = Global.bars_on and not dead
+	if bar_canvas.visible != should_show:
+		bar_canvas.visible = should_show
+	if should_show:
+		_update_bar_positions()
+
+
 
 func _is_story_mode_runtime() -> bool:
 	if Global.has_method("is_parallel_village_runtime"):
@@ -105,10 +126,10 @@ func set_variables(a_dict) -> void:
 		bars[bar].max_value = int(needs[bar]*1.2)
 		bars[bar].value = assets[bar]
 		bars_offset[bar] = bars[bar].position
-		bars[bar].position = (position + bars[bar].position)
 		bars[bar].tint_progress = Global.asset_colors[bar]
 		
 	bar_canvas = $CanvasLayer
+	refresh_bar_visibility()
 
 
 func logistics():
@@ -178,6 +199,8 @@ func _process(_delta: float) -> void:
 	
 	if Global.is_raining and self.is_raining:
 		logistics()
+	if is_instance_valid(bar_canvas) and bar_canvas.visible:
+		_update_bar_positions()
 	#pass
 
 
@@ -206,8 +229,7 @@ func _physics_process(delta):
 	
 		var t = min(1.0, delay * delta)
 		position = position.lerp(get_global_mouse_position(), t)
-		for bar in bars:
-			bars[bar].position = position + bars_offset[bar]
+		_update_bar_positions()
 	
 func _input(event):
 	if false:

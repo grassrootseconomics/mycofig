@@ -4,7 +4,7 @@
 // Incrementing CACHE_VERSION will kick off the install event and force
 // previously cached resources to be updated from the network.
 /** @type {string} */
-const CACHE_VERSION = '1778601298|164678014';
+const CACHE_VERSION = '1778604735|21689695';
 /** @type {string} */
 const CACHE_PREFIX = 'Social Soil-sw-cache-';
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;

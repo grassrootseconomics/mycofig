@@ -153,6 +153,72 @@ func _mark_network_dirty() -> void:
 		LevelHelpersRef.mark_all_buddies_dirty(agents_root)
 
 
+func _is_ecology_network_candidate(agent: Variant) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	if agent == self:
+		return false
+	if bool(agent.get("dead")):
+		return false
+	if not _can_share_story_trade_network(agent):
+		return false
+	var agent_type = str(agent.get("type"))
+	if agent_type == "bean" or agent_type == "squash" or agent_type == "maize" or agent_type == "tree":
+		return true
+	return agent_type == "myco" and agent.has_method("_has_complete_nutrient_set")
+
+
+func _is_in_current_myco_reach(agent: Variant) -> bool:
+	var level_root = _get_level_root()
+	if LevelHelpersRef._supports_tile_world(level_root):
+		return LevelHelpersRef.are_agents_in_tile_reach(level_root, agent, self, true)
+	return is_instance_valid(agent) and global_position.distance_to(agent.global_position) <= buddy_radius
+
+
+func _append_unique_buddy_to_agent(agent: Variant, buddy: Variant) -> void:
+	if not is_instance_valid(agent) or not is_instance_valid(buddy):
+		return
+	var buddies_variant = agent.get("trade_buddies")
+	if typeof(buddies_variant) != TYPE_ARRAY:
+		return
+	var buddies: Array = buddies_variant
+	if buddies.has(buddy):
+		return
+	buddies.append(buddy)
+	agent.set("trade_buddies", buddies)
+
+
+func _refresh_existing_network_after_stage_change() -> void:
+	var agents_root = get_node_or_null("../../Agents")
+	if not is_instance_valid(agents_root):
+		return
+	var level_root = _get_level_root()
+	var dirty_agents: Array = []
+	for agent in agents_root.get_children():
+		if not is_instance_valid(agent):
+			continue
+		if bool(agent.get("dead")):
+			continue
+		if str(agent.get("type")) == "cloud":
+			continue
+		dirty_agents.append(agent)
+		if agent.has_method("generate_buddies"):
+			agent.generate_buddies()
+		if _is_ecology_network_candidate(agent) and _is_in_current_myco_reach(agent):
+			_append_unique_buddy_to_agent(agent, self)
+			if str(agent.get("type")) == "myco":
+				_append_unique_buddy_to_agent(self, agent)
+		if is_instance_valid(level_root) and level_root.has_method("request_agent_dirty"):
+			level_root.request_agent_dirty(agent, true, true, false)
+		else:
+			agent.set("new_buddies", true)
+			if str(agent.get("type")) == "myco":
+				agent.set("draw_lines", true)
+	var lines_root = get_node_or_null("../../Lines")
+	if Global.draw_lines and is_instance_valid(lines_root):
+		LevelHelpersRef.sync_myco_trade_lines(lines_root, agents_root, Global.social_mode, dirty_agents)
+
+
 func _set_rhizo_scale(new_scale: Vector2) -> void:
 	if not is_instance_valid(sprite_myco):
 		return
@@ -236,6 +302,11 @@ func _set_myco_stage(new_stage: int, force: bool = false) -> void:
 					sprite.texture = mushroom_base_texture
 					sprite.scale = mushroom_base_scale * 0.42
 				sprite.modulate = Color(0.84, 0.73, 0.58, 0.82)
+
+	if is_instance_valid(sprite_myco):
+		_refresh_buddy_radius_from_rhizo()
+		_mark_network_dirty()
+		_refresh_existing_network_after_stage_change()
 
 	if myco_stage == MycoGrowthStage.POD_READY and not myco_pod_sparkle_played:
 		var sparkle = Global.sparkle_scene.instantiate()
@@ -472,6 +543,11 @@ func set_variables(a_dict) -> void:
 func generate_buddies() -> void:
 	var agents_root = get_node_or_null("../../Agents")
 	trade_buddies = LevelHelpersRef.query_trade_hubs_near_agent(_get_level_root(), agents_root, self, num_buddies, false)
+	if not is_instance_valid(agents_root):
+		return
+	for candidate in agents_root.get_children():
+		if _is_ecology_network_candidate(candidate) and str(candidate.get("type")) == "myco" and _is_in_current_myco_reach(candidate):
+			_append_unique_buddy_to_agent(self, candidate)
 
 
 func logistics():

@@ -26,6 +26,18 @@ func _ready():
 		_start_scripted_capture()
 	else:
 		reset()
+	if quarry_found or is_instance_valid(_captured_target):
+		_play_entry_sound()
+
+
+func _play_entry_sound() -> void:
+	var level_root = get_node_or_null("../..")
+	if is_instance_valid(level_root) and level_root.has_method("play_tuktuk_entry_sound"):
+		level_root.call("play_tuktuk_entry_sound")
+		return
+	var car_sound = get_node_or_null("../../CarSound")
+	if is_instance_valid(car_sound) and car_sound.has_method("play"):
+		car_sound.play()
 
 
 func configure_scripted_capture(target: Node, spawn_pos: Vector2) -> void:

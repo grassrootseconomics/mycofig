@@ -1234,6 +1234,37 @@ func _restore_story_forced_village_basket_buddies() -> void:
 			trade_buddies.append(candidate)
 
 
+func _restore_all_in_reach_ecology_myco_buddies() -> void:
+	var agents_root = _get_agents_root()
+	if not is_instance_valid(agents_root):
+		return
+	var level_root = _get_level_root()
+	for candidate in agents_root.get_children():
+		if not is_instance_valid(candidate):
+			continue
+		if candidate == self:
+			continue
+		if bool(candidate.get("dead")):
+			continue
+		if str(candidate.get("type")) != "myco":
+			continue
+		if not candidate.has_method("_has_complete_nutrient_set"):
+			continue
+		if not _can_share_story_trade_network(candidate):
+			continue
+		var in_reach := false
+		if LevelHelpersRef._supports_tile_world(level_root):
+			in_reach = LevelHelpersRef.are_agents_in_tile_reach(level_root, self, candidate, true)
+		else:
+			var reach = candidate.get("buddy_radius")
+			var max_dist := 0.0
+			if typeof(reach) == TYPE_FLOAT or typeof(reach) == TYPE_INT:
+				max_dist = maxf(float(reach), 0.0)
+			in_reach = max_dist > 0.0 and global_position.distance_to(candidate.global_position) <= max_dist
+		if in_reach and not _has_trade_buddy_link_to(candidate):
+			trade_buddies.append(candidate)
+
+
 func _is_lifecycle_orphan_spawn_child() -> bool:
 	if not _is_bean_lifecycle_enabled():
 		return false
@@ -2504,6 +2535,7 @@ func _process(delta: float) -> void:
 func generate_buddies() -> void:
 	var agents_root = get_node_or_null("../../Agents")
 	trade_buddies = LevelHelpersRef.query_trade_hubs_near_agent(_get_level_root(), agents_root, self, num_buddies, true)
+	_restore_all_in_reach_ecology_myco_buddies()
 	_restore_lifecycle_spawn_anchor_buddy()
 	_restore_story_forced_village_basket_buddies()
 func new_draw_line():

@@ -323,6 +323,11 @@ func _is_parallel_village_runtime() -> bool:
 	return _is_story_mode() or _is_challenge_dual_village_runtime()
 
 
+func play_tuktuk_entry_sound() -> void:
+	if is_instance_valid(_car_sound_player):
+		_car_sound_player.play()
+
+
 func _is_story_village_item_type(spawn_name: String) -> bool:
 	return spawn_name == "farmer" or spawn_name == "vendor" or spawn_name == "cook" or spawn_name == "basket"
 
@@ -758,8 +763,6 @@ func _story_spawn_phase5_intro_tuktuk(target: Node) -> Node:
 	if predator.has_signal("scripted_capture_started"):
 		predator.connect("scripted_capture_started", Callable(self, "_on_story_phase5_intro_tuktuk_captured"))
 	$Animals.add_child(predator)
-	if is_instance_valid(_car_sound_player):
-		_car_sound_player.play()
 	return predator
 
 
@@ -3258,7 +3261,7 @@ func _spawn_predators(requested_count: int, play_alert: bool = false) -> bool:
 	return true
 
 
-func _spawn_tuktuk_predators(requested_count: int, play_alert: bool = false) -> bool:
+func _spawn_tuktuk_predators(requested_count: int, _play_alert: bool = false) -> bool:
 	if not _tuktuk_predator_mode_enabled():
 		return false
 	var spawn_count = max(requested_count, 0)
@@ -3269,9 +3272,6 @@ func _spawn_tuktuk_predators(requested_count: int, play_alert: bool = false) -> 
 	spawn_count = min(spawn_count, remaining_slots)
 	if spawn_count <= 0:
 		return false
-	if play_alert:
-		if is_instance_valid(_car_sound_player):
-			_car_sound_player.play()
 	for _i in range(spawn_count):
 		make_tuktuk()
 	return true

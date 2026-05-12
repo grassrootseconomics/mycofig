@@ -17,7 +17,6 @@ const TEX_MAIZE_SPROUT_STAGE_PATH := "res://graphics/maize_sprout_stage.png"
 const TEX_MAIZE_VINE_STAGE_PATH := "res://graphics/maize_vine_stage.png"
 const TEX_MAIZE_POD_STAGE_PATH := "res://graphics/maize_pod_stage.png"
 const TEX_MAIZE_DEAD_STAGE_PATH := "res://graphics/maize_dead_stage.png"
-const TEX_ACORN_TREE_SPROUT_STAGE_PATH := "res://graphics/acorn_tree_sprout_stage.png"
 const TEX_ACORN_TREE_VINE_STAGE_PATH := "res://graphics/acorn_tree_vine_stage.png"
 const TEX_ACORN_TREE_POD_STAGE_PATH := "res://graphics/acorn_tree_pod_stage.png"
 const TEX_ACORN_TREE_DEAD_STAGE_PATH := "res://graphics/acorn_tree_dead_stage.png"
@@ -1304,7 +1303,7 @@ func _get_bean_stage_scale_multiplier(stage_value: int) -> float:
 	if crop_type == "tree":
 		match stage_value:
 			BeanGrowthStage.SPROUT:
-				return 1.9
+				return 3.6
 			BeanGrowthStage.VINE:
 				return 5.8
 			BeanGrowthStage.POD_READY:
@@ -1312,7 +1311,7 @@ func _get_bean_stage_scale_multiplier(stage_value: int) -> float:
 			BeanGrowthStage.DEAD:
 				return 5.2
 			_:
-				return 1.9
+				return 3.6
 
 	if crop_type == "maize":
 		match stage_value:
@@ -1361,13 +1360,14 @@ func _get_lifecycle_stage_sprite_offset(stage_value: int) -> Vector2:
 	var crop_type = _get_lifecycle_crop_type()
 	if crop_type != "tree":
 		return Vector2.ZERO
-	# Shift mature tree visuals upward so base sits lower in the origin tile
-	# while canopy extends into the tile above.
+	# Shift tree visuals upward so the visible tree explains its two-tile footprint.
 	match stage_value:
+		BeanGrowthStage.SPROUT:
+			return Vector2(0.0, -36.0)
 		BeanGrowthStage.VINE, BeanGrowthStage.POD_READY, BeanGrowthStage.DEAD:
 			return Vector2(0.0, -56.0)
 		_:
-			return Vector2.ZERO
+			return Vector2(0.0, -36.0)
 
 
 func _ensure_tree_harvest_sprite() -> void:
@@ -1434,16 +1434,16 @@ func _get_lifecycle_stage_texture_path(stage_value: int) -> String:
 	if crop_type == "tree":
 		match stage_value:
 			BeanGrowthStage.SEED:
-				return TEX_ACORN_TREE_SPROUT_STAGE_PATH
+				return TEX_ACORN_TREE_VINE_STAGE_PATH
 			BeanGrowthStage.SPROUT:
-				return TEX_ACORN_TREE_SPROUT_STAGE_PATH
+				return TEX_ACORN_TREE_VINE_STAGE_PATH
 			BeanGrowthStage.VINE:
 				return TEX_ACORN_TREE_VINE_STAGE_PATH
 			BeanGrowthStage.POD_READY:
 				return TEX_ACORN_TREE_VINE_STAGE_PATH
 			BeanGrowthStage.DEAD:
 				return TEX_ACORN_TREE_DEAD_STAGE_PATH
-		return TEX_ACORN_TREE_SPROUT_STAGE_PATH
+		return TEX_ACORN_TREE_VINE_STAGE_PATH
 
 	if crop_type == "maize":
 		match stage_value:

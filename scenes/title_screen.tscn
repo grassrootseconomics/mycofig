@@ -114,7 +114,7 @@ vertical_alignment = 1
 [node name="Tutorial" type="Button" parent="CenterContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 43
-text = "Story Mode"
+text = "Tutorial"
 
 [node name="FreeGarden" type="Button" parent="CenterContainer/VBoxContainer"]
 visible = false

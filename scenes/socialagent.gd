@@ -9,6 +9,11 @@ const STORY_FARMER_MOVE_TO_CROP_SECONDS := 0.32 / STORY_FARMER_HARVEST_SPEED_MUL
 const STORY_FARMER_RETURN_HOME_SECONDS := 0.30 / STORY_FARMER_HARVEST_SPEED_MULTIPLIER
 const FARMER_CARRY_OFFSET := Vector2(16.0, -20.0)
 const FARMER_CARRY_SCALE := Vector2(0.7, 0.7)
+const FARMER_WALK_STRIDE_RADIANS_PER_SEC := 18.0
+const FARMER_WALK_BOB_PIXELS := 3.0
+const FARMER_WALK_SWAY_RADIANS := 0.08
+const FARMER_WALK_STRETCH := 0.045
+const FARMER_WALK_MOVE_EPSILON := 0.04
 const CARRY_TEX_BEAN := preload("res://graphics/bean.png")
 const CARRY_TEX_SQUASH := preload("res://graphics/squash_32.png")
 const CARRY_TEX_MAIZE := preload("res://graphics/maize_32.png")
@@ -36,6 +41,13 @@ var _story_farmer_harvest_move_tween: Tween = null
 var _story_farmer_carry_sprite: Sprite2D = null
 var _story_farmer_carried_harvest_type := ""
 var _story_farmer_carried_harvest_source: Node = null
+var _story_farmer_walk_time := 0.0
+var _story_farmer_walk_active := false
+var _story_farmer_walk_base_position := Vector2.ZERO
+var _story_farmer_walk_base_scale := Vector2.ONE
+var _story_farmer_walk_base_rotation := 0.0
+var _story_farmer_walk_last_global_position := Vector2.ZERO
+var _story_farmer_walk_last_global_position_set := false
 
 
 func _story_farmer_get_level_root() -> Node:
@@ -45,6 +57,10 @@ func _story_farmer_get_level_root() -> Node:
 func _is_story_farmer_actor() -> bool:
 	if not bool(get_meta("story_villager", false)):
 		return false
+	return str(type) == "farmer"
+
+
+func _is_farmer_actor() -> bool:
 	return str(type) == "farmer"
 
 
@@ -72,6 +88,59 @@ func _story_farmer_stop_harvest_tween() -> void:
 	if is_instance_valid(_story_farmer_harvest_move_tween):
 		_story_farmer_harvest_move_tween.kill()
 	_story_farmer_harvest_move_tween = null
+
+
+func _story_farmer_is_walking() -> bool:
+	return _is_farmer_actor() and (
+		_story_farmer_harvest_state == STORY_FARMER_HARVEST_MOVING_TO_CROP
+		or _story_farmer_harvest_state == STORY_FARMER_HARVEST_RETURNING_HOME
+	)
+
+
+func _story_farmer_capture_walk_base() -> void:
+	if not is_instance_valid(sprite):
+		return
+	_story_farmer_walk_base_position = sprite.position
+	_story_farmer_walk_base_scale = sprite.scale
+	_story_farmer_walk_base_rotation = sprite.rotation
+	_story_farmer_walk_time = 0.0
+	_story_farmer_walk_active = true
+
+
+func _story_farmer_reset_walk_animation() -> void:
+	if not _story_farmer_walk_active:
+		return
+	if is_instance_valid(sprite):
+		sprite.position = _story_farmer_walk_base_position
+		sprite.scale = _story_farmer_walk_base_scale
+		sprite.rotation = _story_farmer_walk_base_rotation
+	_story_farmer_walk_active = false
+	_story_farmer_walk_time = 0.0
+
+
+func _story_farmer_update_walk_animation(delta: float) -> void:
+	if not _is_farmer_actor() or not is_instance_valid(sprite):
+		_story_farmer_reset_walk_animation()
+		return
+	var moved_this_frame := false
+	if _story_farmer_walk_last_global_position_set:
+		moved_this_frame = global_position.distance_squared_to(_story_farmer_walk_last_global_position) > FARMER_WALK_MOVE_EPSILON
+	_story_farmer_walk_last_global_position = global_position
+	_story_farmer_walk_last_global_position_set = true
+	if not (_story_farmer_is_walking() or moved_this_frame):
+		_story_farmer_reset_walk_animation()
+		return
+	if not _story_farmer_walk_active:
+		_story_farmer_capture_walk_base()
+	_story_farmer_walk_time += maxf(delta, 0.0)
+	var stride = sin(_story_farmer_walk_time * FARMER_WALK_STRIDE_RADIANS_PER_SEC)
+	var lift = absf(stride)
+	sprite.position = _story_farmer_walk_base_position + Vector2(0.0, -lift * FARMER_WALK_BOB_PIXELS)
+	sprite.rotation = _story_farmer_walk_base_rotation + stride * FARMER_WALK_SWAY_RADIANS
+	sprite.scale = Vector2(
+		_story_farmer_walk_base_scale.x * (1.0 + lift * FARMER_WALK_STRETCH),
+		_story_farmer_walk_base_scale.y * (1.0 - lift * FARMER_WALK_STRETCH * 0.45)
+	)
 
 
 func _story_farmer_release_target(level_root: Node) -> void:
@@ -150,6 +219,7 @@ func _story_farmer_finalize_carried_harvest(level_root: Node) -> void:
 
 func _story_farmer_reset_harvest_state(level_root: Node) -> void:
 	_story_farmer_stop_harvest_tween()
+	_story_farmer_reset_walk_animation()
 	_story_farmer_abort_carried_harvest()
 	_story_farmer_release_target(level_root)
 	_story_farmer_harvest_state = STORY_FARMER_HARVEST_IDLE
@@ -239,6 +309,7 @@ func _on_story_farmer_return_home_finished() -> void:
 	var level_root = _story_farmer_get_level_root()
 	_story_farmer_finalize_carried_harvest(level_root)
 	_story_farmer_harvest_state = STORY_FARMER_HARVEST_IDLE
+	_story_farmer_reset_walk_animation()
 	is_trading = false
 	logistics_ready = true
 	_story_farmer_refresh_trade_network(level_root)
@@ -320,6 +391,11 @@ func _story_farmer_tick_auto_harvest(level_root: Node) -> bool:
 		logistics_ready = false
 		return true
 	return false
+
+
+func _process(delta: float) -> void:
+	super._process(delta)
+	_story_farmer_update_walk_animation(delta)
 
 
 func _is_story_village_person_actor() -> bool:

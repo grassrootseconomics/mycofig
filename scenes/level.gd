@@ -15,12 +15,13 @@ const TEX_FARMER = preload("res://graphics/farmer.png")
 const TEX_VENDOR = preload("res://graphics/mama.png")
 const TEX_COOK = preload("res://graphics/cook.png")
 const TEX_BASKET = preload("res://graphics/basket.png")
+const TEX_HOUSE = preload("res://graphics/shop.png")
 const DEFAULT_PARENT_BOUND_RADIUS_TILES := 4
 const MYCO_HEALTHY_ANCHOR_RADIUS_TILES := 4
 const STORY_WORLD_COLUMNS := 26
 const STORY_WORLD_ROWS := 27
 const STORY_START_TILE := Vector2i(7, 13)
-const STORY_VILLAGE_OFFSET_RIGHT_TILES := 9
+const STORY_VILLAGE_OFFSET_RIGHT_TILES := 7
 const CHALLENGE_VILLAGE_OFFSET_RIGHT_TILES := 2
 const STORY_VILLAGE_RECT := Rect2i(STORY_START_TILE.x + STORY_VILLAGE_OFFSET_RIGHT_TILES, 9, 10, 10)
 const CHALLENGE_LAYOUT_CENTER_OFFSET_FROM_START_X := 2
@@ -169,6 +170,8 @@ var _story_phase5_received_trade_counts: Dictionary = {}
 var _story_phase5_all_villagers_trading := false
 var _story_phase5_basket_placed := false
 var _story_phase5_intro_tuktuk_finished := false
+var _story_phase5_intro_tuktuk_captured := false
+var _story_phase5_intro_tuktuk: Node = null
 var _tuktuk_villager_last_trade_seconds: Dictionary = {}
 var _tuktuk_trade_clock := 0.0
 var _story_farmer_inbound_wait_started_msec: Dictionary = {}
@@ -589,6 +592,8 @@ func _story_reset_phase_state() -> void:
 	_story_phase5_all_villagers_trading = false
 	_story_phase5_basket_placed = false
 	_story_phase5_intro_tuktuk_finished = false
+	_story_phase5_intro_tuktuk_captured = false
+	_story_phase5_intro_tuktuk = null
 	_tuktuk_villager_last_trade_seconds.clear()
 	_tuktuk_trade_clock = 0.0
 	_story_farmer_inbound_wait_started_msec.clear()
@@ -643,7 +648,26 @@ func _story_center_camera_on_village(immediate: bool = false) -> void:
 	if is_instance_valid(world) and world.has_method("set_camera_world_center"):
 		if world.has_method("set_camera_smoothing_speed"):
 			world.set_camera_smoothing_speed(STORY_PHASE4_VILLAGE_CAMERA_SMOOTHING_SPEED)
-		world.set_camera_world_center(_story_village_center_world, immediate)
+		world.set_camera_world_center(_get_story_village_visual_center_world(world), immediate)
+
+
+func _get_story_village_visual_center_world(world: Node) -> Vector2:
+	if not _supports_world_tiles(world):
+		return _story_village_center_world
+	var village_rect = _get_runtime_village_rect(world)
+	var min_coord = Vector2i(village_rect.position.x + 4, village_rect.position.y + 1)
+	var max_coord = Vector2i(village_rect.position.x + village_rect.size.x - 1, village_rect.position.y + village_rect.size.y - 1)
+	for house_coord_variant in _story_get_village_house_tiles(village_rect):
+		var house_coord = Vector2i(house_coord_variant)
+		if not world.in_bounds(house_coord):
+			continue
+		min_coord.x = mini(min_coord.x, house_coord.x)
+		min_coord.y = mini(min_coord.y, house_coord.y)
+		max_coord.x = maxi(max_coord.x, house_coord.x)
+		max_coord.y = maxi(max_coord.y, house_coord.y)
+	var min_world = world.tile_to_world_center(_clamp_tile_coord(world, min_coord))
+	var max_world = world.tile_to_world_center(_clamp_tile_coord(world, max_coord))
+	return (min_world + max_world) * 0.5
 
 
 func _story_center_camera_on_phase5_intro_vendor(immediate: bool = false) -> void:
@@ -656,6 +680,16 @@ func _story_center_camera_on_phase5_intro_vendor(immediate: bool = false) -> voi
 		if world.has_method("set_camera_smoothing_speed"):
 			world.set_camera_smoothing_speed(STORY_PHASE4_CAMERA_SMOOTHING_SPEED)
 		world.set_camera_world_center(target.global_position, immediate)
+
+
+func _story_center_camera_on_phase5_intro_tuktuk(immediate: bool = false) -> void:
+	if not is_instance_valid(_story_phase5_intro_tuktuk):
+		return
+	var world = _get_world_foundation()
+	if is_instance_valid(world) and world.has_method("set_camera_world_center"):
+		if world.has_method("set_camera_smoothing_speed"):
+			world.set_camera_smoothing_speed(STORY_PHASE4_CAMERA_SMOOTHING_SPEED)
+		world.set_camera_world_center(_story_phase5_intro_tuktuk.global_position, immediate)
 
 
 func _story_show_phase4_prompt_after_camera_pan(prompt_text: String) -> void:
@@ -677,6 +711,11 @@ func _story_show_phase5_prompt_after_camera_pan(prompt_text: String) -> void:
 
 func _on_story_phase5_intro_tuktuk_finished() -> void:
 	_story_phase5_intro_tuktuk_finished = true
+
+
+func _on_story_phase5_intro_tuktuk_captured() -> void:
+	_story_phase5_intro_tuktuk_captured = true
+	_story_center_camera_on_phase5_intro_tuktuk(true)
 
 
 func _story_find_phase5_intro_vendor() -> Node:
@@ -711,30 +750,38 @@ func _story_spawn_phase5_intro_tuktuk(target: Node) -> Node:
 	if not predator.has_method("configure_scripted_capture"):
 		return null
 	_story_phase5_intro_tuktuk_finished = false
+	_story_phase5_intro_tuktuk_captured = false
+	_story_phase5_intro_tuktuk = predator
 	predator.configure_scripted_capture(target, _story_get_phase5_intro_tuktuk_spawn_position(target))
 	if predator.has_signal("scripted_capture_finished"):
 		predator.connect("scripted_capture_finished", Callable(self, "_on_story_phase5_intro_tuktuk_finished"))
+	if predator.has_signal("scripted_capture_started"):
+		predator.connect("scripted_capture_started", Callable(self, "_on_story_phase5_intro_tuktuk_captured"))
 	$Animals.add_child(predator)
 	if is_instance_valid(_car_sound_player):
 		_car_sound_player.play()
 	return predator
 
 
-func _story_wait_for_phase5_intro_tuktuk(predator: Node, target: Node) -> void:
+func _story_wait_for_phase5_intro_tuktuk_capture(predator: Node) -> bool:
 	var elapsed := 0.0
 	while elapsed < STORY_PHASE5_INTRO_TUKTUK_TIMEOUT_SEC:
+		if _story_phase5_intro_tuktuk_captured:
+			return true
 		if _story_phase5_intro_tuktuk_finished:
-			return
+			return false
 		if not is_instance_valid(predator) or predator.is_queued_for_deletion():
-			return
+			return false
+		if bool(predator.get("caught")):
+			_story_phase5_intro_tuktuk_captured = true
+			return true
 		await get_tree().create_timer(STORY_PHASE5_INTRO_TUKTUK_POLL_SEC, false, false, true).timeout
 		if not _is_story_mode() or _story_phase_id != 5:
-			return
+			return false
 		elapsed += STORY_PHASE5_INTRO_TUKTUK_POLL_SEC
-	if is_instance_valid(predator) and not predator.is_queued_for_deletion():
-		if bool(predator.get("caught")) and is_instance_valid(target) and target.has_method("kill_it"):
-			target.kill_it()
+	if is_instance_valid(predator) and not predator.is_queued_for_deletion() and not bool(predator.get("caught")):
 		predator.queue_free()
+	return bool(is_instance_valid(predator) and bool(predator.get("caught")))
 
 
 func _story_run_phase5_intro_sequence(prompt_text: String) -> void:
@@ -745,16 +792,14 @@ func _story_run_phase5_intro_sequence(prompt_text: String) -> void:
 	if is_instance_valid(pickup_vendor):
 		var intro_tuktuk = _story_spawn_phase5_intro_tuktuk(pickup_vendor)
 		if is_instance_valid(intro_tuktuk):
-			await _story_wait_for_phase5_intro_tuktuk(intro_tuktuk, pickup_vendor)
+			await _story_wait_for_phase5_intro_tuktuk_capture(intro_tuktuk)
 			if not _is_story_mode() or _story_phase_id != 5:
 				return
 	_story_reset_phase5_trading_progress()
 	_story_prepare_existing_phase5_baskets()
 	_story_refresh_hud()
 	_story_sync_phase1_inventory_sparkle_targets()
-	var world = _get_world_foundation()
-	if is_instance_valid(world) and world.has_method("reset_camera_smoothing_speed"):
-		world.reset_camera_smoothing_speed()
+	_story_center_camera_on_phase5_intro_tuktuk(true)
 	_story_set_prompt(prompt_text, 5)
 
 
@@ -862,6 +907,18 @@ func _story_center_camera_on_phase5_nontrading_villagers(immediate: bool = false
 	if world.has_method("set_camera_smoothing_speed"):
 		world.set_camera_smoothing_speed(STORY_PHASE4_CAMERA_SMOOTHING_SPEED)
 	world.set_camera_world_center(result.get("pos", _story_village_center_world), immediate)
+
+
+func get_story_phase5_intro_tuktuk_world_position() -> Dictionary:
+	if not is_instance_valid(_story_phase5_intro_tuktuk) or _story_phase5_intro_tuktuk.is_queued_for_deletion():
+		return {
+			"ok": false,
+			"pos": Vector2.ZERO
+		}
+	return {
+		"ok": true,
+		"pos": _story_phase5_intro_tuktuk.global_position
+	}
 
 
 func _story_is_phase1_required_placement_type(agent_type: String) -> bool:
@@ -1261,6 +1318,52 @@ func _story_get_lower_villager_layout() -> Array:
 		{"role": "farmer", "tile": Vector2i(village_rect.position.x + 8, lower_bottom_y)},
 		{"role": "vendor", "tile": Vector2i(village_rect.position.x + village_rect.size.x - 1, lower_bottom_y), "phase5_intro_pickup": true}
 	]
+
+
+func _story_get_village_house_tiles(village_rect: Rect2i) -> Array:
+	var right_x = village_rect.position.x + village_rect.size.x
+	return [
+		Vector2i(right_x, village_rect.position.y + 1),
+		Vector2i(right_x + 1, village_rect.position.y + 2),
+		Vector2i(right_x, village_rect.position.y + 4),
+		Vector2i(right_x + 1, village_rect.position.y + 5),
+		Vector2i(right_x, village_rect.position.y + 7),
+		Vector2i(right_x + 1, village_rect.position.y + 8)
+	]
+
+
+func _get_or_create_village_visuals_root() -> Node2D:
+	var root = get_node_or_null("VillageVisuals") as Node2D
+	if is_instance_valid(root):
+		return root
+	root = Node2D.new()
+	root.name = "VillageVisuals"
+	root.z_index = 0
+	add_child(root)
+	return root
+
+
+func _story_spawn_village_houses(world: Node, village_rect: Rect2i) -> void:
+	if not _supports_world_tiles(world):
+		return
+	var root = _get_or_create_village_visuals_root()
+	for child in root.get_children():
+		child.queue_free()
+	var tile_size_world = _get_world_float_property(world, "tile_size", 64.0)
+	var texture_max_size = maxf(float(TEX_HOUSE.get_width()), float(TEX_HOUSE.get_height()))
+	var house_scale = (tile_size_world * 0.88) / maxf(texture_max_size, 1.0)
+	var house_tiles = _story_get_village_house_tiles(village_rect)
+	for idx in range(house_tiles.size()):
+		var coord = Vector2i(house_tiles[idx])
+		if not world.in_bounds(coord):
+			continue
+		var house := Sprite2D.new()
+		house.name = str("VillageHouse", idx + 1)
+		house.texture = TEX_HOUSE
+		house.position = world.tile_to_world_center(coord)
+		house.scale = Vector2(house_scale, house_scale)
+		house.flip_h = idx % 2 == 1
+		root.add_child(house)
 
 
 func _story_get_base_villager_tiles() -> Array:
@@ -2723,6 +2826,7 @@ func _story_spawn_village_cast() -> void:
 	if not _supports_world_tiles(world):
 		return
 	var village_rect = _get_runtime_village_rect(world)
+	_story_spawn_village_houses(world, village_rect)
 	var placed := 0
 	var spawned_village_actors: Array[Node] = []
 	# The bank reaches the top 3 villagers by radius from the village hub row.

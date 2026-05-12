@@ -133,10 +133,10 @@ var story_stage_text = {
 
 Your basket below has beans, squash, maize, tree seeds, and mushrooms.
 
-Tap to plant one of each.",
+Tap or drag to plant one of each.",
 	2: "Phase 2 - Harvest Time!
 
-Tap ready plants to harvest them before the birds do.
+Tap your crops to harvest them before the birds do.
 
 Try to collect one of each garden item.",
 	3: "Phase 3 - Grow your garden!
@@ -151,7 +151,7 @@ Grow crops near the village so the farmers can harvest and recover.",
 	
 	Some villagers have goods, skills, time or services, but not enough money.
 
-	Place a basket near the village so people can trade with eachother - before more leave the village!",
+	Place a basket near the village so people can trade with each other - before more people leave the village!",
 	6: "You Did It!
 
 You helped the garden grow and helped the village share again.

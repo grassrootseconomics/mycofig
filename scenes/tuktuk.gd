@@ -2,6 +2,7 @@ extends CharacterBody2D
 class_name Tuktuk
 
 signal scripted_capture_finished
+signal scripted_capture_started
 
 @export var speed := 250
 const CAPTURE_DISTANCE := 20.0
@@ -17,6 +18,7 @@ var _scripted_capture_enabled := false
 var _scripted_spawn_pos := Vector2.ZERO
 var _scripted_target: Node = null
 var _scripted_finished_emitted := false
+var _scripted_capture_started_emitted := false
 
 
 func _ready():
@@ -42,6 +44,15 @@ func _emit_scripted_capture_finished() -> void:
 	scripted_capture_finished.emit()
 
 
+func _emit_scripted_capture_started() -> void:
+	if not _scripted_capture_enabled:
+		return
+	if _scripted_capture_started_emitted:
+		return
+	_scripted_capture_started_emitted = true
+	scripted_capture_started.emit()
+
+
 func _start_scripted_capture() -> void:
 	quarry_found = false
 	the_quarry = null
@@ -49,6 +60,7 @@ func _start_scripted_capture() -> void:
 	_captured_target = null
 	_capture_cleanup_done = false
 	_scripted_finished_emitted = false
+	_scripted_capture_started_emitted = false
 	position = _scripted_spawn_pos
 	set_rotation(0)
 	if not is_instance_valid(_scripted_target) or bool(_scripted_target.get("dead")):
@@ -67,6 +79,7 @@ func reset():
 	_captured_target = null
 	_capture_cleanup_done = false
 	_scripted_finished_emitted = false
+	_scripted_capture_started_emitted = false
 	var rng := RandomNumberGenerator.new()
 	var world_rect = Global.get_world_rect(self)
 	var level_root = get_node_or_null("../..")
@@ -137,6 +150,7 @@ func _begin_escape_with_capture(agent: Node) -> void:
 	the_quarry = null
 	var vertical = randf_range(-0.20, 0.20)
 	going = Vector2(1.0, vertical).normalized()
+	_emit_scripted_capture_started()
 
 
 func _try_capture_quarry() -> bool:

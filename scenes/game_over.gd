@@ -13,7 +13,7 @@ func _ready():
 		var reached_phase = clampi(int(Global.story_chapter_id), 1, 6)
 		score_label.text = str("You reached\nPhase ", reached_phase, "!")
 		high_score_label.visible = false
-		mode_label.text = "Story Mode"
+		mode_label.text = "Tutorial"
 		rank_intro_label.visible = false
 		rank_label.visible = false
 		return

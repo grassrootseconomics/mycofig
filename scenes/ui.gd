@@ -48,6 +48,9 @@ const INVENTORY_PHASE1_SPARKLE_COLOR := Color(1.0, 0.98, 0.58, 0.95)
 const INVENTORY_PHASE1_SPARKLE_PULSE_SPEED := 4.6
 const INVENTORY_PHASE5_BASKET_STAR_COUNT := 8
 const INVENTORY_PHASE5_BASKET_STAR_COLOR := Color(1.0, 0.92, 0.24, 1.0)
+const TREE_PLANTING_PREVIEW_TEXTURE_PATH := "res://graphics/acorn_tree_vine_stage.png"
+const TREE_PLANTING_PREVIEW_SCALE := Vector2(0.36, 0.36)
+const TREE_PLANTING_PREVIEW_OFFSET := Vector2(0.0, -36.0)
 const TUTORIAL_PANEL_EXPANDED_SIZE := Vector2(372, 178)
 const TUTORIAL_PANEL_COLLAPSED_SIZE := Vector2(44, 44)
 const INVENTORY_ICON_PAD_DEFAULT := 4.0
@@ -103,6 +106,7 @@ const STORY_GUIDE_ARROW_WIDTH := 7.0
 const STORY_GUIDE_ARROW_SHADOW_WIDTH := 12.0
 const STORY_GUIDE_ARROW_HEAD_LENGTH := 32.0
 const STORY_GUIDE_ARROW_HEAD_WIDTH := 30.0
+const STORY_GUIDE_ARROW_COUNT := 2
 const STORY_GUIDE_ARROW_LAYER_Z_INDEX := 85
 const STORY_PHASE3_DIRECTION_PROMPT_INITIAL_DELAY := 3.0
 const STORY_PHASE3_DIRECTION_PROMPT_INTERVAL := 20.0
@@ -1119,7 +1123,7 @@ func _ensure_story_phase1_arrow_overlay() -> void:
 	_story_phase1_arrow_layer.z_as_relative = false
 	_story_phase1_arrow_layer.z_index = STORY_GUIDE_ARROW_LAYER_Z_INDEX
 	add_child(_story_phase1_arrow_layer)
-	for idx in range(2):
+	for idx in range(STORY_GUIDE_ARROW_COUNT):
 		var shadow := Line2D.new()
 		shadow.name = str("ArrowShadow", idx)
 		shadow.width = STORY_GUIDE_ARROW_SHADOW_WIDTH
@@ -1545,6 +1549,25 @@ func _get_phase5_nontrading_villagers_arrow_target() -> Dictionary:
 	}
 
 
+func _get_phase5_intro_tuktuk_arrow_target() -> Dictionary:
+	var level_root = get_parent()
+	if not is_instance_valid(level_root) or not level_root.has_method("get_story_phase5_intro_tuktuk_world_position"):
+		return {
+			"ok": false,
+			"pos": Vector2.ZERO
+		}
+	var result = level_root.call("get_story_phase5_intro_tuktuk_world_position")
+	if typeof(result) != TYPE_DICTIONARY or not bool(result.get("ok", false)):
+		return {
+			"ok": false,
+			"pos": Vector2.ZERO
+		}
+	return {
+		"ok": true,
+		"pos": _world_to_screen(result.get("pos", Vector2.ZERO)) + Vector2(0, -24.0)
+	}
+
+
 func _update_story_instruction_arrows() -> void:
 	if not _should_show_story_instruction_arrows():
 		if is_instance_valid(_story_phase1_arrow_layer):
@@ -1592,12 +1615,12 @@ func _update_story_instruction_arrows() -> void:
 		var basket_start = Vector2(label_rect.position.x + label_rect.size.x + 12.0, label_rect.position.y + label_rect.size.y * 0.55)
 		var basket_control = (basket_start + basket_target) * 0.5 + Vector2(96.0, 72.0)
 		_set_story_arrow_shape(0, basket_start, basket_control, basket_target)
-		var villager_result = _get_phase5_nontrading_villagers_arrow_target()
-		if bool(villager_result.get("ok", false)):
-			var villager_target = villager_result.get("pos", Vector2.ZERO)
-			var villager_start = Vector2(label_rect.position.x + label_rect.size.x * 0.24, label_rect.position.y + label_rect.size.y * 0.56)
-			var villager_control = (villager_start + villager_target) * 0.5 + Vector2(-118.0, 68.0)
-			_set_story_arrow_shape(1, villager_start, villager_control, villager_target)
+		var tuktuk_result = _get_phase5_intro_tuktuk_arrow_target()
+		if bool(tuktuk_result.get("ok", false)):
+			var tuktuk_target = tuktuk_result.get("pos", Vector2.ZERO)
+			var tuktuk_start = Vector2(label_rect.position.x + label_rect.size.x * 0.58, label_rect.position.y + label_rect.size.y * 0.78)
+			var tuktuk_control = (tuktuk_start + tuktuk_target) * 0.5 + Vector2(44.0, 76.0)
+			_set_story_arrow_shape(1, tuktuk_start, tuktuk_control, tuktuk_target)
 		else:
 			_set_story_arrow_visible(1, false)
 		return
@@ -2491,18 +2514,58 @@ func _ensure_drag_preview() -> void:
 	add_child(drag_preview_outline)
 
 
-func _refresh_drag_preview_outline(texture: Texture2D) -> void:
+func _get_drag_preview_tile_size() -> float:
+	var world = _get_world_foundation()
+	if is_instance_valid(world):
+		var raw_tile_size = world.get("tile_size")
+		if typeof(raw_tile_size) == TYPE_INT or typeof(raw_tile_size) == TYPE_FLOAT:
+			return maxf(float(raw_tile_size), 1.0)
+	return 64.0
+
+
+func _get_inventory_drag_preview_texture(agent_name: String, fallback_texture: Texture2D) -> Texture2D:
+	if agent_name == "tree":
+		var tree_texture = load(TREE_PLANTING_PREVIEW_TEXTURE_PATH)
+		if tree_texture is Texture2D:
+			return tree_texture
+	return fallback_texture
+
+
+func _get_inventory_drag_preview_scale(agent_name: String) -> Vector2:
+	if agent_name == "tree":
+		return TREE_PLANTING_PREVIEW_SCALE
+	return Vector2.ONE
+
+
+func _get_inventory_drag_preview_offset(agent_name: String) -> Vector2:
+	if agent_name == "tree":
+		return TREE_PLANTING_PREVIEW_OFFSET
+	return Vector2.ZERO
+
+
+func _refresh_drag_preview_outline(agent_name: String, texture: Texture2D) -> void:
 	if not is_instance_valid(drag_preview_outline):
 		return
 	drag_preview_outline.clear_points()
-	var half_size := Vector2(16, 16)
-	if is_instance_valid(texture):
-		half_size = texture.get_size() * 0.5
-	half_size += Vector2(4.0, 4.0)
-	var top_left = Vector2(-half_size.x, -half_size.y)
-	var top_right = Vector2(half_size.x, -half_size.y)
-	var bottom_right = Vector2(half_size.x, half_size.y)
-	var bottom_left = Vector2(-half_size.x, half_size.y)
+	var top_left := Vector2.ZERO
+	var top_right := Vector2.ZERO
+	var bottom_right := Vector2.ZERO
+	var bottom_left := Vector2.ZERO
+	if _uses_two_tile_vertical_hint(agent_name):
+		var tile_size = _get_drag_preview_tile_size()
+		top_left = Vector2(-tile_size * 0.5, -tile_size * 1.5)
+		top_right = Vector2(tile_size * 0.5, -tile_size * 1.5)
+		bottom_right = Vector2(tile_size * 0.5, tile_size * 0.5)
+		bottom_left = Vector2(-tile_size * 0.5, tile_size * 0.5)
+	else:
+		var half_size := Vector2(16, 16)
+		if is_instance_valid(texture):
+			half_size = texture.get_size() * _get_inventory_drag_preview_scale(agent_name) * 0.5
+		half_size += Vector2(4.0, 4.0)
+		top_left = Vector2(-half_size.x, -half_size.y)
+		top_right = Vector2(half_size.x, -half_size.y)
+		bottom_right = Vector2(half_size.x, half_size.y)
+		bottom_left = Vector2(-half_size.x, half_size.y)
 	drag_preview_outline.add_point(top_left)
 	drag_preview_outline.add_point(top_right)
 	drag_preview_outline.add_point(bottom_right)
@@ -2560,8 +2623,11 @@ func _start_inventory_drag(agent_name: String, mouse_pos: Vector2) -> void:
 			icon = candidate
 			break
 	if is_instance_valid(icon):
-		drag_preview_sprite.texture = icon.texture
-		_refresh_drag_preview_outline(icon.texture)
+		var preview_texture = _get_inventory_drag_preview_texture(agent_name, icon.texture)
+		drag_preview_sprite.texture = preview_texture
+		drag_preview_sprite.scale = _get_inventory_drag_preview_scale(agent_name)
+		drag_preview_sprite.offset = _get_inventory_drag_preview_offset(agent_name)
+		_refresh_drag_preview_outline(agent_name, preview_texture)
 	drag_preview_sprite.global_position = mouse_pos
 	drag_preview_sprite.visible = true
 	if is_instance_valid(drag_preview_outline):
@@ -2580,6 +2646,8 @@ func _end_inventory_drag() -> void:
 	if is_instance_valid(drag_preview_sprite):
 		drag_preview_sprite.visible = false
 		drag_preview_sprite.texture = null
+		drag_preview_sprite.scale = Vector2.ONE
+		drag_preview_sprite.offset = Vector2.ZERO
 	if is_instance_valid(drag_preview_outline):
 		drag_preview_outline.visible = false
 		drag_preview_outline.clear_points()

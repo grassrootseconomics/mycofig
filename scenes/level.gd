@@ -86,6 +86,8 @@ const DYNAMIC_TUKTUK_WAVE_MAX := 3
 const DYNAMIC_TUKTUK_ACTIVE_CAP := 4
 const DYNAMIC_TUKTUK_MIN_EXTRA_VILLAGERS := 1
 const TUKTUK_MIN_NONTRADING_SECONDS := 20.0
+const TUKTUK_ENTRY_SOUND_PATH := "res://audio/old-car-horn.mp3"
+const TUKTUK_ENTRY_SOUND_VOLUME_DB := 3.0
 const CHALLENGE_LOSS_CHECK_INTERVAL_SEC := 0.5
 const CHALLENGE_LOSS_PROMPT_TEXT := "The life in your garden is no more."
 const STORY_PHASE1_REQUIRED_PLACED_TYPES := {
@@ -189,6 +191,7 @@ var _challenge_farmer_n_autofill_enabled := false
 var _challenge_farmer_n_autofill_accum := 0.0
 var _challenge_loss_check_accum := 0.0
 var _challenge_loss_prompt_active := false
+var _tuktuk_entry_sound_player: AudioStreamPlayer = null
 @onready var _bird_sound_player: AudioStreamPlayer2D = get_node_or_null("BirdSound")
 @onready var _bird_long_player: AudioStreamPlayer = get_node_or_null("BirdLong")
 @onready var _car_sound_player: AudioStreamPlayer2D = get_node_or_null("CarSound")
@@ -207,6 +210,7 @@ func _get_runtime_audio_players() -> Array:
 		_bird_sound_player,
 		_bird_long_player,
 		_car_sound_player,
+		_tuktuk_entry_sound_player,
 		_squelch_sound_player,
 		_twinkle_sound_player,
 		_bush_sound_player
@@ -323,8 +327,31 @@ func _is_parallel_village_runtime() -> bool:
 	return _is_story_mode() or _is_challenge_dual_village_runtime()
 
 
+func _ensure_tuktuk_entry_sound_player() -> AudioStreamPlayer:
+	if is_instance_valid(_tuktuk_entry_sound_player):
+		return _tuktuk_entry_sound_player
+	var stream = load(TUKTUK_ENTRY_SOUND_PATH)
+	if not (stream is AudioStream):
+		return null
+	var player := AudioStreamPlayer.new()
+	player.name = "TuktukEntryHorn"
+	player.stream = stream
+	player.volume_db = TUKTUK_ENTRY_SOUND_VOLUME_DB
+	add_child(player)
+	_tuktuk_entry_sound_player = player
+	return _tuktuk_entry_sound_player
+
+
 func play_tuktuk_entry_sound() -> void:
+	if _is_headless_runtime():
+		return
+	var horn_player = _ensure_tuktuk_entry_sound_player()
+	if is_instance_valid(horn_player):
+		horn_player.stop()
+		horn_player.play()
+		return
 	if is_instance_valid(_car_sound_player):
+		_car_sound_player.stop()
 		_car_sound_player.play()
 
 

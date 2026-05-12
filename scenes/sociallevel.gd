@@ -9,6 +9,8 @@ const TEX_TREE = preload("res://graphics/bank.png")
 const TEX_MAIZE = preload("res://graphics/cook.png")
 const TEX_BEAN = preload("res://graphics/farmer.png")
 const TEX_BASKET = preload("res://graphics/basket.png")
+const TUKTUK_ENTRY_SOUND_PATH := "res://audio/old-car-horn.mp3"
+const TUKTUK_ENTRY_SOUND_VOLUME_DB := 3.0
 
 var socialagent_scene: PackedScene = load("res://scenes/socialagent.tscn")
 var trade_scene: PackedScene = load("res://scenes/trade.tscn")
@@ -44,6 +46,7 @@ var _trade_pool: Array = []
 var _trade_visual_packets_by_key: Dictionary = {}
 var _shutdown_cleanup_done := false
 var _bank_hotkey_enabled := true
+var _tuktuk_entry_sound_player: AudioStreamPlayer = null
 const BASKET_NEAR_PERSON_MAX_TILES := 4
 
 
@@ -58,10 +61,40 @@ func _mute_runtime_audio_if_headless() -> void:
 		$BirdSound,
 		$BirdLong,
 		$CarSound,
+		_tuktuk_entry_sound_player,
 		$SquelchSound,
 		$TwinkleSound,
 		$BushSound
 	])
+
+
+func _ensure_tuktuk_entry_sound_player() -> AudioStreamPlayer:
+	if is_instance_valid(_tuktuk_entry_sound_player):
+		return _tuktuk_entry_sound_player
+	var stream = load(TUKTUK_ENTRY_SOUND_PATH)
+	if not (stream is AudioStream):
+		return null
+	var player := AudioStreamPlayer.new()
+	player.name = "TuktukEntryHorn"
+	player.stream = stream
+	player.volume_db = TUKTUK_ENTRY_SOUND_VOLUME_DB
+	add_child(player)
+	_tuktuk_entry_sound_player = player
+	return _tuktuk_entry_sound_player
+
+
+func play_tuktuk_entry_sound() -> void:
+	if _is_headless_runtime():
+		return
+	var horn_player = _ensure_tuktuk_entry_sound_player()
+	if is_instance_valid(horn_player):
+		horn_player.stop()
+		horn_player.play()
+		return
+	var car_sound = get_node_or_null("CarSound")
+	if is_instance_valid(car_sound) and car_sound.has_method("play"):
+		car_sound.stop()
+		car_sound.play()
 
 
 func _get_world_foundation() -> Node:
@@ -852,6 +885,7 @@ func _release_audio() -> void:
 		$BirdSound,
 		$BirdLong,
 		$CarSound,
+		_tuktuk_entry_sound_player,
 		$SquelchSound,
 		$TwinkleSound,
 		$BushSound

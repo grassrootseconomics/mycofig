@@ -2,11 +2,15 @@ extends Control
 
 const SOIL_BACKGROUND_PATH := "res://graphics/soil_end.jpeg"
 const GE_BOOK_URI := "https://grassrootseconomics.org/book/"
-const SHARE_URL := "https://grassrootseconomics.org/games/"
+const SHARE_URL := "https://grassecon.org/games/"
+const SHARE_URL_DISPLAY := "grassecon.org/games"
 const SHARE_CARD_DIR := "user://share"
 const SHARE_CARD_PATH := "user://share/social_soil_result.png"
 const SHARE_CARD_SIZE := Vector2i(1080, 1920)
 const ANDROID_SHARE_CLASS := "com.godot.game.SocialSoilShare"
+const SHARE_CARD_BIRD_PATH := "res://graphics/bird1.png"
+const SHARE_CARD_TUKTUK_PATH := "res://graphics/tuktuk.png"
+const SHARE_CARD_MUSHROOM_PATH := "res://graphics/mushroom_32.png"
 const BIRD_FRAME_PATHS := [
 	"res://graphics/bird1.png",
 	"res://graphics/bird2.png",
@@ -762,16 +766,19 @@ func _make_share_card_control() -> Control:
 	vbox.name = "ShareVBox"
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	vbox.custom_minimum_size = Vector2(904.0, 0.0)
-	vbox.add_theme_constant_override("separation", 42)
+	vbox.add_theme_constant_override("separation", 30)
 	center.add_child(vbox)
 
+	var bird_icon: TextureRect = _make_share_texture("ShareBird", SHARE_CARD_BIRD_PATH, Vector2(118.0, 96.0))
+	vbox.add_child(bird_icon)
+
 	var title: Label = _make_label("ShareTitle", "Social Soil", Color(1.0, 0.9, 0.34, 1.0), 92, 6, Color(0.02, 0.05, 0.02, 1.0))
-	title.custom_minimum_size = Vector2(904.0, 132.0)
+	title.custom_minimum_size = Vector2(904.0, 116.0)
 	vbox.add_child(title)
 
 	var panel: Panel = Panel.new()
 	panel.name = "ShareAchievementPanel"
-	panel.custom_minimum_size = Vector2(904.0, 580.0)
+	panel.custom_minimum_size = Vector2(904.0, 560.0)
 	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.03, 0.13, 0.07, 0.86), Color(0.92, 1.0, 0.54, 0.95), 4, 8))
 	vbox.add_child(panel)
 
@@ -803,14 +810,33 @@ func _make_share_card_control() -> Control:
 
 	var mode: Label = _make_label("ShareMode", _make_share_mode_line(), Color(0.96, 1.0, 0.92, 1.0), 38, 3, Color(0.0, 0.04, 0.02, 0.92))
 	mode.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	mode.custom_minimum_size = Vector2(904.0, 110.0)
+	mode.custom_minimum_size = Vector2(904.0, 96.0)
 	vbox.add_child(mode)
 
-	var footer: Label = _make_label("ShareFooter", str("Play Social Soil\n", SHARE_URL), Color(0.86, 0.95, 1.0, 1.0), 36, 3, Color(0.0, 0.03, 0.06, 0.95))
+	var tuktuk_icon: TextureRect = _make_share_texture("ShareTuktuk", SHARE_CARD_TUKTUK_PATH, Vector2(172.0, 116.0))
+	vbox.add_child(tuktuk_icon)
+
+	var footer: Label = _make_label("ShareFooter", str("Play Social Soil\n", SHARE_URL_DISPLAY), Color(0.86, 0.95, 1.0, 1.0), 36, 3, Color(0.0, 0.03, 0.06, 0.95))
 	footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	footer.custom_minimum_size = Vector2(904.0, 124.0)
+	footer.custom_minimum_size = Vector2(904.0, 110.0)
 	vbox.add_child(footer)
+
+	var mushroom_icon: TextureRect = _make_share_texture("ShareMushroom", SHARE_CARD_MUSHROOM_PATH, Vector2(92.0, 90.0))
+	vbox.add_child(mushroom_icon)
 	return root
+
+
+func _make_share_texture(node_name: String, path: String, min_size: Vector2) -> TextureRect:
+	var texture_rect: TextureRect = TextureRect.new()
+	texture_rect.name = node_name
+	texture_rect.custom_minimum_size = min_size
+	texture_rect.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	texture_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	texture_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	var texture: Resource = load(path)
+	if texture is Texture2D:
+		texture_rect.texture = texture as Texture2D
+	return texture_rect
 
 
 func _apply_share_card_hero_font(label: Label, max_size: int, min_size: int, content_width: float) -> void:
@@ -849,7 +875,7 @@ func _make_share_summary_text() -> String:
 
 
 func _make_share_text() -> String:
-	return str(_make_share_summary_text(), " Play here: ", SHARE_URL)
+	return str(_make_share_summary_text(), " Play here: ", SHARE_URL_DISPLAY)
 
 
 func _open_android_share_sheet(absolute_png_path: String, share_text: String) -> bool:

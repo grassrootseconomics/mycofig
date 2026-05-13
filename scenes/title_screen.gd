@@ -152,7 +152,7 @@ func _setup_version_label() -> void:
 	var version_label: Label = $VersionLabel
 	if not is_instance_valid(version_label):
 		return
-	var version_text = str(ProjectSettings.get_setting("application/config/version", "1.1.6"))
+	var version_text = str(ProjectSettings.get_setting("application/config/version", "1.1.7"))
 	if not version_text.begins_with("v"):
 		version_text = "v" + version_text
 	version_label.text = version_text

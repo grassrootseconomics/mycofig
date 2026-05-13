@@ -139,6 +139,9 @@ const MINIMAP_SIZE_TINY := Vector2(132, 88)
 const SIDE_BUTTON_SIZE_DEFAULT := Vector2(84, 38)
 const SIDE_BUTTON_SIZE_COMPACT := Vector2(98, 46)
 const SIDE_BUTTON_SIZE_TINY := Vector2(112, 52)
+const UI_SAFE_EDGE_MARGIN_DEFAULT := 12.0
+const UI_SAFE_EDGE_MARGIN_COMPACT := 10.0
+const UI_SAFE_EDGE_MARGIN_TINY := 8.0
 const RANK_FLASH_SCALE := 1.34
 const RANK_SPARKLE_DURATION := 0.62
 
@@ -238,6 +241,7 @@ var _ui_layout_dirty := true
 var _last_inventory_rect := Rect2(Vector2.ZERO, Vector2.ZERO)
 var _last_tutorial_visible := false
 var _last_endgame_visible := false
+var _last_safe_view_rect := Rect2(Vector2.ZERO, Vector2.ZERO)
 
 func _ready() -> void:
 	#$PalletContainer2/HBoxContainer/ActiveTexture.texture = Global.active_agent.sprite_texture
@@ -1331,10 +1335,13 @@ func _layout_story_phase3_direction_prompt() -> void:
 	var view_size = view_rect.size
 	if view_size.x <= 0.0 or view_size.y <= 0.0:
 		return
+	var safe_rect = _get_padded_safe_view_rect()
+	if safe_rect.size.x <= 0.0 or safe_rect.size.y <= 0.0:
+		safe_rect = view_rect
 	_story_phase3_direction_layer.position = view_rect.position
 	_story_phase3_direction_layer.size = view_size
 
-	var center = view_rect.position + view_size * 0.5
+	var center = safe_rect.position + safe_rect.size * 0.5
 	var target_screen = _world_to_screen(_story_village_center_world)
 	var direction = target_screen - center
 	if direction.length_squared() <= 1.0:
@@ -1345,20 +1352,20 @@ func _layout_story_phase3_direction_prompt() -> void:
 	var margin = STORY_PHASE3_DIRECTION_PROMPT_MARGIN
 	var side_center: Vector2 = center
 	if absf(direction.x) >= absf(direction.y):
-		side_center.x = view_rect.position.x + view_size.x - margin if direction.x >= 0.0 else view_rect.position.x + margin
-		side_center.y = clampf(center.y + direction.y * view_size.y * 0.28, view_rect.position.y + 96.0, view_rect.position.y + view_size.y - 96.0)
+		side_center.x = safe_rect.position.x + safe_rect.size.x - margin if direction.x >= 0.0 else safe_rect.position.x + margin
+		side_center.y = clampf(center.y + direction.y * safe_rect.size.y * 0.28, safe_rect.position.y + 96.0, safe_rect.position.y + safe_rect.size.y - 96.0)
 	else:
-		side_center.y = view_rect.position.y + view_size.y - margin if direction.y >= 0.0 else view_rect.position.y + margin
-		side_center.x = clampf(center.x + direction.x * view_size.x * 0.28, view_rect.position.x + 110.0, view_rect.position.x + view_size.x - 110.0)
+		side_center.y = safe_rect.position.y + safe_rect.size.y - margin if direction.y >= 0.0 else safe_rect.position.y + margin
+		side_center.x = clampf(center.x + direction.x * safe_rect.size.x * 0.28, safe_rect.position.x + 110.0, safe_rect.position.x + safe_rect.size.x - 110.0)
 
 	var half_length = STORY_PHASE3_DIRECTION_PROMPT_ARROW_LENGTH * 0.5
 	var start_pos = side_center - direction * half_length
 	var tip_pos = side_center + direction * half_length
 	var clamp_margin := 22.0
-	start_pos.x = clampf(start_pos.x, view_rect.position.x + clamp_margin, view_rect.position.x + view_size.x - clamp_margin)
-	start_pos.y = clampf(start_pos.y, view_rect.position.y + clamp_margin, view_rect.position.y + view_size.y - clamp_margin)
-	tip_pos.x = clampf(tip_pos.x, view_rect.position.x + clamp_margin, view_rect.position.x + view_size.x - clamp_margin)
-	tip_pos.y = clampf(tip_pos.y, view_rect.position.y + clamp_margin, view_rect.position.y + view_size.y - clamp_margin)
+	start_pos.x = clampf(start_pos.x, safe_rect.position.x + clamp_margin, safe_rect.position.x + safe_rect.size.x - clamp_margin)
+	start_pos.y = clampf(start_pos.y, safe_rect.position.y + clamp_margin, safe_rect.position.y + safe_rect.size.y - clamp_margin)
+	tip_pos.x = clampf(tip_pos.x, safe_rect.position.x + clamp_margin, safe_rect.position.x + safe_rect.size.x - clamp_margin)
+	tip_pos.y = clampf(tip_pos.y, safe_rect.position.y + clamp_margin, safe_rect.position.y + safe_rect.size.y - clamp_margin)
 
 	var local_start = start_pos - view_rect.position
 	var local_tip = tip_pos - view_rect.position
@@ -1386,8 +1393,9 @@ func _layout_story_phase3_direction_prompt() -> void:
 		if absf(direction.y) > absf(direction.x):
 			label_center = side_center + (Vector2(0, -36) if direction.y >= 0.0 else Vector2(0, 36))
 		var label_pos = label_center - label_size * 0.5
-		label_pos.x = clampf(label_pos.x, view_rect.position.x + 8.0, view_rect.position.x + view_size.x - label_size.x - 8.0)
-		label_pos.y = clampf(label_pos.y, view_rect.position.y + 8.0, view_rect.position.y + view_size.y - label_size.y - 8.0)
+		label_size.x = minf(label_size.x, maxf(safe_rect.size.x - 16.0, 1.0))
+		label_size.y = minf(label_size.y, maxf(safe_rect.size.y - 16.0, 1.0))
+		label_pos = _clamp_control_position_to_rect(label_pos, label_size, safe_rect.grow(-8.0))
 		_story_phase3_direction_label.size = label_size
 		_story_phase3_direction_label.position = label_pos - view_rect.position
 
@@ -1649,8 +1657,76 @@ func _request_layout_update() -> void:
 	_ui_layout_dirty = true
 
 
+func _get_control_layout_size(control: Control, fallback: Vector2) -> Vector2:
+	var result = control.size if is_instance_valid(control) else Vector2.ZERO
+	if result.x <= 0.0:
+		result.x = control.custom_minimum_size.x if is_instance_valid(control) else 0.0
+	if result.y <= 0.0:
+		result.y = control.custom_minimum_size.y if is_instance_valid(control) else 0.0
+	if result.x <= 0.0:
+		result.x = fallback.x
+	if result.y <= 0.0:
+		result.y = fallback.y
+	return result
+
+
+func _get_safe_edge_margin() -> float:
+	if _is_tiny_ui():
+		return UI_SAFE_EDGE_MARGIN_TINY
+	if _is_compact_ui():
+		return UI_SAFE_EDGE_MARGIN_COMPACT
+	return UI_SAFE_EDGE_MARGIN_DEFAULT
+
+
+func _get_safe_view_rect() -> Rect2:
+	var view_rect := get_viewport().get_visible_rect()
+	if not Global.is_mobile_platform:
+		return view_rect
+	var window_size_i := DisplayServer.window_get_size()
+	var window_size := Vector2(window_size_i)
+	if window_size.x <= 0.0 or window_size.y <= 0.0:
+		return view_rect
+	var safe_area_i := DisplayServer.get_display_safe_area()
+	var safe_area := Rect2(Vector2(safe_area_i.position), Vector2(safe_area_i.size))
+	if safe_area.size.x <= 0.0 or safe_area.size.y <= 0.0:
+		return view_rect
+	# Mobile safe areas are reported in window pixels; this HUD is laid out in viewport coordinates.
+	var scale := Vector2(view_rect.size.x / window_size.x, view_rect.size.y / window_size.y)
+	var safe_pos := view_rect.position + safe_area.position * scale
+	var safe_size := safe_area.size * scale
+	var safe_left = clampf(safe_pos.x, view_rect.position.x, view_rect.position.x + view_rect.size.x)
+	var safe_top = clampf(safe_pos.y, view_rect.position.y, view_rect.position.y + view_rect.size.y)
+	var safe_right = clampf(safe_pos.x + safe_size.x, view_rect.position.x, view_rect.position.x + view_rect.size.x)
+	var safe_bottom = clampf(safe_pos.y + safe_size.y, view_rect.position.y, view_rect.position.y + view_rect.size.y)
+	if safe_right - safe_left <= 1.0 or safe_bottom - safe_top <= 1.0:
+		return view_rect
+	return Rect2(Vector2(safe_left, safe_top), Vector2(safe_right - safe_left, safe_bottom - safe_top))
+
+
+func _get_padded_safe_view_rect(extra_margin: float = 0.0) -> Rect2:
+	var safe_rect := _get_safe_view_rect()
+	var margin = maxf(_get_safe_edge_margin() + extra_margin, 0.0)
+	var padded := safe_rect.grow(-margin)
+	if padded.size.x <= 1.0 or padded.size.y <= 1.0:
+		return safe_rect
+	return padded
+
+
+func _clamp_control_position_to_rect(pos: Vector2, size: Vector2, rect: Rect2) -> Vector2:
+	var max_x = maxf(rect.position.x, rect.position.x + rect.size.x - size.x)
+	var max_y = maxf(rect.position.y, rect.position.y + rect.size.y - size.y)
+	return Vector2(
+		clampf(pos.x, rect.position.x, max_x),
+		clampf(pos.y, rect.position.y, max_y)
+	)
+
+
 func _detect_layout_state_change() -> bool:
 	var changed := false
+	var safe_rect := _get_safe_view_rect()
+	if safe_rect != _last_safe_view_rect:
+		_last_safe_view_rect = safe_rect
+		changed = true
 	if is_instance_valid(_inventory_panel):
 		var inventory_rect = _inventory_panel.get_global_rect()
 		if inventory_rect != _last_inventory_rect:
@@ -1670,9 +1746,67 @@ func _detect_layout_state_change() -> bool:
 	return changed
 
 
+func _get_inventory_panel_target_height() -> float:
+	return 178.0 if _is_compact_ui() else 159.0
+
+
+func _get_inventory_panel_target_width() -> float:
+	var view_rect = get_viewport().get_visible_rect()
+	var safe_rect = _get_safe_view_rect()
+	var margin = _get_safe_edge_margin()
+	var max_width = maxf(safe_rect.size.x - margin * 2.0, 160.0)
+	return minf(clampf(view_rect.size.x * 0.36, 200.0, 292.0), max_width)
+
+
+func _layout_inventory_panel() -> void:
+	var inventory: MarginContainer = _inventory_panel
+	if not is_instance_valid(inventory):
+		return
+	var view_rect = get_viewport().get_visible_rect()
+	var safe_rect = _get_safe_view_rect()
+	var margin = _get_safe_edge_margin()
+	var panel_width = _get_inventory_panel_target_width()
+	var panel_height = _get_inventory_panel_target_height()
+	var view_center_x = view_rect.position.x + view_rect.size.x * 0.5
+	var safe_center_x = safe_rect.position.x + safe_rect.size.x * 0.5
+	var center_shift_x = safe_center_x - view_center_x
+	var bottom_inset = view_rect.position.y + view_rect.size.y - (safe_rect.position.y + safe_rect.size.y)
+	var bottom_margin = maxf(bottom_inset + margin, margin)
+	inventory.anchor_left = 0.5
+	inventory.anchor_right = 0.5
+	inventory.anchor_top = 1.0
+	inventory.anchor_bottom = 1.0
+	inventory.offset_left = round(center_shift_x - panel_width * 0.5)
+	inventory.offset_right = round(center_shift_x + panel_width * 0.5)
+	inventory.offset_bottom = -round(bottom_margin)
+	inventory.offset_top = inventory.offset_bottom - panel_height
+
+
+func _layout_top_hud_containers() -> void:
+	var safe_rect = _get_safe_view_rect()
+	var margin = _get_safe_edge_margin()
+	var high_score_size := Vector2.ZERO
+	var high_score_bottom: float = safe_rect.position.y + margin
+	if is_instance_valid(_high_score_container) and _high_score_container.visible:
+		high_score_size = _get_control_layout_size(_high_score_container, Vector2(160, 50))
+		var high_score_pos = _clamp_control_position_to_rect(safe_rect.position + Vector2(margin, margin), high_score_size, safe_rect)
+		_high_score_container.global_position = Vector2(round(high_score_pos.x), round(high_score_pos.y))
+		high_score_bottom = _high_score_container.global_position.y + high_score_size.y
+	if is_instance_valid(_endgame_container) and _endgame_container.visible:
+		var endgame_size = _get_control_layout_size(_endgame_container, Vector2(260, 60))
+		var x = safe_rect.position.x + safe_rect.size.x - endgame_size.x - margin
+		var y = safe_rect.position.y + margin
+		if high_score_size != Vector2.ZERO and x < safe_rect.position.x + margin + high_score_size.x + 8.0:
+			y = high_score_bottom + 8.0
+		var pos = _clamp_control_position_to_rect(Vector2(x, y), endgame_size, safe_rect)
+		_endgame_container.global_position = Vector2(round(pos.x), round(pos.y))
+
+
 func _apply_runtime_layout(force: bool = false) -> void:
 	if not force and not _ui_layout_dirty:
 		return
+	_layout_inventory_panel()
+	_layout_top_hud_containers()
 	_layout_quit_container()
 	_layout_tutorial_container()
 	_layout_story_facts_panel()
@@ -1737,7 +1871,7 @@ func _update_tutorial_expanded_size_for_text() -> void:
 	var text_height = float(effective_lines) * line_height
 	var vertical_padding = TUTORIAL_PANEL_STORY_TEXT_VERTICAL_PADDING if _is_guidance_instruction_mode() else TUTORIAL_PANEL_TEXT_VERTICAL_PADDING
 	var target_height = maxf(_tutorial_expanded_size_base.y, text_height + vertical_padding)
-	var max_height = maxf(get_viewport().get_visible_rect().size.y * TUTORIAL_PANEL_MAX_HEIGHT_FRACTION, _tutorial_expanded_size_base.y)
+	var max_height = maxf(_get_safe_view_rect().size.y * TUTORIAL_PANEL_MAX_HEIGHT_FRACTION, _tutorial_expanded_size_base.y)
 	_tutorial_expanded_size = Vector2(_tutorial_expanded_size_base.x, clampf(target_height, _tutorial_expanded_size_base.y, max_height))
 
 
@@ -1762,6 +1896,7 @@ func _is_guidance_instruction_mode() -> bool:
 func _apply_responsive_layout() -> void:
 	var view_rect = get_viewport().get_visible_rect()
 	var view_size = view_rect.size
+	var safe_rect = _get_safe_view_rect()
 	var compact = _is_compact_ui()
 	var tiny = _is_tiny_ui()
 	var story_instructions = _is_guidance_instruction_mode()
@@ -1772,10 +1907,7 @@ func _apply_responsive_layout() -> void:
 		inventory.add_theme_constant_override("margin_top", margin_px)
 		inventory.add_theme_constant_override("margin_right", margin_px)
 		inventory.add_theme_constant_override("margin_bottom", margin_px)
-		var panel_width = clampf(view_size.x * 0.36, 200.0, 292.0)
-		inventory.offset_left = -round(panel_width * 0.5)
-		inventory.offset_right = round(panel_width * 0.5)
-		inventory.offset_top = -178.0 if compact else -159.0
+		_layout_inventory_panel()
 	_inventory_slot_size = INVENTORY_SLOT_SIZE_TINY if tiny else (INVENTORY_SLOT_SIZE_COMPACT if compact else INVENTORY_SLOT_SIZE_DEFAULT)
 	_inventory_icon_pad_default = 6.0 if tiny else (5.0 if compact else INVENTORY_ICON_PAD_DEFAULT)
 	_inventory_icon_pad_basket = 9.0 if tiny else (8.0 if compact else INVENTORY_ICON_PAD_BASKET)
@@ -1810,7 +1942,7 @@ func _apply_responsive_layout() -> void:
 		tutorial_label.offset_bottom = -66.0 if story_instructions else -18.0
 	var max_expanded_width = STORY_TUTORIAL_PANEL_EXPANDED_SIZE.x if story_instructions else TUTORIAL_PANEL_EXPANDED_SIZE.x
 	var min_expanded_width = 300.0 if story_instructions else 248.0
-	var expanded_width = minf(max_expanded_width, maxf(view_size.x - 24.0, min_expanded_width))
+	var expanded_width = minf(max_expanded_width, maxf(safe_rect.size.x - _get_safe_edge_margin() * 2.0, min_expanded_width))
 	var expanded_height = 188.0 if tiny else (182.0 if compact else TUTORIAL_PANEL_EXPANDED_SIZE.y)
 	if story_instructions:
 		expanded_height = 226.0 if tiny else (238.0 if compact else STORY_TUTORIAL_PANEL_EXPANDED_SIZE.y)
@@ -2055,6 +2187,7 @@ func _layout_quit_container() -> void:
 	var inventory_panel: MarginContainer = _inventory_panel
 	if not is_instance_valid(inventory_panel):
 		return
+	var safe_rect = _get_padded_safe_view_rect()
 	var inventory_rect = inventory_panel.get_global_rect()
 	var center_y = inventory_rect.position.y + inventory_rect.size.y * 0.5
 	if is_instance_valid(quit_container):
@@ -2065,10 +2198,12 @@ func _layout_quit_container() -> void:
 			quit_size.x = 96.0
 		if quit_size.y <= 0.0:
 			quit_size.y = 44.0
-		quit_container.global_position = Vector2(
-			round(inventory_rect.position.x - INVENTORY_SIDE_BUTTON_BUFFER - quit_size.x),
-			round(center_y - quit_size.y * 0.5)
+		var quit_pos = _clamp_control_position_to_rect(
+			Vector2(inventory_rect.position.x - INVENTORY_SIDE_BUTTON_BUFFER - quit_size.x, center_y - quit_size.y * 0.5),
+			quit_size,
+			safe_rect
 		)
+		quit_container.global_position = Vector2(round(quit_pos.x), round(quit_pos.y))
 	if is_instance_valid(pause_container):
 		var pause_size = pause_container.size
 		if pause_size.x <= 0.0 or pause_size.y <= 0.0:
@@ -2077,33 +2212,37 @@ func _layout_quit_container() -> void:
 			pause_size.x = 96.0
 		if pause_size.y <= 0.0:
 			pause_size.y = 44.0
-		pause_container.global_position = Vector2(
-			round(inventory_rect.position.x + inventory_rect.size.x + INVENTORY_SIDE_BUTTON_BUFFER),
-			round(center_y - pause_size.y * 0.5)
+		var pause_pos = _clamp_control_position_to_rect(
+			Vector2(inventory_rect.position.x + inventory_rect.size.x + INVENTORY_SIDE_BUTTON_BUFFER, center_y - pause_size.y * 0.5),
+			pause_size,
+			safe_rect
 		)
+		pause_container.global_position = Vector2(round(pause_pos.x), round(pause_pos.y))
 
 
 func _layout_tutorial_container() -> void:
 	var tutorial: Control = _tutorial_panel
 	if not is_instance_valid(tutorial) or not tutorial.visible:
 		return
-	var view_rect = get_viewport().get_visible_rect()
+	var safe_rect = _get_padded_safe_view_rect()
 	var size = tutorial.size
 	if size.x <= 0.0 or size.y <= 0.0:
 		size = tutorial.custom_minimum_size
 	if size.x <= 0.0 or size.y <= 0.0:
 		size = _tutorial_collapsed_size if _tutorial_collapsed else _tutorial_expanded_size
-	var margin := 12.0
+	size.x = minf(size.x, safe_rect.size.x)
+	size.y = minf(size.y, safe_rect.size.y)
+	tutorial.size = size
 	if _tutorial_collapsed:
 		if is_instance_valid(_high_score_container) and _high_score_container.visible:
 			var high_score_rect = _high_score_container.get_global_rect()
-			margin = maxf(margin, high_score_rect.position.y + high_score_rect.size.y + 8.0)
+			safe_rect.position.y = maxf(safe_rect.position.y, high_score_rect.position.y + high_score_rect.size.y + 8.0)
 		tutorial.global_position = Vector2(
-			round(view_rect.position.x + 12.0),
-			round(view_rect.position.y + margin)
+			round(safe_rect.position.x),
+			round(safe_rect.position.y)
 		)
 		return
-	var top_y := 16.0
+	var top_y: float = safe_rect.position.y
 	var score_container: Control = _endgame_container
 	if is_instance_valid(score_container) and score_container.visible:
 		var score_rect = score_container.get_global_rect()
@@ -2111,28 +2250,28 @@ func _layout_tutorial_container() -> void:
 	if is_instance_valid(_high_score_container) and _high_score_container.visible:
 		var high_score_rect = _high_score_container.get_global_rect()
 		top_y = maxf(top_y, high_score_rect.position.y + high_score_rect.size.y + 12.0)
-	var x = view_rect.position.x + (view_rect.size.x - size.x) * 0.5
-	x = clampf(x, view_rect.position.x + margin, view_rect.position.x + view_rect.size.x - size.x - margin)
-	var y = maxf(top_y, view_rect.position.y + margin)
-	tutorial.global_position = Vector2(round(x), round(y))
+	var x = safe_rect.position.x + (safe_rect.size.x - size.x) * 0.5
+	var y = maxf(top_y, safe_rect.position.y)
+	var pos = _clamp_control_position_to_rect(Vector2(x, y), size, safe_rect)
+	tutorial.global_position = Vector2(round(pos.x), round(pos.y))
 
 
 func _layout_story_facts_panel() -> void:
 	if not is_instance_valid(_story_facts_panel):
 		return
-	var view_rect = get_viewport().get_visible_rect()
+	var safe_rect = _get_padded_safe_view_rect()
 	var compact = _is_compact_ui()
 	var tiny = _is_tiny_ui()
 	var panel_size = STORY_FACTS_PANEL_SIZE
-	panel_size.x = minf(panel_size.x, maxf(view_rect.size.x - 28.0, 300.0))
-	panel_size.y = minf(panel_size.y, maxf(view_rect.size.y - 28.0, 260.0))
+	panel_size.x = minf(panel_size.x, maxf(safe_rect.size.x, 300.0))
+	panel_size.y = minf(panel_size.y, maxf(safe_rect.size.y, 260.0))
 	if compact:
-		panel_size = Vector2(minf(panel_size.x, view_rect.size.x - 24.0), minf(panel_size.y, view_rect.size.y - 24.0))
+		panel_size = Vector2(minf(panel_size.x, safe_rect.size.x), minf(panel_size.y, safe_rect.size.y))
 	_story_facts_panel.custom_minimum_size = panel_size
 	_story_facts_panel.size = panel_size
 	_story_facts_panel.global_position = Vector2(
-		round(view_rect.position.x + (view_rect.size.x - panel_size.x) * 0.5),
-		round(view_rect.position.y + (view_rect.size.y - panel_size.y) * 0.5)
+		round(safe_rect.position.x + (safe_rect.size.x - panel_size.x) * 0.5),
+		round(safe_rect.position.y + (safe_rect.size.y - panel_size.y) * 0.5)
 	)
 
 	if is_instance_valid(_story_facts_close_button):

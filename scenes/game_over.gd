@@ -714,7 +714,7 @@ func _render_share_card_image() -> Image:
 	share_viewport.size = SHARE_CARD_SIZE
 	share_viewport.disable_3d = true
 	share_viewport.transparent_bg = false
-	share_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	share_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	add_child(share_viewport)
 
 	var share_card: Control = _make_share_card_control()
@@ -723,7 +723,9 @@ func _render_share_card_image() -> Image:
 	await RenderingServer.frame_post_draw
 
 	var image: Image = share_viewport.get_texture().get_image()
-	share_viewport.queue_free()
+	share_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	remove_child(share_viewport)
+	share_viewport.free()
 	return image
 
 

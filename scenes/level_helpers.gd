@@ -2544,6 +2544,31 @@ static func update_inventory_connection_preview(level_root: Node, agents_root: N
 			_add_preview_l_pair(lines_root, preview_lines, agent.global_position, anchor_world, preview_color)
 
 
+static func load_looping_audio_stream(asset_path: String) -> AudioStream:
+	if not ResourceLoader.exists(asset_path):
+		push_warning("Missing looping audio stream: %s" % asset_path)
+		return null
+	var stream: AudioStream = load(asset_path) as AudioStream
+	if stream == null:
+		push_warning("Could not load looping audio stream: %s" % asset_path)
+		return null
+	if stream is AudioStreamWAV:
+		var wav_stream := stream as AudioStreamWAV
+		wav_stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		wav_stream.loop_begin = 0
+		var loop_end := int(round(wav_stream.get_length() * float(wav_stream.mix_rate)))
+		if loop_end > 0:
+			wav_stream.loop_end = loop_end
+	elif stream is AudioStreamMP3:
+		var mp3_stream: AudioStreamMP3 = stream as AudioStreamMP3
+		mp3_stream.loop = true
+	return stream
+
+
+static func load_tuktuk_engine_stream(asset_path: String) -> AudioStream:
+	return load_looping_audio_stream(asset_path)
+
+
 static func stop_audio_players(players: Array, free_players: bool = false) -> void:
 	for player in players:
 		if is_instance_valid(player):

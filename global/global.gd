@@ -144,7 +144,7 @@ Tap your crops to harvest them before the birds do.
 Try to collect one of each garden item.",
 	3: "Phase 3 - Grow your garden!
 	
-	Tap plants to check their need. Plant mushrooms so nearby plants can share through the network.",
+	Tap plants to check their needs. Plant mushrooms so nearby plants can share through the network.",
 	4: "Phase 4 - You Found a Village!
 
 The farmers need healthy food.

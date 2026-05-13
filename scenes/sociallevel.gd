@@ -9,8 +9,22 @@ const TEX_TREE = preload("res://graphics/bank.png")
 const TEX_MAIZE = preload("res://graphics/cook.png")
 const TEX_BEAN = preload("res://graphics/farmer.png")
 const TEX_BASKET = preload("res://graphics/basket.png")
-const TUKTUK_ENTRY_SOUND_PATH := "res://audio/old-car-horn.mp3"
-const TUKTUK_ENTRY_SOUND_VOLUME_DB := -6.0
+const PREDATOR_BIRD_SOUND_PATH := "res://audio/cardinal.mp3"
+const PREDATOR_BIRD_ACTIVE_VOLUME_DB := -6.0
+const PREDATOR_BIRD_DISTANT_VOLUME_DB := -24.0
+const PREDATOR_BIRD_SILENT_VOLUME_DB := -48.0
+const PREDATOR_BIRD_FADE_OUT_SECONDS := 0.28
+const PREDATOR_BIRD_FOCUS_RADIUS_WORLD := 72.0
+const PREDATOR_BIRD_APPROACH_FADE_DB_PER_SEC := 10.0
+const PREDATOR_BIRD_DEPART_FADE_DB_PER_SEC := 44.0
+const TUKTUK_ENGINE_SOUND_PATH := "res://audio/tuktuk-engine-loop.wav"
+const TUKTUK_ENGINE_ACTIVE_VOLUME_DB := -13.0
+const TUKTUK_ENGINE_DISTANT_VOLUME_DB := -28.0
+const TUKTUK_ENGINE_SILENT_VOLUME_DB := -48.0
+const TUKTUK_ENGINE_FADE_OUT_SECONDS := 0.28
+const TUKTUK_ENGINE_FOCUS_RADIUS_WORLD := 72.0
+const TUKTUK_ENGINE_APPROACH_FADE_DB_PER_SEC := 11.0
+const TUKTUK_ENGINE_DEPART_FADE_DB_PER_SEC := 42.0
 
 var socialagent_scene: PackedScene = load("res://scenes/socialagent.tscn")
 var trade_scene: PackedScene = load("res://scenes/trade.tscn")
@@ -46,7 +60,14 @@ var _trade_pool: Array = []
 var _trade_visual_packets_by_key: Dictionary = {}
 var _shutdown_cleanup_done := false
 var _bank_hotkey_enabled := true
-var _tuktuk_entry_sound_player: AudioStreamPlayer = null
+var _tuktuk_engine_sound_player: AudioStreamPlayer = null
+var _tuktuk_engine_active_count := 0
+var _tuktuk_engine_fade_tween: Tween = null
+var _tuktuk_engine_states: Dictionary = {}
+var _predator_bird_sound_player: AudioStreamPlayer = null
+var _predator_bird_active_count := 0
+var _predator_bird_fade_tween: Tween = null
+var _predator_bird_states: Dictionary = {}
 const BASKET_NEAR_PERSON_MAX_TILES := 4
 
 
@@ -60,42 +81,308 @@ func _mute_runtime_audio_if_headless() -> void:
 	LevelHelpersRef.stop_audio_players([
 		$BirdSound,
 		$BirdLong,
+		_predator_bird_sound_player,
 		$CarSound,
-		_tuktuk_entry_sound_player,
+		_tuktuk_engine_sound_player,
 		$SquelchSound,
 		$TwinkleSound,
 		$BushSound
 	])
 
 
-func _ensure_tuktuk_entry_sound_player() -> AudioStreamPlayer:
-	if is_instance_valid(_tuktuk_entry_sound_player):
-		return _tuktuk_entry_sound_player
-	var stream = load(TUKTUK_ENTRY_SOUND_PATH)
-	if not (stream is AudioStream):
+func _play_squelch_at(world_pos: Vector2) -> void:
+	var player: AudioStreamPlayer2D = get_node_or_null("SquelchSound") as AudioStreamPlayer2D
+	if not is_instance_valid(player):
+		return
+	player.global_position = world_pos
+	player.play()
+
+
+func _ensure_tuktuk_engine_sound_player() -> AudioStreamPlayer:
+	if is_instance_valid(_tuktuk_engine_sound_player):
+		return _tuktuk_engine_sound_player
+	var stream: AudioStream = LevelHelpersRef.load_tuktuk_engine_stream(TUKTUK_ENGINE_SOUND_PATH)
+	if stream == null:
 		return null
 	var player := AudioStreamPlayer.new()
-	player.name = "TuktukEntryHorn"
+	player.name = "TuktukEngineLoop"
 	player.stream = stream
-	player.volume_db = TUKTUK_ENTRY_SOUND_VOLUME_DB
+	player.volume_db = TUKTUK_ENGINE_SILENT_VOLUME_DB
 	add_child(player)
-	_tuktuk_entry_sound_player = player
-	return _tuktuk_entry_sound_player
+	_tuktuk_engine_sound_player = player
+	return _tuktuk_engine_sound_player
+
+
+func _fade_tuktuk_engine(target_volume_db: float, duration: float, stop_after: bool = false) -> void:
+	var engine_player := _ensure_tuktuk_engine_sound_player()
+	if not is_instance_valid(engine_player):
+		return
+	if is_instance_valid(_tuktuk_engine_fade_tween):
+		_tuktuk_engine_fade_tween.kill()
+	_tuktuk_engine_fade_tween = get_tree().create_tween()
+	_tuktuk_engine_fade_tween.tween_property(engine_player, "volume_db", target_volume_db, duration)
+	if stop_after:
+		_tuktuk_engine_fade_tween.finished.connect(func() -> void:
+			if _tuktuk_engine_active_count <= 0 and is_instance_valid(engine_player):
+				engine_player.stop()
+		)
+
+
+func _get_tuktuk_engine_listener_world_position() -> Vector2:
+	var camera: Camera2D = get_viewport().get_camera_2d()
+	if is_instance_valid(camera):
+		return camera.get_screen_center_position()
+	return Global.get_world_center(self)
+
+
+func _get_tuktuk_engine_audible_radius_world() -> float:
+	var camera: Camera2D = get_viewport().get_camera_2d()
+	if is_instance_valid(camera):
+		var view_size: Vector2 = get_viewport().get_visible_rect().size
+		var zoom: Vector2 = camera.zoom
+		var world_width: float = view_size.x / maxf(absf(zoom.x), 0.001)
+		var world_height: float = view_size.y / maxf(absf(zoom.y), 0.001)
+		return maxf(maxf(world_width, world_height) * 0.58, TUKTUK_ENGINE_FOCUS_RADIUS_WORLD + 1.0)
+	var world_rect: Rect2 = Global.get_world_rect(self)
+	return maxf(maxf(world_rect.size.x, world_rect.size.y) * 0.58, TUKTUK_ENGINE_FOCUS_RADIUS_WORLD + 1.0)
+
+
+func _set_tuktuk_engine_state(tuktuk_id: int, tuktuk_pos: Vector2, escaping: bool) -> void:
+	if tuktuk_id == 0:
+		return
+	_tuktuk_engine_states[tuktuk_id] = {
+		"pos": tuktuk_pos,
+		"escaping": escaping
+	}
+	_tuktuk_engine_active_count = _tuktuk_engine_states.size()
+
+
+func _compute_tuktuk_engine_target_db() -> float:
+	if _tuktuk_engine_states.is_empty():
+		if _tuktuk_engine_active_count > 0:
+			return TUKTUK_ENGINE_ACTIVE_VOLUME_DB
+		return TUKTUK_ENGINE_SILENT_VOLUME_DB
+	var listener_pos: Vector2 = _get_tuktuk_engine_listener_world_position()
+	var audible_radius: float = _get_tuktuk_engine_audible_radius_world()
+	var target_db: float = TUKTUK_ENGINE_DISTANT_VOLUME_DB
+	for raw_state in _tuktuk_engine_states.values():
+		if not (raw_state is Dictionary):
+			continue
+		var state: Dictionary = raw_state
+		var pos: Variant = state.get("pos", listener_pos)
+		if typeof(pos) != TYPE_VECTOR2:
+			continue
+		var tuktuk_pos: Vector2 = pos
+		var escaping: bool = bool(state.get("escaping", false))
+		var state_audible_radius: float = audible_radius
+		if escaping:
+			state_audible_radius = maxf(audible_radius * 0.62, TUKTUK_ENGINE_FOCUS_RADIUS_WORLD + 1.0)
+		var fade_range: float = maxf(state_audible_radius - TUKTUK_ENGINE_FOCUS_RADIUS_WORLD, 1.0)
+		var dist: float = listener_pos.distance_to(tuktuk_pos)
+		var closeness: float = clampf(1.0 - ((dist - TUKTUK_ENGINE_FOCUS_RADIUS_WORLD) / fade_range), 0.0, 1.0)
+		var shaped: float = closeness * closeness * (3.0 - 2.0 * closeness)
+		target_db = maxf(target_db, lerpf(TUKTUK_ENGINE_DISTANT_VOLUME_DB, TUKTUK_ENGINE_ACTIVE_VOLUME_DB, shaped))
+	return target_db
+
+
+func _update_tuktuk_engine_volume(delta: float) -> void:
+	if _shutdown_cleanup_done or _is_headless_runtime():
+		return
+	if _tuktuk_engine_active_count <= 0 and _tuktuk_engine_states.is_empty():
+		return
+	var engine_player := _ensure_tuktuk_engine_sound_player()
+	if not is_instance_valid(engine_player):
+		return
+	if not engine_player.playing:
+		engine_player.volume_db = TUKTUK_ENGINE_SILENT_VOLUME_DB
+		engine_player.play()
+	var target_db := _compute_tuktuk_engine_target_db()
+	var fade_rate := TUKTUK_ENGINE_APPROACH_FADE_DB_PER_SEC
+	if target_db < engine_player.volume_db:
+		fade_rate = TUKTUK_ENGINE_DEPART_FADE_DB_PER_SEC
+	engine_player.volume_db = move_toward(engine_player.volume_db, target_db, fade_rate * maxf(delta, 0.0))
+
+
+func start_tuktuk_engine_sound(tuktuk_id: int = 0, tuktuk_pos: Vector2 = Vector2.ZERO, escaping: bool = false) -> void:
+	if _shutdown_cleanup_done or _is_headless_runtime():
+		return
+	if tuktuk_id != 0:
+		_set_tuktuk_engine_state(tuktuk_id, tuktuk_pos, escaping)
+	else:
+		_tuktuk_engine_active_count += 1
+	var engine_player := _ensure_tuktuk_engine_sound_player()
+	if is_instance_valid(engine_player):
+		if is_instance_valid(_tuktuk_engine_fade_tween):
+			_tuktuk_engine_fade_tween.kill()
+			_tuktuk_engine_fade_tween = null
+		if not engine_player.playing:
+			engine_player.volume_db = TUKTUK_ENGINE_SILENT_VOLUME_DB
+			engine_player.play()
+		_update_tuktuk_engine_volume(0.0)
+
+
+func update_tuktuk_engine_sound(tuktuk_id: int, tuktuk_pos: Vector2, escaping: bool = false) -> void:
+	if _shutdown_cleanup_done or _is_headless_runtime():
+		return
+	_set_tuktuk_engine_state(tuktuk_id, tuktuk_pos, escaping)
+	_update_tuktuk_engine_volume(0.0)
+
+
+func stop_tuktuk_engine_sound(tuktuk_id: int = 0) -> void:
+	if _shutdown_cleanup_done:
+		return
+	if tuktuk_id != 0:
+		_tuktuk_engine_states.erase(tuktuk_id)
+		_tuktuk_engine_active_count = _tuktuk_engine_states.size()
+	else:
+		_tuktuk_engine_active_count = maxi(_tuktuk_engine_active_count - 1, 0)
+	if _tuktuk_engine_active_count > 0:
+		return
+	var engine_player := _tuktuk_engine_sound_player
+	if is_instance_valid(engine_player) and engine_player.playing:
+		_fade_tuktuk_engine(TUKTUK_ENGINE_SILENT_VOLUME_DB, TUKTUK_ENGINE_FADE_OUT_SECONDS, true)
 
 
 func play_tuktuk_entry_sound() -> void:
-	if _is_headless_runtime():
+	start_tuktuk_engine_sound()
+
+
+func _ensure_predator_bird_sound_player() -> AudioStreamPlayer:
+	if is_instance_valid(_predator_bird_sound_player):
+		return _predator_bird_sound_player
+	var stream: AudioStream = LevelHelpersRef.load_looping_audio_stream(PREDATOR_BIRD_SOUND_PATH)
+	if stream == null:
+		return null
+	var player := AudioStreamPlayer.new()
+	player.name = "PredatorBirdLoop"
+	player.stream = stream
+	player.volume_db = PREDATOR_BIRD_SILENT_VOLUME_DB
+	add_child(player)
+	_predator_bird_sound_player = player
+	return _predator_bird_sound_player
+
+
+func _fade_predator_bird_sound(target_volume_db: float, duration: float, stop_after: bool = false) -> void:
+	var bird_player := _ensure_predator_bird_sound_player()
+	if not is_instance_valid(bird_player):
 		return
-	var horn_player = _ensure_tuktuk_entry_sound_player()
-	if is_instance_valid(horn_player):
-		horn_player.stop()
-		horn_player.play()
+	if is_instance_valid(_predator_bird_fade_tween):
+		_predator_bird_fade_tween.kill()
+	_predator_bird_fade_tween = get_tree().create_tween()
+	_predator_bird_fade_tween.tween_property(bird_player, "volume_db", target_volume_db, duration)
+	if stop_after:
+		_predator_bird_fade_tween.finished.connect(func() -> void:
+			if _predator_bird_active_count <= 0 and is_instance_valid(bird_player):
+				bird_player.stop()
+		)
+
+
+func _get_predator_bird_audible_radius_world() -> float:
+	var camera: Camera2D = get_viewport().get_camera_2d()
+	if is_instance_valid(camera):
+		var view_size: Vector2 = get_viewport().get_visible_rect().size
+		var zoom: Vector2 = camera.zoom
+		var world_width: float = view_size.x / maxf(absf(zoom.x), 0.001)
+		var world_height: float = view_size.y / maxf(absf(zoom.y), 0.001)
+		return maxf(maxf(world_width, world_height) * 0.58, PREDATOR_BIRD_FOCUS_RADIUS_WORLD + 1.0)
+	var world_rect: Rect2 = Global.get_world_rect(self)
+	return maxf(maxf(world_rect.size.x, world_rect.size.y) * 0.58, PREDATOR_BIRD_FOCUS_RADIUS_WORLD + 1.0)
+
+
+func _set_predator_bird_state(bird_id: int, bird_pos: Vector2, escaping: bool) -> void:
+	if bird_id == 0:
 		return
-	var car_sound := get_node_or_null("CarSound") as AudioStreamPlayer2D
-	if is_instance_valid(car_sound):
-		car_sound.volume_db = TUKTUK_ENTRY_SOUND_VOLUME_DB
-		car_sound.stop()
-		car_sound.play()
+	_predator_bird_states[bird_id] = {
+		"pos": bird_pos,
+		"escaping": escaping
+	}
+	_predator_bird_active_count = _predator_bird_states.size()
+
+
+func _compute_predator_bird_target_db() -> float:
+	if _predator_bird_states.is_empty():
+		if _predator_bird_active_count > 0:
+			return PREDATOR_BIRD_ACTIVE_VOLUME_DB
+		return PREDATOR_BIRD_SILENT_VOLUME_DB
+	var listener_pos: Vector2 = _get_tuktuk_engine_listener_world_position()
+	var audible_radius: float = _get_predator_bird_audible_radius_world()
+	var target_db: float = PREDATOR_BIRD_DISTANT_VOLUME_DB
+	for raw_state in _predator_bird_states.values():
+		if not (raw_state is Dictionary):
+			continue
+		var state: Dictionary = raw_state
+		var pos: Variant = state.get("pos", listener_pos)
+		if typeof(pos) != TYPE_VECTOR2:
+			continue
+		var bird_pos: Vector2 = pos
+		var escaping: bool = bool(state.get("escaping", false))
+		var state_audible_radius: float = audible_radius
+		if escaping:
+			state_audible_radius = maxf(audible_radius * 0.62, PREDATOR_BIRD_FOCUS_RADIUS_WORLD + 1.0)
+		var fade_range: float = maxf(state_audible_radius - PREDATOR_BIRD_FOCUS_RADIUS_WORLD, 1.0)
+		var dist: float = listener_pos.distance_to(bird_pos)
+		var closeness: float = clampf(1.0 - ((dist - PREDATOR_BIRD_FOCUS_RADIUS_WORLD) / fade_range), 0.0, 1.0)
+		var shaped: float = closeness * closeness * (3.0 - 2.0 * closeness)
+		target_db = maxf(target_db, lerpf(PREDATOR_BIRD_DISTANT_VOLUME_DB, PREDATOR_BIRD_ACTIVE_VOLUME_DB, shaped))
+	return target_db
+
+
+func _update_predator_bird_volume(delta: float) -> void:
+	if _shutdown_cleanup_done or _is_headless_runtime():
+		return
+	if _predator_bird_active_count <= 0 and _predator_bird_states.is_empty():
+		return
+	var bird_player := _ensure_predator_bird_sound_player()
+	if not is_instance_valid(bird_player):
+		return
+	if not bird_player.playing:
+		bird_player.volume_db = PREDATOR_BIRD_SILENT_VOLUME_DB
+		bird_player.play()
+	var target_db := _compute_predator_bird_target_db()
+	var fade_rate := PREDATOR_BIRD_APPROACH_FADE_DB_PER_SEC
+	if target_db < bird_player.volume_db:
+		fade_rate = PREDATOR_BIRD_DEPART_FADE_DB_PER_SEC
+	bird_player.volume_db = move_toward(bird_player.volume_db, target_db, fade_rate * maxf(delta, 0.0))
+
+
+func start_predator_bird_sound(bird_id: int = 0, bird_pos: Vector2 = Vector2.ZERO, escaping: bool = false) -> void:
+	if _shutdown_cleanup_done or _is_headless_runtime():
+		return
+	if bird_id != 0:
+		_set_predator_bird_state(bird_id, bird_pos, escaping)
+	else:
+		_predator_bird_active_count += 1
+	var bird_player := _ensure_predator_bird_sound_player()
+	if is_instance_valid(bird_player):
+		if is_instance_valid(_predator_bird_fade_tween):
+			_predator_bird_fade_tween.kill()
+			_predator_bird_fade_tween = null
+		if not bird_player.playing:
+			bird_player.volume_db = PREDATOR_BIRD_SILENT_VOLUME_DB
+			bird_player.play()
+		_update_predator_bird_volume(0.0)
+
+
+func update_predator_bird_sound(bird_id: int, bird_pos: Vector2, escaping: bool = false) -> void:
+	if _shutdown_cleanup_done or _is_headless_runtime():
+		return
+	_set_predator_bird_state(bird_id, bird_pos, escaping)
+	_update_predator_bird_volume(0.0)
+
+
+func stop_predator_bird_sound(bird_id: int = 0) -> void:
+	if _shutdown_cleanup_done:
+		return
+	if bird_id != 0:
+		_predator_bird_states.erase(bird_id)
+		_predator_bird_active_count = _predator_bird_states.size()
+	else:
+		_predator_bird_active_count = maxi(_predator_bird_active_count - 1, 0)
+	if _predator_bird_active_count > 0:
+		return
+	var bird_player := _predator_bird_sound_player
+	if is_instance_valid(bird_player) and bird_player.playing:
+		_fade_predator_bird_sound(PREDATOR_BIRD_SILENT_VOLUME_DB, PREDATOR_BIRD_FADE_OUT_SECONDS, true)
 
 
 func _get_world_foundation() -> Node:
@@ -388,6 +675,8 @@ func _input(event):
 
 
 func _process(_delta: float) -> void:
+	_update_tuktuk_engine_volume(_delta)
+	_update_predator_bird_volume(_delta)
 	if not Global.is_mobile_platform:
 		LevelHelpersRef.update_agent_hover_focus(self, $Agents)
 	_dirty_refresh_accum += _delta
@@ -488,13 +777,7 @@ func update_bars(path_dict)  -> void:
 
 
 func _play_predator_alert() -> void:
-	if(Global.social_mode):
-		var car_sound := get_node_or_null("CarSound") as AudioStreamPlayer2D
-		if is_instance_valid(car_sound):
-			car_sound.volume_db = TUKTUK_ENTRY_SOUND_VOLUME_DB
-			car_sound.play()
-	else:
-		$BirdSound.play()
+	return
 
 
 func _spawn_predators(requested_count: int, play_alert: bool = false) -> void:
@@ -575,7 +858,7 @@ func _on_new_agent(agent_dict) -> void:
 		$TwinkleSound.play()
 		new_agent = make_maize(spawn_pos)
 	elif spawn_name  == "myco" or spawn_name == "basket":
-		$SquelchSound.play()
+		_play_squelch_at(spawn_pos)
 		new_agent = make_myco(spawn_pos)
 	elif spawn_name  == "tree":
 		$BushSound.play()
@@ -884,13 +1167,24 @@ func _release_audio() -> void:
 	if _shutdown_cleanup_done:
 		return
 	_shutdown_cleanup_done = true
+	_tuktuk_engine_active_count = 0
+	_tuktuk_engine_states.clear()
+	if is_instance_valid(_tuktuk_engine_fade_tween):
+		_tuktuk_engine_fade_tween.kill()
+		_tuktuk_engine_fade_tween = null
+	_predator_bird_active_count = 0
+	_predator_bird_states.clear()
+	if is_instance_valid(_predator_bird_fade_tween):
+		_predator_bird_fade_tween.kill()
+		_predator_bird_fade_tween = null
 	LevelHelpersRef.clear_trade_line_cache($Lines, true)
 	LevelHelpersRef.clear_inventory_connection_preview_lines(inventory_preview_lines, true)
 	LevelHelpersRef.stop_audio_players([
 		$BirdSound,
 		$BirdLong,
+		_predator_bird_sound_player,
 		$CarSound,
-		_tuktuk_entry_sound_player,
+		_tuktuk_engine_sound_player,
 		$SquelchSound,
 		$TwinkleSound,
 		$BushSound

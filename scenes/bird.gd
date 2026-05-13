@@ -20,14 +20,46 @@ var _capture_cleanup_done := false
 var _carry_sprite: Sprite2D = null
 var _reserved_harvest_target: Node = null
 var _retarget_retry_cooldown := 0.0
+var _predator_audio_started := false
+var _predator_audio_host: Node = null
 
 
 func _ready():
 	reset()
+	if quarry_found or caught:
+		_start_predator_audio()
 
 
 func _get_level_root() -> Node:
 	return get_node_or_null("../..")
+
+
+func _start_predator_audio() -> void:
+	if _predator_audio_started:
+		return
+	_predator_audio_started = true
+	var level_root: Node = _get_level_root()
+	_predator_audio_host = level_root
+	if is_instance_valid(level_root) and level_root.has_method("start_predator_bird_sound"):
+		level_root.call("start_predator_bird_sound", get_instance_id(), global_position, caught)
+
+
+func _update_predator_audio() -> void:
+	if not _predator_audio_started:
+		return
+	var level_root: Node = _predator_audio_host if is_instance_valid(_predator_audio_host) else _get_level_root()
+	if is_instance_valid(level_root) and level_root.has_method("update_predator_bird_sound"):
+		level_root.call("update_predator_bird_sound", get_instance_id(), global_position, caught)
+
+
+func _stop_predator_audio() -> void:
+	if not _predator_audio_started:
+		return
+	_predator_audio_started = false
+	var level_root: Node = _predator_audio_host if is_instance_valid(_predator_audio_host) else _get_level_root()
+	_predator_audio_host = null
+	if is_instance_valid(level_root) and level_root.has_method("stop_predator_bird_sound"):
+		level_root.call("stop_predator_bird_sound", get_instance_id())
 
 
 func _is_target_forward(target: Node) -> bool:
@@ -288,6 +320,8 @@ func _physics_process(delta: float) -> void:
 
 	if _is_outside_world_bounds():
 		_capture_and_exit()
+	else:
+		_update_predator_audio()
 
 
 func _on_area_entered(agent: Area2D) -> void:
@@ -308,5 +342,6 @@ func _on_area_entered(agent: Area2D) -> void:
 
 
 func _exit_tree() -> void:
+	_stop_predator_audio()
 	_release_reserved_harvest_target()
 	_clear_carry_visual()

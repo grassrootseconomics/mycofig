@@ -1,10 +1,14 @@
 extends Control
 
+const LevelHelpersRef = preload("res://scenes/level_helpers.gd")
 const TITLE_COMPACT_SHORT_EDGE := 640.0
 const TITLE_TINY_SHORT_EDGE := 500.0
 const GE_LOGO_PATH := "res://graphics/ge-logo-horizontal-text.png"
 const TITLE_SOIL_BACKGROUND_PATH := "res://graphics/soil_end.jpeg"
 const TITLE_ART_BACKGROUND_PATH := "res://graphics/social.png"
+const TITLE_PREDATOR_BIRD_SOUND_PATH := "res://audio/cardinal.mp3"
+const TITLE_TUKTUK_ENGINE_SOUND_PATH := "res://audio/tuktuk-engine-loop.wav"
+const TITLE_BASKET_LAND_SOUND_PATH := "res://audio/squelch_slayer.wav"
 const TITLE_SCORE_STAR_COUNT := 12
 const TITLE_BIRD_FRAME_PATHS := [
 	"res://graphics/bird1.png",
@@ -16,8 +20,19 @@ const TITLE_TUKTUK_TEXTURE_PATH := "res://graphics/tuktuk.png"
 const TITLE_BASKET_TEXTURE_PATH := "res://graphics/basket.png"
 const TITLE_BIRD_FLYBY_SECONDS := 4.8
 const TITLE_BASKET_DROP_SECONDS := 1.05
+const TITLE_BASKET_DROP_LAND_T := 0.72
 const TITLE_TUKTUK_FLYBY_SECONDS := 4.2
 const TITLE_FLYBY_WAIT_SECONDS := 1.5
+const TITLE_PREDATOR_BIRD_ACTIVE_VOLUME_DB := -6.0
+const TITLE_PREDATOR_BIRD_DISTANT_VOLUME_DB := -24.0
+const TITLE_PREDATOR_BIRD_SILENT_VOLUME_DB := -48.0
+const TITLE_TUKTUK_ENGINE_ACTIVE_VOLUME_DB := -9.0
+const TITLE_TUKTUK_ENGINE_DISTANT_VOLUME_DB := -25.0
+const TITLE_TUKTUK_ENGINE_SILENT_VOLUME_DB := -48.0
+const TITLE_BASKET_LAND_VOLUME_DB := -16.0
+const TITLE_FLYBY_FOCUS_RADIUS := 90.0
+const TITLE_FLYBY_APPROACH_FADE_DB_PER_SEC := 10.0
+const TITLE_FLYBY_DEPART_FADE_DB_PER_SEC := 44.0
 
 var _ge_logo_texture: Texture2D = null
 var _title_soil_background: TextureRect = null
@@ -49,6 +64,10 @@ var _title_tuktuk_pickup_pos := Vector2.ZERO
 var _title_tuktuk_exit_pos := Vector2.ZERO
 var _title_tuktuk_pickup_seconds := 0.0
 var _title_tuktuk_exit_seconds := 0.0
+var _title_basket_land_sound_played := false
+var _title_predator_bird_sound_player: AudioStreamPlayer = null
+var _title_tuktuk_engine_sound_player: AudioStreamPlayer = null
+var _title_basket_land_sound_player: AudioStreamPlayer = null
 
 
 func _get_ge_logo_texture() -> Texture2D:
@@ -246,14 +265,41 @@ func _layout_title_score_panel(panel: Panel, label: Label, visible: bool) -> voi
 	panel.size = Vector2(label_rect.size.x + 20.0, label_rect.size.y + 12.0)
 
 
+func _get_title_menu_column_rect(view_size: Vector2, fallback_width: float) -> Rect2:
+	var column_center_x: float = view_size.x * 0.5
+	var center_container := get_node_or_null("CenterContainer") as Control
+	if is_instance_valid(center_container):
+		var center_rect: Rect2 = center_container.get_global_rect()
+		if center_rect.size.x > 1.0:
+			column_center_x = center_rect.get_center().x
+	for button_path in ["CenterContainer/VBoxContainer/Tutorial", "CenterContainer/VBoxContainer/ChallengeButton"]:
+		var button := get_node_or_null(button_path) as Button
+		if not is_instance_valid(button) or not button.visible:
+			continue
+		var button_rect: Rect2 = button.get_global_rect()
+		if button_rect.size.x > 1.0:
+			return Rect2(Vector2(round(column_center_x - button_rect.size.x * 0.5), button_rect.position.y), button_rect.size)
+	var menu_box := get_node_or_null("CenterContainer/VBoxContainer") as Control
+	if is_instance_valid(menu_box):
+		var menu_rect: Rect2 = menu_box.get_global_rect()
+		if menu_rect.size.x > 1.0:
+			return Rect2(Vector2(round(column_center_x - menu_rect.size.x * 0.5), menu_rect.position.y), menu_rect.size)
+	return Rect2(Vector2(round(column_center_x - fallback_width * 0.5), 0.0), Vector2(fallback_width, 0.0))
+
+
 func _update_title_score_widgets(view_size: Vector2, compact: bool, tiny: bool) -> void:
 	_ensure_title_score_widgets()
 	var has_last_score = int(Global.last_score) > 0
 	var has_high_score = int(Global.high_score) > 0
 	var show_scores = has_last_score or has_high_score
-	var label_width = clampf(view_size.x - 96.0, 250.0, 340.0)
-	var last_size = Vector2(label_width, 66.0 if tiny else (72.0 if compact else 78.0))
-	var high_size = Vector2(label_width, 42.0 if tiny else (48.0 if compact else 54.0))
+	var fallback_panel_width: float = clampf(view_size.x - 64.0, 220.0, 720.0)
+	var menu_rect: Rect2 = _get_title_menu_column_rect(view_size, fallback_panel_width)
+	var score_center_x: float = menu_rect.get_center().x
+	var max_panel_width: float = maxf(220.0, view_size.x - 64.0)
+	var panel_width: float = clampf(menu_rect.size.x, 220.0, max_panel_width)
+	var label_width: float = maxf(200.0, panel_width - 20.0)
+	var last_size := Vector2(label_width, 66.0 if tiny else (72.0 if compact else 78.0))
+	var high_size := Vector2(label_width, 42.0 if tiny else (48.0 if compact else 54.0))
 	_style_title_score_label(_last_score_label, 22 if tiny else (24 if compact else 27))
 	_style_title_score_label(_high_score_label, 22 if tiny else (24 if compact else 27))
 	if is_instance_valid(_last_score_label):
@@ -266,17 +312,17 @@ func _update_title_score_widgets(view_size: Vector2, compact: bool, tiny: bool) 
 		_high_score_label.custom_minimum_size = high_size
 		_high_score_label.size = high_size
 		_high_score_label.text = str("High Score: ", Global.format_score_value(Global.high_score))
-	var basket_center = _get_title_basket_score_anchor(view_size, compact)
+	var basket_center: Vector2 = _get_title_basket_score_anchor(view_size, compact)
 	if is_instance_valid(_last_score_label):
 		var last_y = basket_center.y - (98.0 if tiny else (108.0 if compact else 122.0))
 		var link: LinkButton = $CenterContainer/VBoxContainer/LinkButton
 		if is_instance_valid(link):
 			var link_rect = link.get_global_rect()
 			last_y = maxf(last_y, link_rect.position.y + link_rect.size.y + 8.0)
-		_last_score_label.position = Vector2(round(basket_center.x - last_size.x * 0.5), round(last_y))
+		_last_score_label.position = Vector2(round(score_center_x - last_size.x * 0.5), round(last_y))
 	if is_instance_valid(_high_score_label):
 		var high_y = basket_center.y + (34.0 if tiny else (40.0 if compact else 48.0))
-		_high_score_label.position = Vector2(round(basket_center.x - high_size.x * 0.5), round(high_y))
+		_high_score_label.position = Vector2(round(score_center_x - high_size.x * 0.5), round(high_y))
 	_layout_title_score_panel(_last_score_panel, _last_score_label, has_last_score)
 	_layout_title_score_panel(_high_score_panel, _high_score_label, has_high_score)
 	_title_score_sparkle_target = null
@@ -325,6 +371,97 @@ func _make_title_bird_frames() -> SpriteFrames:
 		if texture is Texture2D:
 			frames.add_frame(&"default", texture as Texture2D)
 	return frames
+
+
+func _ensure_title_loop_player(player_name: String, asset_path: String, silent_volume_db: float) -> AudioStreamPlayer:
+	var existing := get_node_or_null(player_name) as AudioStreamPlayer
+	if is_instance_valid(existing):
+		return existing
+	var stream: AudioStream = LevelHelpersRef.load_looping_audio_stream(asset_path)
+	if stream == null:
+		return null
+	var player := AudioStreamPlayer.new()
+	player.name = player_name
+	player.stream = stream
+	player.volume_db = silent_volume_db
+	add_child(player)
+	return player
+
+
+func _ensure_title_predator_bird_sound_player() -> AudioStreamPlayer:
+	if is_instance_valid(_title_predator_bird_sound_player):
+		return _title_predator_bird_sound_player
+	_title_predator_bird_sound_player = _ensure_title_loop_player("TitlePredatorBirdLoop", TITLE_PREDATOR_BIRD_SOUND_PATH, TITLE_PREDATOR_BIRD_SILENT_VOLUME_DB)
+	return _title_predator_bird_sound_player
+
+
+func _ensure_title_tuktuk_engine_sound_player() -> AudioStreamPlayer:
+	if is_instance_valid(_title_tuktuk_engine_sound_player):
+		return _title_tuktuk_engine_sound_player
+	_title_tuktuk_engine_sound_player = _ensure_title_loop_player("TitleTuktukEngineLoop", TITLE_TUKTUK_ENGINE_SOUND_PATH, TITLE_TUKTUK_ENGINE_SILENT_VOLUME_DB)
+	return _title_tuktuk_engine_sound_player
+
+
+func _ensure_title_basket_land_sound_player() -> AudioStreamPlayer:
+	if is_instance_valid(_title_basket_land_sound_player):
+		return _title_basket_land_sound_player
+	var stream: AudioStream = load(TITLE_BASKET_LAND_SOUND_PATH) as AudioStream
+	if stream == null:
+		return null
+	var player: AudioStreamPlayer = AudioStreamPlayer.new()
+	player.name = "TitleBasketLandSound"
+	player.stream = stream
+	player.volume_db = TITLE_BASKET_LAND_VOLUME_DB
+	add_child(player)
+	_title_basket_land_sound_player = player
+	return _title_basket_land_sound_player
+
+
+func _play_title_basket_land_sound() -> void:
+	var player: AudioStreamPlayer = _ensure_title_basket_land_sound_player()
+	if not is_instance_valid(player):
+		return
+	player.volume_db = TITLE_BASKET_LAND_VOLUME_DB
+	player.stop()
+	player.play()
+
+
+func _get_title_flyby_target_volume(pos: Vector2, active_db: float, distant_db: float) -> float:
+	var view_size: Vector2 = get_viewport_rect().size
+	var listener_pos := view_size * 0.5
+	var audible_radius: float = maxf(maxf(view_size.x, view_size.y) * 0.58, TITLE_FLYBY_FOCUS_RADIUS + 1.0)
+	var fade_range: float = maxf(audible_radius - TITLE_FLYBY_FOCUS_RADIUS, 1.0)
+	var dist: float = listener_pos.distance_to(pos)
+	var closeness: float = clampf(1.0 - ((dist - TITLE_FLYBY_FOCUS_RADIUS) / fade_range), 0.0, 1.0)
+	var shaped: float = closeness * closeness * (3.0 - 2.0 * closeness)
+	return lerpf(distant_db, active_db, shaped)
+
+
+func _move_title_loop_volume(player: AudioStreamPlayer, target_db: float, silent_db: float, delta: float) -> void:
+	if not is_instance_valid(player):
+		return
+	if not player.playing and target_db > silent_db + 0.1:
+		player.volume_db = silent_db
+		player.play()
+	var fade_rate := TITLE_FLYBY_APPROACH_FADE_DB_PER_SEC
+	if target_db < player.volume_db:
+		fade_rate = TITLE_FLYBY_DEPART_FADE_DB_PER_SEC
+	player.volume_db = move_toward(player.volume_db, target_db, fade_rate * maxf(delta, 0.0))
+	if player.playing and target_db <= silent_db + 0.1 and player.volume_db <= silent_db + 0.1:
+		player.stop()
+
+
+func _update_title_flyby_audio(delta: float) -> void:
+	var bird_target_db := TITLE_PREDATOR_BIRD_SILENT_VOLUME_DB
+	if is_instance_valid(_title_bird_sprite) and _title_bird_sprite.visible and str(_title_flyby_phase).begins_with("bird"):
+		bird_target_db = _get_title_flyby_target_volume(_title_bird_sprite.global_position, TITLE_PREDATOR_BIRD_ACTIVE_VOLUME_DB, TITLE_PREDATOR_BIRD_DISTANT_VOLUME_DB)
+	if bird_target_db > TITLE_PREDATOR_BIRD_SILENT_VOLUME_DB + 0.1 or is_instance_valid(_title_predator_bird_sound_player):
+		_move_title_loop_volume(_ensure_title_predator_bird_sound_player(), bird_target_db, TITLE_PREDATOR_BIRD_SILENT_VOLUME_DB, delta)
+	var tuktuk_target_db := TITLE_TUKTUK_ENGINE_SILENT_VOLUME_DB
+	if is_instance_valid(_title_tuktuk_node) and _title_tuktuk_node.visible and str(_title_flyby_phase).begins_with("tuktuk"):
+		tuktuk_target_db = _get_title_flyby_target_volume(_title_tuktuk_node.global_position, TITLE_TUKTUK_ENGINE_ACTIVE_VOLUME_DB, TITLE_TUKTUK_ENGINE_DISTANT_VOLUME_DB)
+	if tuktuk_target_db > TITLE_TUKTUK_ENGINE_SILENT_VOLUME_DB + 0.1 or is_instance_valid(_title_tuktuk_engine_sound_player):
+		_move_title_loop_volume(_ensure_title_tuktuk_engine_sound_player(), tuktuk_target_db, TITLE_TUKTUK_ENGINE_SILENT_VOLUME_DB, delta)
 
 
 func _ensure_title_flyby_nodes() -> void:
@@ -421,7 +558,7 @@ func _title_basket_drop_position(t: float) -> Vector2:
 	var drop_x = _title_basket_rest_pos.x
 	var start_y = _title_basket_drop_start_pos.y
 	var rest_y = _title_basket_rest_pos.y
-	var fall_end := 0.72
+	var fall_end := TITLE_BASKET_DROP_LAND_T
 	var first_bounce_end := 0.88
 	var bounce_height = clampf((rest_y - start_y) * 0.12, 12.0, 34.0)
 	if drop_t < fall_end:
@@ -451,6 +588,10 @@ func _begin_title_bird_flyby() -> void:
 	_title_bird_sprite.position = _title_bird_start_pos
 	_title_bird_sprite.visible = true
 	_title_bird_sprite.play(&"default")
+	var bird_player := _ensure_title_predator_bird_sound_player()
+	if is_instance_valid(bird_player):
+		bird_player.volume_db = TITLE_PREDATOR_BIRD_SILENT_VOLUME_DB
+		bird_player.play()
 	if is_instance_valid(_title_bird_basket_sprite):
 		_title_bird_basket_sprite.visible = true
 	if is_instance_valid(_title_tuktuk_node):
@@ -462,6 +603,7 @@ func _begin_title_bird_flyby() -> void:
 
 
 func _drop_title_basket_from_bird() -> void:
+	_title_basket_land_sound_played = false
 	_title_basket_drop_start_pos = Vector2(_title_basket_rest_pos.x, _title_bird_drop_pos.y + 5.0)
 	if is_instance_valid(_title_bird_basket_sprite):
 		_title_basket_drop_start_pos.y = _title_bird_basket_sprite.global_position.y
@@ -488,6 +630,10 @@ func _begin_title_tuktuk_flyby() -> void:
 	if is_instance_valid(_title_tuktuk_node):
 		_title_tuktuk_node.position = _title_tuktuk_start_pos
 		_title_tuktuk_node.visible = true
+	var tuktuk_player := _ensure_title_tuktuk_engine_sound_player()
+	if is_instance_valid(tuktuk_player):
+		tuktuk_player.volume_db = TITLE_TUKTUK_ENGINE_SILENT_VOLUME_DB
+		tuktuk_player.play()
 	if is_instance_valid(_title_tuktuk_basket_sprite):
 		_title_tuktuk_basket_sprite.visible = false
 	var basket = _get_title_basket_sprite()
@@ -540,6 +686,9 @@ func _update_title_flyby(delta: float) -> void:
 			var t_drop = _title_phase_t(TITLE_BASKET_DROP_SECONDS)
 			if is_instance_valid(basket):
 				basket.global_position = _title_basket_drop_position(t_drop)
+			if not _title_basket_land_sound_played and t_drop >= TITLE_BASKET_DROP_LAND_T:
+				_title_basket_land_sound_played = true
+				_play_title_basket_land_sound()
 			if _title_flyby_elapsed >= maxf(bird_out_seconds, TITLE_BASKET_DROP_SECONDS):
 				if is_instance_valid(basket):
 					basket.global_position = _title_basket_rest_pos
@@ -569,6 +718,7 @@ func _update_title_flyby(delta: float) -> void:
 
 
 func _reset_title_flyby_visuals() -> void:
+	_title_basket_land_sound_played = false
 	if is_instance_valid(_title_bird_sprite):
 		_title_bird_sprite.visible = false
 	if is_instance_valid(_title_bird_basket_sprite):
@@ -577,6 +727,14 @@ func _reset_title_flyby_visuals() -> void:
 		_title_tuktuk_node.visible = false
 	if is_instance_valid(_title_tuktuk_basket_sprite):
 		_title_tuktuk_basket_sprite.visible = false
+	if is_instance_valid(_title_predator_bird_sound_player):
+		_title_predator_bird_sound_player.stop()
+		_title_predator_bird_sound_player.volume_db = TITLE_PREDATOR_BIRD_SILENT_VOLUME_DB
+	if is_instance_valid(_title_tuktuk_engine_sound_player):
+		_title_tuktuk_engine_sound_player.stop()
+		_title_tuktuk_engine_sound_player.volume_db = TITLE_TUKTUK_ENGINE_SILENT_VOLUME_DB
+	if is_instance_valid(_title_basket_land_sound_player):
+		_title_basket_land_sound_player.stop()
 
 
 func _start_title_flyby_cycle() -> void:
@@ -864,6 +1022,7 @@ func _process(delta: float) -> void:
 		_apply_responsive_layout()
 	_update_title_score_sparkles(delta)
 	_update_title_flyby(delta)
+	_update_title_flyby_audio(delta)
 
 
 func _exit_tree() -> void:

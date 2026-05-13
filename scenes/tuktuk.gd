@@ -6,7 +6,6 @@ signal scripted_capture_started
 
 @export var speed := 250
 const CAPTURE_DISTANCE := 20.0
-const TUKTUK_ENTRY_SOUND_VOLUME_DB := -6.0
 var going = Vector2(1, 0)
 var quarry_found = false
 var the_quarry: Node = null
@@ -20,6 +19,8 @@ var _scripted_spawn_pos := Vector2.ZERO
 var _scripted_target: Node = null
 var _scripted_finished_emitted := false
 var _scripted_capture_started_emitted := false
+var _engine_sound_started := false
+var _engine_sound_host: Node = null
 
 
 func _ready():
@@ -28,18 +29,35 @@ func _ready():
 	else:
 		reset()
 	if quarry_found or is_instance_valid(_captured_target):
-		_play_entry_sound()
+		_start_engine_sound()
 
 
-func _play_entry_sound() -> void:
-	var level_root = get_node_or_null("../..")
-	if is_instance_valid(level_root) and level_root.has_method("play_tuktuk_entry_sound"):
-		level_root.call("play_tuktuk_entry_sound")
+func _start_engine_sound() -> void:
+	if _engine_sound_started:
 		return
-	var car_sound := get_node_or_null("../../CarSound") as AudioStreamPlayer2D
-	if is_instance_valid(car_sound):
-		car_sound.volume_db = TUKTUK_ENTRY_SOUND_VOLUME_DB
-		car_sound.play()
+	_engine_sound_started = true
+	var level_root = get_node_or_null("../..")
+	_engine_sound_host = level_root
+	if is_instance_valid(level_root) and level_root.has_method("start_tuktuk_engine_sound"):
+		level_root.call("start_tuktuk_engine_sound", get_instance_id(), global_position, caught)
+
+
+func _update_engine_sound() -> void:
+	if not _engine_sound_started:
+		return
+	var level_root = _engine_sound_host if is_instance_valid(_engine_sound_host) else get_node_or_null("../..")
+	if is_instance_valid(level_root) and level_root.has_method("update_tuktuk_engine_sound"):
+		level_root.call("update_tuktuk_engine_sound", get_instance_id(), global_position, caught)
+
+
+func _stop_engine_sound() -> void:
+	if not _engine_sound_started:
+		return
+	_engine_sound_started = false
+	var level_root = _engine_sound_host if is_instance_valid(_engine_sound_host) else get_node_or_null("../..")
+	_engine_sound_host = null
+	if is_instance_valid(level_root) and level_root.has_method("stop_tuktuk_engine_sound"):
+		level_root.call("stop_tuktuk_engine_sound", get_instance_id())
 
 
 func configure_scripted_capture(target: Node, spawn_pos: Vector2) -> void:
@@ -213,6 +231,12 @@ func _physics_process(delta: float) -> void:
 
 	if _is_outside_world_bounds():
 		_capture_and_exit()
+	else:
+		_update_engine_sound()
+
+
+func _exit_tree() -> void:
+	_stop_engine_sound()
 
 
 func _on_area_entered(agent: Area2D) -> void:

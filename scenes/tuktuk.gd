@@ -174,6 +174,8 @@ func _begin_escape_with_capture(agent: Node) -> void:
 	_captured_target = agent
 	if is_instance_valid(_captured_target):
 		_captured_target.set("dead", true)
+		if _captured_target.has_method("notify_tuktuk_capture_started"):
+			_captured_target.notify_tuktuk_capture_started()
 		var level_root = get_node_or_null("../..")
 		if is_instance_valid(level_root) and level_root.has_method("notify_tuktuk_villager_captured"):
 			level_root.call("notify_tuktuk_villager_captured", _captured_target)

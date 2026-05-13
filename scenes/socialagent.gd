@@ -23,8 +23,16 @@ const VILLAGER_FAMILY_ENERGY_TRADE := 1
 const VILLAGER_FAMILY_ENERGY_MISSING_NUTRIENT := 2
 const VILLAGER_FAMILY_ENERGY_COMPLETE_NPK := 1
 const VILLAGER_FAMILY_RETRY_TICKS := 24
+const VILLAGER_CHILD_MATURITY_THRESHOLD := 10
+const VILLAGER_CHILD_FAILED_RETRY_TICKS := 4
 const VILLAGER_NUTRIENTS := ["N", "P", "K"]
 const DIRECT_PERSON_TRADE_TILE_REDUCTION := 1
+const VILLAGER_VENDOR_MIN_MATURE_SCALE := 0.92
+const VILLAGER_ADULT_TEXTURE_PATHS := {
+	"farmer": "res://graphics/farmer.png",
+	"vendor": "res://graphics/mama.png",
+	"cook": "res://graphics/cook.png"
+}
 
 var trade_queue = []
 var is_trading = false
@@ -91,7 +99,7 @@ func _story_farmer_stop_harvest_tween() -> void:
 
 
 func _story_farmer_is_walking() -> bool:
-	return _is_farmer_actor() and (
+	return not bool(dead) and _is_farmer_actor() and (
 		_story_farmer_harvest_state == STORY_FARMER_HARVEST_MOVING_TO_CROP
 		or _story_farmer_harvest_state == STORY_FARMER_HARVEST_RETURNING_HOME
 	)
@@ -121,6 +129,11 @@ func _story_farmer_reset_walk_animation() -> void:
 func _story_farmer_update_walk_animation(delta: float) -> void:
 	if not _is_farmer_actor() or not is_instance_valid(sprite):
 		_story_farmer_reset_walk_animation()
+		return
+	if bool(dead):
+		_story_farmer_reset_walk_animation()
+		_story_farmer_walk_last_global_position = global_position
+		_story_farmer_walk_last_global_position_set = true
 		return
 	var moved_this_frame := false
 	if _story_farmer_walk_last_global_position_set:
@@ -223,6 +236,15 @@ func _story_farmer_reset_harvest_state(level_root: Node) -> void:
 	_story_farmer_abort_carried_harvest()
 	_story_farmer_release_target(level_root)
 	_story_farmer_harvest_state = STORY_FARMER_HARVEST_IDLE
+	is_trading = false
+
+
+func notify_tuktuk_capture_started() -> void:
+	if _is_farmer_actor():
+		_story_farmer_reset_harvest_state(_story_farmer_get_level_root())
+	_story_farmer_reset_walk_animation()
+	_story_farmer_walk_last_global_position = global_position
+	_story_farmer_walk_last_global_position_set = true
 	is_trading = false
 
 
@@ -395,6 +417,8 @@ func _story_farmer_tick_auto_harvest(level_root: Node) -> bool:
 
 func _process(delta: float) -> void:
 	super._process(delta)
+	_keep_villager_opaque()
+	_apply_mature_villager_scale_floor()
 	_story_farmer_update_walk_animation(delta)
 
 
@@ -403,6 +427,35 @@ func _is_story_village_person_actor() -> bool:
 		return false
 	var role = str(type)
 	return role == "farmer" or role == "vendor" or role == "cook"
+
+
+func _keep_villager_opaque() -> void:
+	if not _is_story_village_person_actor():
+		return
+	if is_equal_approx(modulate.a, 1.0):
+		return
+	var opaque_color := modulate
+	opaque_color.a = 1.0
+	modulate = opaque_color
+
+
+func _is_villager_child() -> bool:
+	return bool(get_meta("villager_child", false))
+
+
+func _apply_mature_villager_scale_floor() -> void:
+	if str(type) != "vendor" or _is_villager_child() or not is_instance_valid(sprite):
+		return
+	min_scale = maxf(min_scale, VILLAGER_VENDOR_MIN_MATURE_SCALE)
+	var current_scale_max = maxf(absf(sprite.scale.x), absf(sprite.scale.y))
+	if current_scale_max >= VILLAGER_VENDOR_MIN_MATURE_SCALE:
+		return
+	if current_scale_max <= 0.0:
+		sprite.scale = Vector2(VILLAGER_VENDOR_MIN_MATURE_SCALE, VILLAGER_VENDOR_MIN_MATURE_SCALE)
+	else:
+		sprite.scale *= VILLAGER_VENDOR_MIN_MATURE_SCALE / current_scale_max
+	bean_base_scale = sprite.scale
+	_sync_occupancy_cache()
 
 
 func _should_use_villager_r_liquidity_cycle() -> bool:
@@ -425,6 +478,8 @@ func _villager_has_complete_nutrients() -> bool:
 func _can_villager_family_reproduce() -> bool:
 	if not _is_story_village_person_actor():
 		return false
+	if _is_villager_child():
+		return false
 	if bool(get_meta("story_disable_birth", false)):
 		return false
 	if not Global.baby_mode:
@@ -443,20 +498,66 @@ func _try_villager_family_reproduction() -> void:
 	if not _can_villager_family_reproduce():
 		return
 	var babies_before: int = int(current_babies)
-	have_babies(true)
-	if current_babies > babies_before:
-		villager_family_energy = 0
-		villager_family_retry_ticks = VILLAGER_FAMILY_RETRY_TICKS
-		var sparkles_root = get_node_or_null("../../Sparkles")
-		if is_instance_valid(Global.sparkle_scene) and is_instance_valid(sparkles_root):
-			var sparkle = Global.sparkle_scene.instantiate()
-			sparkle.z_as_relative = false
-			sparkle.position = position
-			sparkle.global_position = global_position
-			sparkles_root.add_child(sparkle)
-			sparkle.start(0.75)
-	else:
-		villager_family_retry_ticks = VILLAGER_FAMILY_RETRY_TICKS
+	emit_signal("new_agent", {
+		"name": str(type),
+		"pos": global_position,
+		"villager_child_spawn": true,
+		"villager_parent": self
+	})
+	if current_babies == babies_before and villager_family_retry_ticks <= 0:
+		notify_villager_child_spawn_failed()
+
+
+func notify_villager_child_spawned(child: Node) -> void:
+	villager_family_reproduction_pending = false
+	if not is_instance_valid(child):
+		notify_villager_child_spawn_failed()
+		return
+	current_babies += 1
+	villager_family_energy = 0
+	villager_family_retry_ticks = VILLAGER_FAMILY_RETRY_TICKS
+
+
+func notify_villager_child_spawn_failed() -> void:
+	villager_family_reproduction_pending = false
+	villager_family_retry_ticks = maxi(villager_family_retry_ticks, VILLAGER_CHILD_FAILED_RETRY_TICKS)
+
+
+func _get_adult_villager_texture() -> Texture2D:
+	var path = str(VILLAGER_ADULT_TEXTURE_PATHS.get(str(type), ""))
+	if path == "":
+		return null
+	var loaded = ResourceLoader.load(path)
+	if loaded is Texture2D:
+		return loaded
+	return null
+
+
+func _mature_villager_child() -> void:
+	if not _is_villager_child():
+		return
+	var adult_texture = _get_adult_villager_texture()
+	if adult_texture is Texture2D:
+		sprite_texture = adult_texture
+		if is_instance_valid(sprite):
+			sprite.texture = adult_texture
+	set_meta("villager_child", false)
+	set_meta("villager_child_maturity_energy", VILLAGER_CHILD_MATURITY_THRESHOLD)
+	_apply_mature_villager_scale_floor()
+
+
+func _add_villager_child_maturity_energy(amount: int) -> void:
+	if amount <= 0:
+		return
+	if not _is_villager_child():
+		return
+	var maturity_energy = mini(
+		int(get_meta("villager_child_maturity_energy", 0)) + amount,
+		VILLAGER_CHILD_MATURITY_THRESHOLD
+	)
+	set_meta("villager_child_maturity_energy", maturity_energy)
+	if maturity_energy >= VILLAGER_CHILD_MATURITY_THRESHOLD:
+		_mature_villager_child()
 
 
 func _add_villager_family_energy(amount: int) -> void:
@@ -1201,11 +1302,15 @@ func _on_area_entered(ztrade: Area2D) -> void:
 			}
 			_emit_or_queue_trade(return_path)
 		if _is_story_village_person_actor() and received_nutrient:
-			_add_villager_family_energy(VILLAGER_FAMILY_ENERGY_TRADE)
+			var nutrient_growth_energy := VILLAGER_FAMILY_ENERGY_TRADE
 			if was_missing_nutrient:
-				_add_villager_family_energy(VILLAGER_FAMILY_ENERGY_MISSING_NUTRIENT)
+				nutrient_growth_energy += VILLAGER_FAMILY_ENERGY_MISSING_NUTRIENT
 			if _villager_has_complete_nutrients():
-				_add_villager_family_energy(VILLAGER_FAMILY_ENERGY_COMPLETE_NPK)
+				nutrient_growth_energy += VILLAGER_FAMILY_ENERGY_COMPLETE_NPK
+			if _is_villager_child():
+				_add_villager_child_maturity_energy(nutrient_growth_energy)
+			else:
+				_add_villager_family_energy(nutrient_growth_energy)
 		var level_root = _story_farmer_get_level_root()
 		if is_instance_valid(level_root) and level_root.has_method("notify_story_phase5_trade_received"):
 			level_root.call("notify_story_phase5_trade_received", self, ztrade)
@@ -1227,10 +1332,15 @@ func _on_growth_timer_timeout() -> void:
 	#production_ready = true
 	#if production_ready:		
 	#	production_ready = false
+	var lock_villager_alpha := _is_story_village_person_actor()
+	if lock_villager_alpha:
+		_keep_villager_opaque()
 	if villager_family_retry_ticks > 0:
 		villager_family_retry_ticks -= 1
 	if _is_village_bank_node(self):
 		_bank_consume_nutrients_if_ready()
+		return
+	if _is_villager_child():
 		return
 	var disable_story_farmer_production = bool(get_meta("story_disable_farmer_production", false))
 	if not disable_story_farmer_production and prod_res.size() > 0 and prod_res[0] != null:
@@ -1256,12 +1366,13 @@ func _on_growth_timer_timeout() -> void:
 			if _can_expand_to_scale(candidate_scale):
 				newScale = candidate_scale
 			
-		var old_modulate = modulate
-		var new_alpha = modulate.a+alpha_step_up
-		if new_alpha > high_alpha:
-			new_alpha = high_alpha
-		var new_color = Color(old_modulate,new_alpha)
-		self.modulate= new_color
+		if not lock_villager_alpha:
+			var old_modulate = modulate
+			var new_alpha = modulate.a+alpha_step_up
+			if new_alpha > high_alpha:
+				new_alpha = high_alpha
+			var new_color = Color(old_modulate,new_alpha)
+			self.modulate= new_color
 		
 		
 		Global.add_score(400)
@@ -1285,23 +1396,24 @@ func _on_growth_timer_timeout() -> void:
 			#newScale = $Sprite2D.scale * 0.95
 			#print($Sprite2D.scale)
 			
-		var old_modulate = modulate
-		var new_alpha = modulate.a-alpha_step_down
-		if new_alpha < low_alpha:
-			new_alpha = low_alpha
-			
-			if(Global.is_killing == true and self.killable == true):
-				kill_it()
-			
-		var new_color = Color(old_modulate,new_alpha)
-		self.modulate= new_color
+		if not lock_villager_alpha:
+			var old_modulate = modulate
+			var new_alpha = modulate.a-alpha_step_down
+			if new_alpha < low_alpha:
+				new_alpha = low_alpha
+				
+				if(Global.is_killing == true and self.killable == true):
+					kill_it()
+				
+			var new_color = Color(old_modulate,new_alpha)
+			self.modulate= new_color
 
 	if newScale != $Sprite2D.scale:
 		var tween = get_tree().create_tween()
 		tween.tween_property($Sprite2D, "scale", newScale, 0.05)
 		#tween.set_parallel(true)	
 		
-	if newScale.x >= max_scale and newScale.y >= max_scale and modulate.a >= 1:
+	if not _is_story_village_person_actor() and newScale.x >= max_scale and newScale.y >= max_scale and modulate.a >= 1:
 		#print("increase score and twinkle")
 		var sparkle = Global.sparkle_scene.instantiate()
 		

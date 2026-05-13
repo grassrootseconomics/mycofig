@@ -737,6 +737,17 @@ func _reset_title_flyby_visuals() -> void:
 		_title_basket_land_sound_player.stop()
 
 
+func _release_title_audio() -> void:
+	LevelHelpersRef.stop_audio_players([
+		_title_predator_bird_sound_player,
+		_title_tuktuk_engine_sound_player,
+		_title_basket_land_sound_player
+	], true)
+	_title_predator_bird_sound_player = null
+	_title_tuktuk_engine_sound_player = null
+	_title_basket_land_sound_player = null
+
+
 func _start_title_flyby_cycle() -> void:
 	if _title_flyby_running:
 		return
@@ -1028,6 +1039,7 @@ func _process(delta: float) -> void:
 func _exit_tree() -> void:
 	_title_flyby_running = false
 	_reset_title_flyby_visuals()
+	_release_title_audio()
 	var basket = _get_title_basket_sprite()
 	if is_instance_valid(basket):
 		basket.visible = true

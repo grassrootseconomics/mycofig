@@ -16,6 +16,9 @@ const TEX_VENDOR = preload("res://graphics/mama.png")
 const TEX_COOK = preload("res://graphics/cook.png")
 const TEX_BASKET = preload("res://graphics/basket.png")
 const TEX_HOUSE = preload("res://graphics/shop.png")
+const TEX_HOUSE_2 = preload("res://graphics/house2.png")
+const TEX_HOUSE_3 = preload("res://graphics/house3.png")
+const TEX_VILLAGER_CHILD_PATH := "res://graphics/villager_child.png"
 const DEFAULT_PARENT_BOUND_RADIUS_TILES := 4
 const MYCO_HEALTHY_ANCHOR_RADIUS_TILES := 4
 const STORY_WORLD_COLUMNS := 26
@@ -34,8 +37,8 @@ const STORY_TUKTUK_SPAWN_RING_MIN := 1
 const STORY_TUKTUK_SPAWN_RING_MAX := 2
 const STORY_TUKTUK_TARGET_BUFFER := 4
 const STORY_VILLAGER_COUNT_PER_ROLE := 3
-const VILLAGER_BABIES_MIN := 1
-const VILLAGER_BABIES_MAX := 3
+const VILLAGER_BABIES_MIN := 0
+const VILLAGER_BABIES_MAX := 1
 const TUKTUK_SPAWN_LEFT_MIN_OFFSET := 120.0
 const TUKTUK_SPAWN_LEFT_MAX_OFFSET := 40.0
 const TUKTUK_SPAWN_VERTICAL_MARGIN_RATIO := 0.08
@@ -147,6 +150,7 @@ var tuktuk_scene: PackedScene = load("res://scenes/tuktuk.tscn")
 var socialagent_scene: PackedScene = load("res://scenes/socialagent.tscn")
 var basket_scene: PackedScene = load("res://scenes/basket.tscn")
 var ui_scene: PackedScene = load("res://scenes/ui.tscn")
+var _villager_child_texture: Texture2D = null
 
 
 var mid_width = 0
@@ -651,6 +655,15 @@ func _is_story_village_item_type(spawn_name: String) -> bool:
 
 func _is_crop_type(agent_type: String) -> bool:
 	return agent_type == "bean" or agent_type == "squash" or agent_type == "maize" or agent_type == "tree"
+
+
+func _get_villager_child_texture() -> Texture2D:
+	if _villager_child_texture != null:
+		return _villager_child_texture
+	var loaded_texture := ResourceLoader.load(TEX_VILLAGER_CHILD_PATH)
+	if loaded_texture is Texture2D:
+		_villager_child_texture = loaded_texture
+	return _villager_child_texture
 
 
 func _is_harvestable_crop_target(candidate: Node) -> bool:
@@ -1761,13 +1774,17 @@ func _story_spawn_village_houses(world: Node, village_rect: Rect2i) -> void:
 	var texture_max_size = maxf(float(TEX_HOUSE.get_width()), float(TEX_HOUSE.get_height()))
 	var house_scale = (tile_size_world * 0.88) / maxf(texture_max_size, 1.0)
 	var house_tiles = _story_get_village_house_tiles(village_rect)
+	var alternate_house_textures = [TEX_HOUSE_2, TEX_HOUSE_3]
 	for idx in range(house_tiles.size()):
 		var coord = Vector2i(house_tiles[idx])
 		if not world.in_bounds(coord):
 			continue
+		var house_texture = TEX_HOUSE
+		if idx % 2 == 1:
+			house_texture = alternate_house_textures[int(idx / 2) % alternate_house_textures.size()]
 		var house := Sprite2D.new()
 		house.name = str("VillageHouse", idx + 1)
-		house.texture = TEX_HOUSE
+		house.texture = house_texture
 		house.position = world.tile_to_world_center(coord)
 		house.scale = Vector2(house_scale, house_scale)
 		house.flip_h = idx % 2 == 1
@@ -2639,6 +2656,41 @@ func _resolve_exact_tile_spawn_pos(pos: Vector2, ignore_agent: Variant = null) -
 		result["ok"] = false
 		return result
 	result["pos"] = world.tile_to_world_center(coord)
+	return result
+
+
+func _resolve_villager_child_spawn_pos(parent: Variant, fallback_pos: Vector2) -> Dictionary:
+	var result := {
+		"ok": false,
+		"pos": fallback_pos,
+		"coord": Vector2i(-1, -1)
+	}
+	var world = _get_world_foundation()
+	if not _supports_world_tiles(world):
+		return result
+	var village_rect = _get_runtime_village_rect(world)
+	var parent_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(fallback_pos)))
+	if is_instance_valid(parent):
+		parent_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(parent.global_position)))
+	var max_radius = maxi(village_rect.size.x, village_rect.size.y) + 2
+	for radius in range(1, max_radius + 1):
+		for dy in range(-radius, radius + 1):
+			for dx in range(-radius, radius + 1):
+				if abs(dx) != radius and abs(dy) != radius:
+					continue
+				var coord = parent_coord + Vector2i(dx, dy)
+				if not village_rect.has_point(coord):
+					continue
+				if not world.in_bounds(coord):
+					continue
+				if _story_villager_reserves_tile(coord):
+					continue
+				if LevelHelpersRef.is_tile_occupied(self, $Agents, coord, parent, true):
+					continue
+				result["ok"] = true
+				result["coord"] = coord
+				result["pos"] = world.tile_to_world_center(coord)
+				return result
 	return result
 
 
@@ -3765,10 +3817,25 @@ func _on_new_agent(agent_dict) -> void:
 	var allow_unanchored_spawn = bool(agent_dict.get("allow_unanchored_spawn", false))
 	var myco_gate_result: Dictionary = {}
 	var spawn_already_snapped := false
+	var villager_child_spawn = bool(agent_dict.get("villager_child_spawn", false))
+	var villager_parent = agent_dict.get("villager_parent", null)
 	var story_village_item = _is_story_village_item_type(spawn_name)
 	if story_village_item:
 		allow_replace = false
 		require_exact_tile = true
+	if villager_child_spawn:
+		if not _is_challenge_dual_village_runtime() or not _is_story_village_person_type(spawn_name):
+			if is_instance_valid(villager_parent) and villager_parent.has_method("notify_villager_child_spawn_failed"):
+				villager_parent.notify_villager_child_spawn_failed()
+			return
+		var child_spawn = _resolve_villager_child_spawn_pos(villager_parent, spawn_pos)
+		if not bool(child_spawn["ok"]):
+			if is_instance_valid(villager_parent) and villager_parent.has_method("notify_villager_child_spawn_failed"):
+				villager_parent.notify_villager_child_spawn_failed()
+			return
+		spawn_pos = child_spawn["pos"]
+		require_exact_tile = true
+		spawn_already_snapped = true
 
 	if _is_parallel_village_runtime() and story_village_item:
 		if _is_story_mode() and not _story_village_revealed:
@@ -3928,16 +3995,27 @@ func _on_new_agent(agent_dict) -> void:
 			_bush_sound_player.play()
 		new_agent = make_tree(spawn_pos, spawn_already_snapped)
 	elif spawn_name == "farmer":
-		new_agent = make_farmer(spawn_pos)
+		new_agent = make_farmer(spawn_pos, not spawn_already_snapped)
 	elif spawn_name == "vendor":
-		new_agent = make_vendor(spawn_pos)
+		new_agent = make_vendor(spawn_pos, not spawn_already_snapped)
 	elif spawn_name == "cook":
-		new_agent = make_cook(spawn_pos)
+		new_agent = make_cook(spawn_pos, not spawn_already_snapped)
 	elif spawn_name == "basket":
 		_play_squelch_at(spawn_pos)
 		new_agent = make_story_basket(spawn_pos)
 	
 	if is_instance_valid(new_agent):
+		if villager_child_spawn:
+			new_agent.set_meta("villager_child", true)
+			new_agent.set_meta("villager_child_maturity_energy", 0)
+			new_agent.set_meta("villager_parent", villager_parent)
+			var villager_child_texture := _get_villager_child_texture()
+			if villager_child_texture != null:
+				new_agent.sprite_texture = villager_child_texture
+				if is_instance_valid(new_agent.sprite):
+					new_agent.sprite.texture = villager_child_texture
+			if is_instance_valid(villager_parent) and villager_parent.has_method("notify_villager_child_spawned"):
+				villager_parent.notify_villager_child_spawned(new_agent)
 		if not from_inventory and ecology_spawn and agent_dict.has("parent_anchor"):
 			new_agent.set_meta("lifecycle_spawn_child", true)
 			new_agent.set_meta("lifecycle_spawn_anchor", agent_dict["parent_anchor"])
@@ -3957,6 +4035,8 @@ func _on_new_agent(agent_dict) -> void:
 		request_spawn_neighborhood_dirty(new_agent)
 		if _is_story_mode() and _is_story_village_actor(new_agent):
 			_story_refresh_hud()
+	elif villager_child_spawn and is_instance_valid(villager_parent) and villager_parent.has_method("notify_villager_child_spawn_failed"):
+		villager_parent.notify_villager_child_spawn_failed()
 	if(Global.active_agent == null and not Global.prevent_auto_select):
 		Global.active_agent = new_agent
 		LevelHelpersRef.refresh_agent_bar_visibility($Agents)
@@ -4373,6 +4453,20 @@ func _release_audio() -> void:
 	LevelHelpersRef.clear_trade_line_cache($Lines, true)
 	LevelHelpersRef.clear_inventory_connection_preview_lines(inventory_preview_lines, true)
 	LevelHelpersRef.stop_audio_players(_get_runtime_audio_players(), true)
+	Global.active_agent = null
+	Global.is_dragging = false
+	_villager_child_texture = null
+	_dirty_buddies_agents.clear()
+	_dirty_lines_agents.clear()
+	_dirty_tile_hints_agents.clear()
+	_trade_visual_packets_by_key.clear()
+	_story_phase4_reserved_crop_to_farmer_ids.clear()
+	_bird_reserved_crop_to_bird_ids.clear()
+	_story_phase5_target_villager_ids.clear()
+	_story_phase5_sent_trade_counts.clear()
+	_story_phase5_received_trade_counts.clear()
+	_story_phase5_intro_tuktuk = null
+	_tuktuk_villager_last_trade_seconds.clear()
 	for active_trade in $Trades.get_children():
 		if is_instance_valid(active_trade):
 			if active_trade.get_parent() != null:

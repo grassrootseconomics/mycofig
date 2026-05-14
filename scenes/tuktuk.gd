@@ -6,6 +6,7 @@ signal scripted_capture_started
 
 @export var speed := 250
 const CAPTURE_DISTANCE := 20.0
+const TRAIL_SAMPLE_TILE_FRACTION := 0.5
 var going = Vector2(1, 0)
 var quarry_found = false
 var the_quarry: Node = null
@@ -21,6 +22,8 @@ var _scripted_finished_emitted := false
 var _scripted_capture_started_emitted := false
 var _engine_sound_started := false
 var _engine_sound_host: Node = null
+var _trail_damaged_tiles: Dictionary = {}
+var _trail_damaged_agents: Dictionary = {}
 
 
 func _ready():
@@ -91,6 +94,8 @@ func _start_scripted_capture() -> void:
 	caught = false
 	_captured_target = null
 	_capture_cleanup_done = false
+	_trail_damaged_tiles.clear()
+	_trail_damaged_agents.clear()
 	_scripted_finished_emitted = false
 	_scripted_capture_started_emitted = false
 	position = _scripted_spawn_pos
@@ -110,6 +115,8 @@ func reset():
 	caught = false
 	_captured_target = null
 	_capture_cleanup_done = false
+	_trail_damaged_tiles.clear()
+	_trail_damaged_agents.clear()
 	_scripted_finished_emitted = false
 	_scripted_capture_started_emitted = false
 	var rng := RandomNumberGenerator.new()
@@ -205,7 +212,147 @@ func _try_capture_quarry() -> bool:
 	return false
 
 
+func _get_world_foundation() -> Node:
+	var level_root := get_node_or_null("../..")
+	if not is_instance_valid(level_root):
+		return null
+	return level_root.get_node_or_null("WorldFoundation")
+
+
+func _get_trail_sample_step(world: Node) -> float:
+	var tile_size_value := 64.0
+	if is_instance_valid(world):
+		var raw_tile_size: Variant = world.get("tile_size")
+		if typeof(raw_tile_size) == TYPE_INT or typeof(raw_tile_size) == TYPE_FLOAT:
+			tile_size_value = maxf(float(raw_tile_size), 1.0)
+	return maxf(tile_size_value * TRAIL_SAMPLE_TILE_FRACTION, 1.0)
+
+
+func _is_trail_damage_target(agent: Variant) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	if Global.to_bool(agent.get("dead")):
+		return false
+	var agent_type := str(agent.get("type"))
+	if agent_type == "bean" or agent_type == "squash" or agent_type == "maize" or agent_type == "tree":
+		return true
+	return agent_type == "myco" and agent.has_method("_has_complete_nutrient_set")
+
+
+func _damage_trail_agent(agent: Variant) -> void:
+	if not _is_trail_damage_target(agent):
+		return
+	var agent_id := int(agent.get_instance_id())
+	if _trail_damaged_agents.has(agent_id):
+		return
+	_trail_damaged_agents[agent_id] = true
+	if agent.has_method("kill_it"):
+		agent.call_deferred("kill_it")
+
+
+func _agent_covers_trail_tile(world: Node, agent: Variant, coord: Vector2i) -> bool:
+	if not _is_trail_damage_target(agent):
+		return false
+	if not (agent is Node2D):
+		return false
+	var agent_node := agent as Node2D
+	if str(agent.get("type")) == "tree":
+		var base_coord := Vector2i(world.call("world_to_tile", agent_node.global_position))
+		return coord == base_coord or coord == base_coord + Vector2i(0, -1)
+	return coord == Vector2i(world.call("world_to_tile", agent_node.global_position))
+
+
+func _scan_trail_tile_targets(world: Node, coord: Vector2i) -> void:
+	var level_root := get_node_or_null("../..")
+	if not is_instance_valid(level_root):
+		return
+	var agents_root := level_root.get_node_or_null("Agents")
+	if not is_instance_valid(agents_root):
+		return
+	for agent in agents_root.get_children():
+		if _agent_covers_trail_tile(world, agent, coord):
+			_damage_trail_agent(agent)
+
+
+func _damage_trail_tile(world: Node, coord: Vector2i) -> bool:
+	if not is_instance_valid(world) or not world.has_method("in_bounds"):
+		return false
+	if not Global.to_bool(world.call("in_bounds", coord)):
+		return false
+	if not _trail_damaged_tiles.has(coord):
+		_trail_damaged_tiles[coord] = true
+		if world.has_method("degrade_tile_one_stage"):
+			world.call("degrade_tile_one_stage", coord)
+	var killed_target := false
+	if not world.has_method("get_tile_occupants_cached"):
+		_scan_trail_tile_targets(world, coord)
+		return true
+	var occupants_variant: Variant = world.call("get_tile_occupants_cached", coord)
+	if typeof(occupants_variant) != TYPE_ARRAY:
+		_scan_trail_tile_targets(world, coord)
+		return true
+	for occupant in occupants_variant:
+		if _is_trail_damage_target(occupant):
+			killed_target = true
+		_damage_trail_agent(occupant)
+	if not killed_target:
+		_scan_trail_tile_targets(world, coord)
+	return true
+
+
+func _get_tuktuk_trail_tiles_at(world: Node, sample_pos: Vector2) -> Array:
+	var coords: Array = []
+	if not is_instance_valid(world) or not world.has_method("world_to_tile"):
+		return coords
+	var min_pos := sample_pos
+	var max_pos := sample_pos
+	var sprite_node := get_node_or_null("Sprite2D")
+	if is_instance_valid(sprite_node) and sprite_node is Sprite2D:
+		var sprite := sprite_node as Sprite2D
+		if sprite.texture == null:
+			var center_coord := Vector2i(world.call("world_to_tile", sample_pos))
+			if not world.has_method("in_bounds") or Global.to_bool(world.call("in_bounds", center_coord)):
+				coords.append(center_coord)
+			return coords
+		var rect: Rect2 = sprite.get_rect()
+		var scaled_pos := Vector2(rect.position.x * sprite.scale.x, rect.position.y * sprite.scale.y)
+		var scaled_size := Vector2(rect.size.x * sprite.scale.x, rect.size.y * sprite.scale.y)
+		min_pos = sample_pos + Vector2(
+			minf(scaled_pos.x, scaled_pos.x + scaled_size.x),
+			minf(scaled_pos.y, scaled_pos.y + scaled_size.y)
+		)
+		max_pos = sample_pos + Vector2(
+			maxf(scaled_pos.x, scaled_pos.x + scaled_size.x),
+			maxf(scaled_pos.y, scaled_pos.y + scaled_size.y)
+		) - Vector2(0.001, 0.001)
+	var min_coord := Vector2i(world.call("world_to_tile", min_pos))
+	var max_coord := Vector2i(world.call("world_to_tile", max_pos))
+	for y in range(min_coord.y, max_coord.y + 1):
+		for x in range(min_coord.x, max_coord.x + 1):
+			var coord := Vector2i(x, y)
+			if world.has_method("in_bounds") and not Global.to_bool(world.call("in_bounds", coord)):
+				continue
+			coords.append(coord)
+	return coords
+
+
+func _apply_tuktuk_trail_damage(from_world_pos: Vector2, to_world_pos: Vector2) -> void:
+	var world := _get_world_foundation()
+	if not is_instance_valid(world) or not world.has_method("world_to_tile"):
+		return
+	var step := _get_trail_sample_step(world)
+	var distance := from_world_pos.distance_to(to_world_pos)
+	var sample_count := maxi(1, int(ceil(distance / step)))
+	for sample_index in range(sample_count + 1):
+		var sample_t := float(sample_index) / float(sample_count)
+		var sample_pos := from_world_pos.lerp(to_world_pos, sample_t)
+		for coord in _get_tuktuk_trail_tiles_at(world, sample_pos):
+			_damage_trail_tile(world, Vector2i(coord))
+
+
 func _physics_process(delta: float) -> void:
+	var previous_world_pos := global_position
+
 	if _scripted_capture_enabled and not caught and (not is_instance_valid(the_quarry) or Global.to_bool(the_quarry.get("dead"))):
 		the_quarry = null
 		quarry_found = false
@@ -230,6 +377,8 @@ func _physics_process(delta: float) -> void:
 			quarry_found = false
 			the_quarry = null
 			move_and_collide(speed * going * delta)
+
+	_apply_tuktuk_trail_damage(previous_world_pos, global_position)
 
 	if _is_outside_world_bounds():
 		_capture_and_exit()

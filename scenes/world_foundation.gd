@@ -428,6 +428,29 @@ func set_stage(coord: Vector2i, stage: int) -> void:
 	_update_debug_label(coord)
 
 
+func degrade_tile_one_stage(coord: Vector2i) -> bool:
+	if not in_bounds(coord):
+		return false
+	if is_village_cobble_tile(coord):
+		return false
+	var idx = _index_for(coord)
+	var tile: Dictionary = _tiles[idx]
+	var old_stage := int(tile["stage"])
+	if old_stage <= STAGE_DRY_COMPACTED:
+		return false
+	var new_stage := maxi(old_stage - 1, STAGE_DRY_COMPACTED)
+	var defaults: Dictionary = _stage_defaults(new_stage)
+	tile["stage"] = new_stage
+	tile["moisture"] = float(defaults["moisture"])
+	tile["compaction"] = float(defaults["compaction"])
+	tile["organic_matter"] = float(defaults["organic_matter"])
+	_tiles[idx] = tile
+	queue_redraw()
+	tile_stage_changed.emit(coord, new_stage)
+	_update_debug_label(coord)
+	return true
+
+
 func set_tiles_stage(coords: Array, stage: int) -> void:
 	var changed := false
 	var clamped_stage = clampi(stage, STAGE_DRY_COMPACTED, STAGE_HEALTHY)

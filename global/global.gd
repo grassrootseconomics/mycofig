@@ -48,8 +48,8 @@ var perf_soil_tick_ms_last = 0.0
 var perf_tile_occupancy_queries = 0
 var perf_last_sample = {}
 var perf_run_metadata = {}
-const PERF_DENSITY_TIER1_AGENT_COUNT := 220
-const PERF_DENSITY_TIER2_AGENT_COUNT := 320
+const PERF_DENSITY_TIER1_AGENT_COUNT := 260
+const PERF_DENSITY_TIER2_AGENT_COUNT := 650
 const PERF_OCCUPANCY_TIER2_QUERY_COUNT := 50000
 var minimap_adaptive_redraw_enabled = true
 var ui_layout_cadence_enabled = true
@@ -139,6 +139,8 @@ var trade_sender_burst_myco := 4.0
 var trade_link_rate_per_sec_myco := 10.0
 var trade_link_burst_myco := 2.0
 var trade_visual_hybrid_enabled := true
+var trade_visual_suppression_enabled := true
+var trade_visual_suppression_min_tier := 2
 var trade_visual_per_link_cap_t0 := 4
 var trade_visual_per_link_cap_t1 := 3
 var trade_visual_per_link_cap_t2 := 2
@@ -723,6 +725,12 @@ func get_trade_visual_link_packet_cap() -> int:
 			return maxi(trade_visual_per_link_cap_t2, 1)
 		_:
 			return maxi(trade_visual_per_link_cap_t0, 1)
+
+
+func should_suppress_trade_visuals() -> bool:
+	if not trade_visual_suppression_enabled:
+		return false
+	return get_effective_perf_tier() >= maxi(trade_visual_suppression_min_tier, 0)
 
 
 func reset_trade_dispatch_budgets() -> void:

@@ -26,6 +26,8 @@ const TUKTUK_ENGINE_FOCUS_RADIUS_WORLD := 72.0
 const TUKTUK_ENGINE_APPROACH_FADE_DB_PER_SEC := 11.0
 const TUKTUK_ENGINE_DEPART_FADE_DB_PER_SEC := 42.0
 
+var _level_runtime_services = LevelRuntimeServicesRef.new()
+
 var socialagent_scene: PackedScene = load("res://scenes/socialagent.tscn")
 var trade_scene: PackedScene = load("res://scenes/trade.tscn")
 #var myco_scene: PackedScene = load("res://scenes/myco.tscn")
@@ -531,11 +533,11 @@ func _find_replaceable_agent_at_world_pos(pos: Vector2, ignore_agent: Variant = 
 
 
 func _agent_key(agent: Variant) -> int:
-	return LevelRuntimeServicesRef.agent_key(agent)
+	return _level_runtime_services.agent_key(agent)
 
 
 func request_agent_dirty(agent: Variant, buddies: bool = true, lines: bool = true, tile_hint: bool = false) -> void:
-	LevelRuntimeServicesRef.request_agent_dirty(_dirty_buddies_agents, _dirty_lines_agents, _dirty_tile_hints_agents, agent, buddies, lines, tile_hint)
+	_level_runtime_services.request_agent_dirty(_dirty_buddies_agents, _dirty_lines_agents, _dirty_tile_hints_agents, agent, buddies, lines, tile_hint)
 
 
 func request_all_agents_dirty() -> void:
@@ -549,15 +551,15 @@ func mark_agent_moved(agent: Variant, old_pos: Vector2, new_pos: Vector2) -> voi
 
 
 func _process_dirty_queues() -> void:
-	LevelRuntimeServicesRef.process_dirty_queues(self, $Agents, $Lines, _dirty_buddies_agents, _dirty_lines_agents, _dirty_tile_hints_agents, true)
+	_level_runtime_services.process_dirty_queues(self, $Agents, $Lines, _dirty_buddies_agents, _dirty_lines_agents, _dirty_tile_hints_agents, true)
 
 
 func _setup_perf_monitor() -> void:
-	perf_monitor = LevelRuntimeServicesRef.setup_perf_monitor(self, perf_monitor, $Agents, $Trades, $Lines, _get_world_foundation())
+	perf_monitor = _level_runtime_services.setup_perf_monitor(self, perf_monitor, $Agents, $Trades, $Lines, _get_world_foundation())
 
 
 func _recycle_trade(trade: Node) -> void:
-	LevelRuntimeServicesRef.recycle_trade(_trade_pool, _trade_visual_packets_by_key, trade)
+	_level_runtime_services.recycle_trade(_trade_pool, _trade_visual_packets_by_key, trade)
 
 
 func _ready():
@@ -728,23 +730,23 @@ func _on_agent_trade(path_dict) -> void:
 
 
 func _build_trade_visual_key(path_dict: Dictionary) -> String:
-	return LevelRuntimeServicesRef.build_trade_visual_key(path_dict)
+	return _level_runtime_services.build_trade_visual_key(path_dict)
 
 
 func _get_trade_visual_key_for_packet(trade: Node) -> String:
-	return LevelRuntimeServicesRef.get_trade_visual_key_for_packet(trade)
+	return _level_runtime_services.get_trade_visual_key_for_packet(trade)
 
 
 func _get_trade_visual_packets_for_key(visual_key: String) -> Array:
-	return LevelRuntimeServicesRef.get_trade_visual_packets_for_key(_trade_visual_packets_by_key, $Trades, visual_key)
+	return _level_runtime_services.get_trade_visual_packets_for_key(_trade_visual_packets_by_key, $Trades, visual_key)
 
 
 func _register_trade_visual_packet(trade: Node) -> void:
-	LevelRuntimeServicesRef.register_trade_visual_packet(_trade_visual_packets_by_key, trade)
+	_level_runtime_services.register_trade_visual_packet(_trade_visual_packets_by_key, trade)
 
 
 func _unregister_trade_visual_packet(trade: Node) -> void:
-	LevelRuntimeServicesRef.unregister_trade_visual_packet(_trade_visual_packets_by_key, trade)
+	_level_runtime_services.unregister_trade_visual_packet(_trade_visual_packets_by_key, trade)
 
 
 func _spawn_trade(path_dict) -> void:
@@ -755,6 +757,8 @@ func _spawn_trade(path_dict) -> void:
 		trade_dict["created_at_msec"] = Time.get_ticks_msec()
 	var trade_amount = maxi(int(trade_dict.get("trade_amount", 1)), 1)
 	trade_dict["trade_amount"] = trade_amount
+	if Global.should_suppress_trade_visuals():
+		trade_dict["suppress_trade_visuals"] = true
 	if Global.trade_visual_hybrid_enabled:
 		var visual_key = _build_trade_visual_key(trade_dict)
 		if visual_key != "":

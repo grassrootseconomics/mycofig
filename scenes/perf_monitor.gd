@@ -9,6 +9,7 @@ class_name PerfMonitor
 @export var log_csv_path := ""
 
 const TIER_ENTER_CONFIRM_SAMPLES := 2
+const TIER2_ENTER_CONFIRM_SAMPLES := 8
 const TIER_EXIT_CONFIRM_SAMPLES := 5
 const TIER1_EXIT_SCALE := 0.74
 const TIER2_EXIT_SCALE := 0.80
@@ -19,16 +20,16 @@ const TIER1_THRESHOLDS := {
 	"packets": 145.0,
 	"lines": 24.0,
 	"bars": 340.0,
-	"occ": 38.0
+	"occ": 38000.0
 }
 const TIER2_THRESHOLDS := {
-	"p95": 20.0,
-	"avg": 14.5,
-	"agents": 500.0,
-	"packets": 150.0,
-	"lines": 30.0,
+	"p95": 50.0,
+	"avg": 33.0,
+	"agents": 750.0,
+	"packets": 1200.0,
+	"lines": 320.0,
 	"bars": 500.0,
-	"occ": 46.0
+	"occ": 46000.0
 }
 const PRESSURE_WEIGHTS := {
 	"perf": 0.48,
@@ -159,7 +160,8 @@ func _collect_sample() -> void:
 		"run_seed": int(run_meta.get("seed", 0)),
 		"run_profile": str(run_meta.get("profile", "")),
 		"run_target": int(run_meta.get("target", 0)),
-		"quality_tier": Global.get_effective_perf_tier()
+		"quality_tier": Global.get_effective_perf_tier(),
+		"trade_visuals_suppressed": Global.should_suppress_trade_visuals()
 	}
 
 	var pressure_t1 = _compute_pressure_score(sample, TIER1_THRESHOLDS)
@@ -173,6 +175,7 @@ func _collect_sample() -> void:
 	if adaptive_quality_enabled and Global.perf_adaptive_enabled and Global.perf_quality_override < 0:
 		_apply_adaptive_tier_from_sample(sample)
 		sample["quality_tier"] = Global.get_effective_perf_tier()
+		sample["trade_visuals_suppressed"] = Global.should_suppress_trade_visuals()
 
 	_update_overlay(sample)
 
@@ -215,7 +218,7 @@ func _apply_adaptive_tier_from_sample(sample: Dictionary) -> void:
 		if score_t2 >= 1.0:
 			_tier_up_counter += 1
 			_tier_down_counter = 0
-			if _tier_up_counter >= TIER_ENTER_CONFIRM_SAMPLES:
+			if _tier_up_counter >= TIER2_ENTER_CONFIRM_SAMPLES:
 				next_tier = 2
 		else:
 			_tier_up_counter = 0
@@ -251,6 +254,7 @@ func _update_overlay(sample: Dictionary) -> void:
 		str("pressure t1=", _fmt(sample.get("pressure_t1", 0.0)), " t2=", _fmt(sample.get("pressure_t2", 0.0))),
 		str("agents=", sample.get("active_agents", 0), " moving=", sample.get("moving_agents", 0)),
 		str("packets=", sample.get("trade_packets", 0), " lines=", sample.get("line_count", 0), " bars=", sample.get("visible_bars", 0)),
+		str("trade visuals suppressed=", sample.get("trade_visuals_suppressed", false)),
 		str("soil_tick_tiles=", sample.get("soil_tiles_touched", 0), " soil_tick_ms=", _fmt(sample.get("soil_tick_ms", 0.0)), " occ_q=", sample.get("tile_occupancy_queries", 0))
 	]
 	_overlay_label.text = "\n".join(lines)
@@ -294,11 +298,14 @@ func _write_logs() -> void:
 
 	var csv_file = FileAccess.open(csv_target, FileAccess.WRITE)
 	if csv_file != null:
-		csv_file.store_line("timestamp_ms,scenario_id,run_profile,run_seed,run_target,frame_avg_ms,frame_p95_ms,active_agents,moving_agents,trade_packets,line_count,visible_bars,soil_tiles_touched,soil_tick_ms,tile_occupancy_queries,pressure_t1,pressure_t2,quality_tier")
+		csv_file.store_line("timestamp_ms,scenario_id,run_profile,run_seed,run_target,frame_avg_ms,frame_p95_ms,active_agents,moving_agents,trade_packets,line_count,visible_bars,soil_tiles_touched,soil_tick_ms,tile_occupancy_queries,pressure_t1,pressure_t2,quality_tier,trade_visuals_suppressed")
 		for sample_variant in _samples:
 			if typeof(sample_variant) != TYPE_DICTIONARY:
 				continue
 			var sample: Dictionary = sample_variant
+			var trade_visuals_suppressed := 0
+			if Global.to_bool(sample.get("trade_visuals_suppressed", false)):
+				trade_visuals_suppressed = 1
 			csv_file.store_line(
 				str(sample.get("timestamp_ms", 0), ",",
 				sample.get("scenario_id", ""), ",",
@@ -317,6 +324,7 @@ func _write_logs() -> void:
 					sample.get("tile_occupancy_queries", 0), ",",
 					sample.get("pressure_t1", 0.0), ",",
 					sample.get("pressure_t2", 0.0), ",",
-					sample.get("quality_tier", 0))
+					sample.get("quality_tier", 0), ",",
+					trade_visuals_suppressed)
 			)
 		csv_file.close()

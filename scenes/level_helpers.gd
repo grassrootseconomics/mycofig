@@ -2266,12 +2266,32 @@ static func _refresh_village_trails(lines_root: Node, now_ms: int) -> void:
 	_set_village_trail_store(lines_root, remaining)
 
 
+static func _set_village_trade_visuals_visible(lines_root: Node, next_visible: bool) -> void:
+	var pair_store = _get_village_pair_store(lines_root)
+	for pair_variant in pair_store.values():
+		if typeof(pair_variant) != TYPE_ARRAY:
+			continue
+		var pair_lines: Array = pair_variant
+		for line_variant in pair_lines:
+			if line_variant is Line2D and is_instance_valid(line_variant):
+				var line: Line2D = line_variant
+				line.visible = next_visible
+	var trails = _get_village_trail_store(lines_root)
+	for trail_variant in trails:
+		if trail_variant is Line2D and is_instance_valid(trail_variant):
+			var trail: Line2D = trail_variant
+			trail.visible = next_visible
+
+
 static func refresh_trade_line_visuals(lines_root: Node) -> void:
 	if not is_instance_valid(lines_root):
 		return
 	var now_ms = Time.get_ticks_msec()
-	_refresh_village_pair_lines(lines_root, now_ms)
-	_refresh_village_trails(lines_root, now_ms)
+	if Global.should_suppress_trade_visuals():
+		_set_village_trade_visuals_visible(lines_root, false)
+	else:
+		_refresh_village_pair_lines(lines_root, now_ms)
+		_refresh_village_trails(lines_root, now_ms)
 	for line in lines_root.get_children():
 		if not (line is Line2D):
 			continue

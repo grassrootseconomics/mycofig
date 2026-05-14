@@ -142,6 +142,7 @@ const PARENT_BOUNDED_TYPES := {
 	"maize": true
 }
 
+var _level_runtime_services = LevelRuntimeServicesRef.new()
 var plant_scene: PackedScene = load("res://scenes/plant.tscn")
 var trade_scene: PackedScene = load("res://scenes/trade.tscn")
 var myco_scene: PackedScene = load("res://scenes/myco.tscn")
@@ -2991,11 +2992,11 @@ func _validate_myco_spawn(spawn_pos: Vector2, ignore_agent: Variant = null) -> D
 
 
 func _agent_key(agent: Variant) -> int:
-	return LevelRuntimeServicesRef.agent_key(agent)
+	return _level_runtime_services.agent_key(agent)
 
 
 func request_agent_dirty(agent: Variant, buddies: bool = true, lines: bool = true, tile_hint: bool = false) -> void:
-	LevelRuntimeServicesRef.request_agent_dirty(_dirty_buddies_agents, _dirty_lines_agents, _dirty_tile_hints_agents, agent, buddies, lines, tile_hint)
+	_level_runtime_services.request_agent_dirty(_dirty_buddies_agents, _dirty_lines_agents, _dirty_tile_hints_agents, agent, buddies, lines, tile_hint)
 
 
 func request_all_agents_dirty() -> void:
@@ -3013,15 +3014,15 @@ func mark_agent_moved(agent: Variant, old_pos: Vector2, new_pos: Vector2) -> voi
 
 
 func _process_dirty_queues(force_all: bool = false) -> void:
-	LevelRuntimeServicesRef.process_dirty_queues(self, $Agents, $Lines, _dirty_buddies_agents, _dirty_lines_agents, _dirty_tile_hints_agents, false, force_all)
+	_level_runtime_services.process_dirty_queues(self, $Agents, $Lines, _dirty_buddies_agents, _dirty_lines_agents, _dirty_tile_hints_agents, false, force_all)
 
 
 func _setup_perf_monitor() -> void:
-	perf_monitor = LevelRuntimeServicesRef.setup_perf_monitor(self, perf_monitor, $Agents, $Trades, $Lines, _get_world_foundation())
+	perf_monitor = _level_runtime_services.setup_perf_monitor(self, perf_monitor, $Agents, $Trades, $Lines, _get_world_foundation())
 
 
 func _recycle_trade(trade: Node) -> void:
-	LevelRuntimeServicesRef.recycle_trade(_trade_pool, _trade_visual_packets_by_key, trade)
+	_level_runtime_services.recycle_trade(_trade_pool, _trade_visual_packets_by_key, trade)
 
 
 func _ready():
@@ -3411,23 +3412,23 @@ func _on_agent_trade(path_dict) -> void:
 
 
 func _build_trade_visual_key(path_dict: Dictionary) -> String:
-	return LevelRuntimeServicesRef.build_trade_visual_key(path_dict)
+	return _level_runtime_services.build_trade_visual_key(path_dict)
 
 
 func _get_trade_visual_key_for_packet(trade: Node) -> String:
-	return LevelRuntimeServicesRef.get_trade_visual_key_for_packet(trade)
+	return _level_runtime_services.get_trade_visual_key_for_packet(trade)
 
 
 func _get_trade_visual_packets_for_key(visual_key: String) -> Array:
-	return LevelRuntimeServicesRef.get_trade_visual_packets_for_key(_trade_visual_packets_by_key, $Trades, visual_key)
+	return _level_runtime_services.get_trade_visual_packets_for_key(_trade_visual_packets_by_key, $Trades, visual_key)
 
 
 func _register_trade_visual_packet(trade: Node) -> void:
-	LevelRuntimeServicesRef.register_trade_visual_packet(_trade_visual_packets_by_key, trade)
+	_level_runtime_services.register_trade_visual_packet(_trade_visual_packets_by_key, trade)
 
 
 func _unregister_trade_visual_packet(trade: Node) -> void:
-	LevelRuntimeServicesRef.unregister_trade_visual_packet(_trade_visual_packets_by_key, trade)
+	_level_runtime_services.unregister_trade_visual_packet(_trade_visual_packets_by_key, trade)
 
 
 func _spawn_trade(path_dict) -> void:
@@ -3438,10 +3439,14 @@ func _spawn_trade(path_dict) -> void:
 		trade_dict["created_at_msec"] = Time.get_ticks_msec()
 	var trade_amount = maxi(int(trade_dict.get("trade_amount", 1)), 1)
 	trade_dict["trade_amount"] = trade_amount
+	var suppress_trade_visuals := Global.should_suppress_trade_visuals()
+	if suppress_trade_visuals:
+		trade_dict["suppress_trade_visuals"] = true
 	var is_village_visual_trade := LevelHelpersRef.is_village_trade_visual_path(trade_dict)
 	if is_village_visual_trade:
-		trade_dict["village_ephemeral_trade_visual"] = true
-		LevelHelpersRef.pulse_village_trade_pair_line($Lines, trade_dict.get("from_agent", null), trade_dict.get("to_agent", null))
+		trade_dict["village_ephemeral_trade_visual"] = not suppress_trade_visuals
+		if not suppress_trade_visuals:
+			LevelHelpersRef.pulse_village_trade_pair_line($Lines, trade_dict.get("from_agent", null), trade_dict.get("to_agent", null))
 	if not is_village_visual_trade and Global.trade_visual_hybrid_enabled:
 		var visual_key = _build_trade_visual_key(trade_dict)
 		if visual_key != "":

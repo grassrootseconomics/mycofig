@@ -13,13 +13,13 @@ const DIRTY_LINE_PROCESS_CAP_T2 := 32
 const DIRTY_TILE_HINT_PROCESS_CAP := 24
 
 
-static func agent_key(agent: Variant) -> int:
+func agent_key(agent: Variant) -> int:
 	if not is_instance_valid(agent):
 		return -1
 	return int(agent.get_instance_id())
 
 
-static func request_agent_dirty(dirty_buddies: Dictionary, dirty_lines: Dictionary, dirty_tile_hints: Dictionary, agent: Variant, buddies: bool = true, lines: bool = true, tile_hint: bool = false) -> void:
+func request_agent_dirty(dirty_buddies: Dictionary, dirty_lines: Dictionary, dirty_tile_hints: Dictionary, agent: Variant, buddies: bool = true, lines: bool = true, tile_hint: bool = false) -> void:
 	var key = agent_key(agent)
 	if key < 0:
 		return
@@ -31,7 +31,7 @@ static func request_agent_dirty(dirty_buddies: Dictionary, dirty_lines: Dictiona
 		dirty_tile_hints[key] = agent
 
 
-static func _get_dirty_buddy_process_cap() -> int:
+func _get_dirty_buddy_process_cap() -> int:
 	match Global.get_effective_perf_tier():
 		1:
 			return DIRTY_BUDDY_PROCESS_CAP_T1
@@ -41,7 +41,7 @@ static func _get_dirty_buddy_process_cap() -> int:
 			return DIRTY_BUDDY_PROCESS_CAP_T0
 
 
-static func _get_dirty_line_process_cap() -> int:
+func _get_dirty_line_process_cap() -> int:
 	match Global.get_effective_perf_tier():
 		1:
 			return DIRTY_LINE_PROCESS_CAP_T1
@@ -51,7 +51,7 @@ static func _get_dirty_line_process_cap() -> int:
 			return DIRTY_LINE_PROCESS_CAP_T0
 
 
-static func _is_priority_dirty_agent(agent: Variant) -> bool:
+func _is_priority_dirty_agent(agent: Variant) -> bool:
 	if not is_instance_valid(agent):
 		return false
 	if is_instance_valid(Global.active_agent) and agent == Global.active_agent:
@@ -63,7 +63,7 @@ static func _is_priority_dirty_agent(agent: Variant) -> bool:
 	return typeof(keyboard_variant) == TYPE_BOOL and Global.to_bool(keyboard_variant)
 
 
-static func _take_dirty_agents(dirty_store: Dictionary, max_count: int, skip_keys: Dictionary = {}) -> Array:
+func _take_dirty_agents(dirty_store: Dictionary, max_count: int, skip_keys: Dictionary = {}) -> Array:
 	var agents: Array = []
 	var processed_keys: Array = []
 	for priority_pass in [true, false]:
@@ -85,7 +85,7 @@ static func _take_dirty_agents(dirty_store: Dictionary, max_count: int, skip_key
 	return agents
 
 
-static func _count_live_agents(agents_root: Node) -> int:
+func _count_live_agents(agents_root: Node) -> int:
 	if not is_instance_valid(agents_root):
 		return 0
 	var total := 0
@@ -100,7 +100,7 @@ static func _count_live_agents(agents_root: Node) -> int:
 	return total
 
 
-static func process_dirty_queues(level_root: Node, agents_root: Node, lines_root: Node, dirty_buddies: Dictionary, dirty_lines: Dictionary, dirty_tile_hints: Dictionary, social_mode: bool, force_all: bool = false) -> void:
+func process_dirty_queues(level_root: Node, agents_root: Node, lines_root: Node, dirty_buddies: Dictionary, dirty_lines: Dictionary, dirty_tile_hints: Dictionary, social_mode: bool, force_all: bool = false) -> void:
 	if dirty_buddies.is_empty() and dirty_lines.is_empty() and dirty_tile_hints.is_empty():
 		return
 	var active_agents = _count_live_agents(agents_root)
@@ -130,7 +130,7 @@ static func process_dirty_queues(level_root: Node, agents_root: Node, lines_root
 			LevelHelpersRef.sync_myco_trade_lines(lines_root, agents_root, social_mode, line_agents)
 
 
-static func setup_perf_monitor(owner: Node, existing_monitor: Node, agents_root: Node, trades_root: Node, lines_root: Node, world_root: Node) -> Node:
+func setup_perf_monitor(owner: Node, existing_monitor: Node, agents_root: Node, trades_root: Node, lines_root: Node, world_root: Node) -> Node:
 	if is_instance_valid(existing_monitor):
 		return existing_monitor
 	if not is_instance_valid(owner):
@@ -145,7 +145,7 @@ static func setup_perf_monitor(owner: Node, existing_monitor: Node, agents_root:
 	return perf_monitor
 
 
-static func build_trade_visual_key(path_dict: Dictionary) -> String:
+func build_trade_visual_key(path_dict: Dictionary) -> String:
 	var from_agent = path_dict.get("from_agent", null)
 	var to_agent = path_dict.get("to_agent", null)
 	var asset_key = str(path_dict.get("trade_asset", ""))
@@ -156,7 +156,7 @@ static func build_trade_visual_key(path_dict: Dictionary) -> String:
 	return str(int(from_agent.get_instance_id()), "->", int(to_agent.get_instance_id()), ":", asset_key)
 
 
-static func get_trade_visual_key_for_packet(trade: Node) -> String:
+func get_trade_visual_key_for_packet(trade: Node) -> String:
 	if not is_instance_valid(trade):
 		return ""
 	if not trade.has_method("get_trade_visual_key"):
@@ -164,7 +164,7 @@ static func get_trade_visual_key_for_packet(trade: Node) -> String:
 	return str(trade.call("get_trade_visual_key"))
 
 
-static func get_trade_visual_packets_for_key(packet_store: Dictionary, trades_root: Node, visual_key: String) -> Array:
+func get_trade_visual_packets_for_key(packet_store: Dictionary, trades_root: Node, visual_key: String) -> Array:
 	var packets: Array = []
 	if visual_key == "":
 		return packets
@@ -187,7 +187,7 @@ static func get_trade_visual_packets_for_key(packet_store: Dictionary, trades_ro
 	return packets
 
 
-static func register_trade_visual_packet(packet_store: Dictionary, trade: Node) -> void:
+func register_trade_visual_packet(packet_store: Dictionary, trade: Node) -> void:
 	var visual_key = get_trade_visual_key_for_packet(trade)
 	if visual_key == "":
 		return
@@ -198,7 +198,7 @@ static func register_trade_visual_packet(packet_store: Dictionary, trade: Node) 
 	packet_store[visual_key] = packets
 
 
-static func unregister_trade_visual_packet(packet_store: Dictionary, trade: Node) -> void:
+func unregister_trade_visual_packet(packet_store: Dictionary, trade: Node) -> void:
 	var visual_key = get_trade_visual_key_for_packet(trade)
 	if visual_key == "":
 		return
@@ -216,7 +216,7 @@ static func unregister_trade_visual_packet(packet_store: Dictionary, trade: Node
 		packet_store[visual_key] = packets
 
 
-static func recycle_trade(trade_pool: Array, packet_store: Dictionary, trade: Node) -> void:
+func recycle_trade(trade_pool: Array, packet_store: Dictionary, trade: Node) -> void:
 	if not is_instance_valid(trade):
 		return
 	unregister_trade_visual_packet(packet_store, trade)

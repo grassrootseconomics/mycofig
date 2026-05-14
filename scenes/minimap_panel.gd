@@ -21,7 +21,9 @@ var _input_suppressed_until_msec := 0
 var _village_marker_world := Vector2.ZERO
 var _village_marker_visible := false
 var _redraw_elapsed := 0.0
+var _last_unscaled_msec := 0
 var _redraw_requested := true
+var _redraw_immediate := true
 var _last_camera_center := Vector2.INF
 var _last_camera_size := Vector2.ZERO
 var _last_camera_zoom := Vector2.ZERO
@@ -31,6 +33,7 @@ var _last_world_rect := Rect2(Vector2.ZERO, Vector2.ZERO)
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	_last_unscaled_msec = Time.get_ticks_msec()
 
 
 func configure(level_root: Node, world_node: Node, agents_root: Node) -> void:
@@ -100,8 +103,10 @@ func _notification(what: int) -> void:
 		_request_redraw()
 
 
-func _request_redraw() -> void:
+func _request_redraw(immediate: bool = true) -> void:
 	_redraw_requested = true
+	if immediate:
+		_redraw_immediate = true
 
 
 func _camera_or_world_changed() -> bool:
@@ -132,14 +137,25 @@ func _camera_or_world_changed() -> bool:
 	return changed
 
 
+func _get_unscaled_delta(fallback_delta: float) -> float:
+	var now_msec := Time.get_ticks_msec()
+	if _last_unscaled_msec <= 0:
+		_last_unscaled_msec = now_msec
+		return fallback_delta
+	var elapsed := maxf(float(now_msec - _last_unscaled_msec) / 1000.0, 0.0)
+	_last_unscaled_msec = now_msec
+	return elapsed
+
+
 func _process(delta: float) -> void:
-	_redraw_elapsed += maxf(delta, 0.0)
+	_redraw_elapsed += _get_unscaled_delta(delta)
 	if _camera_or_world_changed():
-		_request_redraw()
+		_request_redraw(false)
 	var interval = Global.get_minimap_interaction_redraw_interval() if _dragging else Global.get_minimap_idle_redraw_interval()
-	if _redraw_requested or _redraw_elapsed >= maxf(interval, 0.016):
+	if _redraw_immediate or (_redraw_requested and _redraw_elapsed >= maxf(interval, 0.016)):
 		_redraw_elapsed = 0.0
 		_redraw_requested = false
+		_redraw_immediate = false
 		queue_redraw()
 
 
@@ -167,7 +183,7 @@ func _gui_input(event: InputEvent) -> void:
 		if event.index != _touch_drag_id:
 			return
 		_dragging = true
-		_request_redraw()
+		_request_redraw(false)
 		_emit_pan_for_local(event.position)
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
@@ -184,7 +200,7 @@ func _gui_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion and _dragging:
 		if Global.is_mobile_platform:
 			return
-		_request_redraw()
+		_request_redraw(false)
 		_emit_pan_for_local(event.position)
 
 
@@ -192,7 +208,7 @@ func _emit_pan_for_local(local_pos: Vector2) -> void:
 	var world_pos = _map_to_world(local_pos)
 	if world_pos == Vector2.INF:
 		return
-	_request_redraw()
+	_request_redraw(false)
 	emit_signal("camera_pan_requested", world_pos)
 
 
@@ -210,7 +226,7 @@ func _draw_agents() -> void:
 	for agent in _agents_root.get_children():
 		if not is_instance_valid(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		var agent_type = str(agent.get("type"))
 		if agent_type == "cloud":

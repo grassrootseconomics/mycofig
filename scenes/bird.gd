@@ -169,11 +169,11 @@ func reset():
 	for child in children:
 		if not is_instance_valid(child):
 			continue
-		if bool(child.get("dead")):
+		if Global.to_bool(child.get("dead")):
 			continue
 		var valid_target := false
 		if is_instance_valid(level_root) and level_root.has_method("is_valid_predator_target"):
-			valid_target = bool(level_root.is_valid_predator_target(self, child))
+			valid_target = Global.to_bool(level_root.is_valid_predator_target(self, child))
 		else:
 			valid_target = str(child.get("type")) == quarry_type
 		if not valid_target:
@@ -254,12 +254,12 @@ func on_predator_harvest_success(harvest_type: String) -> void:
 func _try_harvest_target(target: Node) -> bool:
 	if not is_instance_valid(target):
 		return false
-	if bool(target.get("dead")):
+	if Global.to_bool(target.get("dead")):
 		return false
 	if not target.has_method("try_harvest_to_predator"):
 		return false
 	var harvest_type = str(target.get("type"))
-	if not bool(target.call("try_harvest_to_predator", self)):
+	if not Global.to_bool(target.call("try_harvest_to_predator", self)):
 		return false
 	_begin_escape_with_capture(harvest_type)
 	return true
@@ -270,7 +270,7 @@ func _try_capture_quarry() -> bool:
 		return false
 	if not is_instance_valid(the_quarry):
 		return false
-	if bool(the_quarry.get("dead")):
+	if Global.to_bool(the_quarry.get("dead")):
 		_clear_quarry_target()
 		return false
 	if global_position.distance_to(the_quarry.global_position) <= CAPTURE_DISTANCE:
@@ -290,12 +290,12 @@ func _physics_process(delta: float) -> void:
 	if quarry_found and is_instance_valid(the_quarry):
 		var level_root = _get_level_root()
 		if is_instance_valid(level_root) and level_root.has_method("is_valid_predator_target"):
-			if not bool(level_root.call("is_valid_predator_target", self, the_quarry)):
+			if not Global.to_bool(level_root.call("is_valid_predator_target", self, the_quarry)):
 				_clear_quarry_target()
 		if is_instance_valid(the_quarry) and not _is_target_forward(the_quarry):
 			_clear_quarry_target()
 
-	if not is_instance_valid(the_quarry) or bool(the_quarry.get("dead")):
+	if not is_instance_valid(the_quarry) or Global.to_bool(the_quarry.get("dead")):
 		_clear_quarry_target()
 
 	if (str(Global.mode) == "story" or str(Global.mode) == "challenge") and not caught and quarry_found and is_instance_valid(the_quarry) and _retarget_retry_cooldown <= 0.0:
@@ -331,7 +331,7 @@ func _on_area_entered(agent: Area2D) -> void:
 		return
 	var level_root = get_node_or_null("../..")
 	if is_instance_valid(level_root) and level_root.has_method("is_valid_predator_target"):
-		if not bool(level_root.is_valid_predator_target(self, agent)):
+		if not Global.to_bool(level_root.is_valid_predator_target(self, agent)):
 			return
 	if is_instance_valid(the_quarry) and agent != the_quarry:
 		return

@@ -85,6 +85,10 @@ var _desktop_drag_button: MouseButton = MOUSE_BUTTON_NONE
 var _touch_drag_id: int = -1
 var _touch_drag_last := Vector2.ZERO
 var _camera_pan_suppressed_until_msec := 0
+var _camera_smoothing_speed_base := DEFAULT_CAMERA_SMOOTHING_SPEED
+var _camera_pan_selection_cleared := false
+var _keyboard_camera_pan_active := false
+var _external_camera_pan_until_msec := 0
 var _drag_hint_visible := false
 var _drag_hint_coord := Vector2i(-1, -1)
 var _drag_hint_secondary_visible := false
@@ -106,6 +110,7 @@ var _permanent_revealed_tiles: PackedByteArray = PackedByteArray()
 
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	if str(Global.mode) == "story":
 		columns = STORY_WORLD_COLUMNS
 		rows = STORY_WORLD_ROWS
@@ -117,6 +122,7 @@ func _ready() -> void:
 	_start_soil_tick()
 	_start_fog_tick()
 	_ensure_camera_pan_actions()
+	_connect_gameplay_speed_signal()
 	_setup_camera()
 	if get_viewport().has_signal("size_changed"):
 		get_viewport().size_changed.connect(_on_viewport_size_changed)
@@ -190,7 +196,7 @@ func is_tile_occupied_cached(coord: Vector2i, ignore_agent: Variant = null) -> b
 	for agent in occupants:
 		if not is_instance_valid(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if is_instance_valid(ignore_agent) and agent == ignore_agent:
 			cleaned.append(agent)
@@ -216,7 +222,7 @@ func get_tile_occupants_cached(coord: Vector2i, ignore_agent: Variant = null) ->
 	for agent in occupants:
 		if not is_instance_valid(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if str(agent.get("type")) == "cloud":
 			continue
@@ -241,7 +247,7 @@ func get_trade_hub_occupants_cached(coord: Vector2i, ignore_agent: Variant = nul
 	for agent in occupants:
 		if not is_instance_valid(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if is_instance_valid(ignore_agent) and agent == ignore_agent:
 			continue
@@ -337,7 +343,7 @@ func rebuild_occupancy_cache(level_root: Node, agents_root: Node) -> void:
 	for agent in agents_root.get_children():
 		if not is_instance_valid(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if str(agent.get("type")) == "cloud":
 			continue
@@ -611,6 +617,13 @@ func _clear_selection_for_camera_move() -> void:
 	LevelHelpersRef.suppress_hover_focus_until_pointer_moves(level_root)
 
 
+func _clear_selection_once_for_camera_move() -> void:
+	if _camera_pan_selection_cleared:
+		return
+	_clear_selection_for_camera_move()
+	_camera_pan_selection_cleared = true
+
+
 func _is_mouse_wheel_button(button_index: MouseButton) -> bool:
 	return (
 		button_index == MOUSE_BUTTON_WHEEL_UP
@@ -664,8 +677,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			if event.pressed and _touch_drag_id == -1 and not _is_pointer_over_ui(event.position):
 				_touch_drag_id = event.index
 				_touch_drag_last = event.position
+				_camera_pan_selection_cleared = false
 			elif not event.pressed and event.index == _touch_drag_id:
 				_touch_drag_id = -1
+				_camera_pan_selection_cleared = false
 		if event is InputEventScreenDrag and event.index == _touch_drag_id and not Global.is_dragging:
 			var delta = event.position - _touch_drag_last
 			_touch_drag_last = event.position
@@ -677,10 +692,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			_pan_camera_by_screen_delta(event.delta * pan_gesture_scale)
 
 	if event is InputEventMouseMotion:
-		if _desktop_dragging and not Global.is_dragging:
-			var delta = event.position - _desktop_drag_last
-			_desktop_drag_last = event.position
-			_pan_camera_by_screen_delta(delta)
+		if _desktop_dragging:
+			if Global.is_dragging:
+				_desktop_drag_last = event.position
+			else:
+				var delta = event.position - _desktop_drag_last
+				_desktop_drag_last = event.position
+				_pan_camera_by_screen_delta(delta)
 		if debug_overlay_enabled or debug_edit_enabled:
 			_update_debug_label()
 
@@ -696,12 +714,30 @@ func _process(delta: float) -> void:
 		if fade_progress >= 1.0:
 			clear_drag_tile_hint()
 			return
-	var followed = _follow_active_agent(delta)
-	if not followed and _should_keyboard_pan():
+	var camera_delta := _get_camera_unscaled_delta(delta)
+	if _desktop_dragging or _touch_drag_id != -1:
+		if _keyboard_camera_pan_active:
+			_keyboard_camera_pan_active = false
+		if debug_overlay_enabled or debug_edit_enabled:
+			_update_debug_label()
+		return
+	if _should_keyboard_pan():
 		var pan_dir = _get_camera_pan_vector()
 		if pan_dir != Vector2.ZERO:
-			camera.global_position += _screen_delta_to_world_delta(pan_dir.normalized() * camera_pan_speed * delta)
+			if not _keyboard_camera_pan_active:
+				_keyboard_camera_pan_active = true
+			_clear_selection_once_for_camera_move()
+			camera.global_position += _screen_delta_to_world_delta(pan_dir.normalized() * camera_pan_speed * camera_delta)
 			_clamp_camera()
+		else:
+			if _keyboard_camera_pan_active:
+				_keyboard_camera_pan_active = false
+			_camera_pan_selection_cleared = false
+			_follow_active_agent(camera_delta)
+	else:
+		if _keyboard_camera_pan_active:
+			_keyboard_camera_pan_active = false
+		_follow_active_agent(camera_delta)
 	if debug_overlay_enabled or debug_edit_enabled:
 		_update_debug_label()
 
@@ -711,6 +747,7 @@ func _start_soil_tick() -> void:
 		_soil_tick_timer.stop()
 		_soil_tick_timer.queue_free()
 	_soil_tick_timer = Timer.new()
+	_soil_tick_timer.process_mode = Node.PROCESS_MODE_PAUSABLE
 	_soil_tick_timer.one_shot = false
 	_soil_tick_timer.autostart = true
 	_soil_tick_timer.wait_time = maxf(soil_tick_seconds, 0.1)
@@ -723,6 +760,7 @@ func _start_fog_tick() -> void:
 		_fog_tick_timer.stop()
 		_fog_tick_timer.queue_free()
 	_fog_tick_timer = Timer.new()
+	_fog_tick_timer.process_mode = Node.PROCESS_MODE_PAUSABLE
 	_fog_tick_timer.one_shot = false
 	_fog_tick_timer.autostart = true
 	_fog_tick_timer.wait_time = STORY_FOG_TICK_SECONDS
@@ -760,7 +798,7 @@ func _refresh_story_fog_map() -> void:
 		for agent in agents_root.get_children():
 			if not is_instance_valid(agent):
 				continue
-			if bool(agent.get("dead")):
+			if Global.to_bool(agent.get("dead")):
 				continue
 			if str(agent.get("type")) != "myco":
 				continue
@@ -778,7 +816,7 @@ func _refresh_story_fog_map() -> void:
 func _is_story_hidden_village_tile(coord: Vector2i) -> bool:
 	if str(Global.mode) != "story":
 		return false
-	if bool(Global.village_revealed):
+	if Global.to_bool(Global.village_revealed):
 		return false
 	return STORY_HIDDEN_VILLAGE_RECT.has_point(coord)
 
@@ -944,12 +982,12 @@ func _get_agents_root() -> Node:
 func _is_live_agent_for_soil(agent: Node) -> bool:
 	if not is_instance_valid(agent):
 		return false
-	if bool(agent.get("dead")):
+	if Global.to_bool(agent.get("dead")):
 		return false
 	if str(agent.get("type")) == "cloud":
 		return false
 	# Village runtime actors (people, village baskets, bank) must never drive soil updates.
-	if bool(agent.get_meta("story_village_actor", false)):
+	if Global.to_bool(agent.get_meta("story_village_actor", false)):
 		return false
 	return true
 
@@ -965,7 +1003,7 @@ func _get_agent_occupied_tiles_for_soil(agent: Node) -> Array:
 
 
 func _get_tree_occupied_tiles_for_soil(agent: Node) -> Array:
-	if not bool(Global.social_mode):
+	if not Global.to_bool(Global.social_mode):
 		var base_coord = world_to_tile(agent.global_position)
 		if not in_bounds(base_coord):
 			return []
@@ -1242,7 +1280,7 @@ func _get_gameplay_baseline_center() -> Vector2:
 		var story_x = clampi(STORY_START_TILE.x, 0, max(columns - 1, 0))
 		var story_y = clampi(STORY_START_TILE.y, 0, max(rows - 1, 0))
 		return Vector2(float(story_x), float(story_y))
-	if Global.has_method("is_challenge_dual_village_mode") and bool(Global.is_challenge_dual_village_mode()):
+	if Global.has_method("is_challenge_dual_village_mode") and Global.to_bool(Global.is_challenge_dual_village_mode()):
 		var start_x = floori(columns * 0.5) - CHALLENGE_LAYOUT_CENTER_OFFSET_FROM_START_X
 		start_x = clampi(start_x, 0, max(columns - 1, 0))
 		var start_y = clampi(STORY_START_TILE.y, 0, max(rows - 1, 0))
@@ -1253,14 +1291,14 @@ func _get_gameplay_baseline_center() -> Vector2:
 func _uses_village_cobble() -> bool:
 	if str(Global.mode) == "story":
 		return true
-	if Global.has_method("is_challenge_dual_village_mode") and bool(Global.is_challenge_dual_village_mode()):
+	if Global.has_method("is_challenge_dual_village_mode") and Global.to_bool(Global.is_challenge_dual_village_mode()):
 		return true
 	return false
 
 
 func _get_runtime_village_cobble_rect() -> Rect2i:
 	var rect = STORY_VILLAGE_RECT
-	if Global.has_method("is_challenge_dual_village_mode") and bool(Global.is_challenge_dual_village_mode()):
+	if Global.has_method("is_challenge_dual_village_mode") and Global.to_bool(Global.is_challenge_dual_village_mode()):
 		var start_x = floori(columns * 0.5) - CHALLENGE_LAYOUT_CENTER_OFFSET_FROM_START_X
 		start_x = clampi(start_x, 0, max(columns - 1, 0))
 		rect.position.x = start_x + CHALLENGE_VILLAGE_OFFSET_RIGHT_TILES
@@ -1301,8 +1339,8 @@ func _stage_color(stage: int) -> Color:
 
 func _draw_stage_detail(rect: Rect2, stage: int) -> void:
 	if stage == STAGE_DRY_COMPACTED:
-		draw_line(rect.position + Vector2(6, 8), rect.position + rect.size - Vector2(6, 8), Color(0.45, 0.35, 0.26, 0.65), 1.4)
-		draw_line(rect.position + Vector2(14, rect.size.y - 9), rect.position + Vector2(rect.size.x - 12, 9), Color(0.47, 0.37, 0.27, 0.5), 1.0)
+		var dry_line_color := Color(0.45, 0.35, 0.26, 0.62)
+		_draw_desert_hump_detail(rect, dry_line_color)
 	elif stage == STAGE_RECOVERING:
 		draw_circle(rect.position + rect.size * 0.5, tile_size * 0.08, Color(0.63, 0.67, 0.44, 0.5))
 	elif stage == STAGE_SEMI_HEALTHY:
@@ -1310,6 +1348,20 @@ func _draw_stage_detail(rect: Rect2, stage: int) -> void:
 		draw_circle(rect.position + rect.size * 0.67, tile_size * 0.07, Color(0.60, 0.74, 0.55, 0.45))
 	else:
 		draw_circle(rect.position + rect.size * 0.5, tile_size * 0.12, Color(0.64, 0.84, 0.66, 0.45))
+
+
+func _draw_desert_hump_detail(rect: Rect2, color: Color) -> void:
+	var bottom_left := rect.position + Vector2(tile_size * 0.18, tile_size * 0.64)
+	var bottom_peak := rect.position + Vector2(tile_size * 0.50, tile_size * 0.58)
+	var bottom_right := rect.position + Vector2(tile_size * 0.82, tile_size * 0.64)
+	draw_line(bottom_left, bottom_peak, color, 1.0, true)
+	draw_line(bottom_peak, bottom_right, color, 1.0, true)
+
+	var top_left := rect.position + Vector2(tile_size * 0.48, tile_size * 0.40)
+	var top_peak := rect.position + Vector2(tile_size * 0.63, tile_size * 0.35)
+	var top_right := rect.position + Vector2(tile_size * 0.78, tile_size * 0.40)
+	draw_line(top_left, top_peak, color, 1.0, true)
+	draw_line(top_peak, top_right, color, 1.0, true)
 
 
 func _draw_cobble_tile(rect: Rect2, coord: Vector2i) -> void:
@@ -1342,11 +1394,14 @@ func _draw_cobble_tile(rect: Rect2, coord: Vector2i) -> void:
 
 func _setup_camera() -> void:
 	camera.enabled = true
+	camera.process_callback = Camera2D.CAMERA2D_PROCESS_IDLE
 	camera.position_smoothing_enabled = true
-	camera.position_smoothing_speed = DEFAULT_CAMERA_SMOOTHING_SPEED
+	_camera_smoothing_speed_base = DEFAULT_CAMERA_SMOOTHING_SPEED
+	_apply_camera_smoothing_speed()
 	camera.zoom = _get_target_world_zoom()
 	camera.global_position = get_world_center()
 	_clamp_camera()
+	camera.reset_smoothing()
 
 
 func _get_target_world_zoom() -> Vector2:
@@ -1362,6 +1417,40 @@ func _get_safe_camera_zoom() -> Vector2:
 func _screen_delta_to_world_delta(delta: Vector2) -> Vector2:
 	var zoom := _get_safe_camera_zoom()
 	return Vector2(delta.x / zoom.x, delta.y / zoom.y)
+
+
+func _get_camera_unscaled_delta(fallback_delta: float) -> float:
+	var speed_multiplier := _get_gameplay_speed_multiplier()
+	var elapsed := maxf(fallback_delta / speed_multiplier, 0.0)
+	return minf(elapsed, 0.05)
+
+
+func _get_gameplay_speed_multiplier() -> float:
+	if Global.has_method("get_gameplay_speed_multiplier"):
+		return maxf(float(Global.get_gameplay_speed_multiplier()), 0.001)
+	return maxf(float(Engine.time_scale), 0.001)
+
+
+func _get_camera_smoothing_speed_adjusted() -> float:
+	return maxf(_camera_smoothing_speed_base, 0.1) / _get_gameplay_speed_multiplier()
+
+
+func _apply_camera_smoothing_speed() -> void:
+	if not is_instance_valid(camera):
+		return
+	camera.position_smoothing_speed = _get_camera_smoothing_speed_adjusted()
+
+
+func _connect_gameplay_speed_signal() -> void:
+	if not Global.has_signal("gameplay_speed_changed"):
+		return
+	var callback := Callable(self, "_on_gameplay_speed_changed")
+	if not Global.is_connected("gameplay_speed_changed", callback):
+		Global.connect("gameplay_speed_changed", callback)
+
+
+func _on_gameplay_speed_changed(_multiplier: float, _label: String) -> void:
+	_apply_camera_smoothing_speed()
 
 
 func _get_visible_world_size() -> Vector2:
@@ -1397,11 +1486,13 @@ func is_world_zoom_enabled() -> bool:
 func set_camera_smoothing_speed(speed: float) -> void:
 	if not is_instance_valid(camera):
 		return
-	camera.position_smoothing_speed = maxf(speed, 0.1)
+	_camera_smoothing_speed_base = maxf(speed, 0.1)
+	_apply_camera_smoothing_speed()
 
 
 func reset_camera_smoothing_speed() -> void:
-	set_camera_smoothing_speed(DEFAULT_CAMERA_SMOOTHING_SPEED)
+	_camera_smoothing_speed_base = DEFAULT_CAMERA_SMOOTHING_SPEED
+	_apply_camera_smoothing_speed()
 
 
 func set_camera_world_center(world_pos: Vector2, immediate: bool = false) -> void:
@@ -1411,33 +1502,41 @@ func set_camera_world_center(world_pos: Vector2, immediate: bool = false) -> voi
 	_clamp_camera()
 	if immediate:
 		camera.reset_smoothing()
+	else:
+		_external_camera_pan_until_msec = Time.get_ticks_msec() + 120
 
 
 func _on_viewport_size_changed() -> void:
 	_clamp_camera()
 
 
-func _clamp_camera() -> void:
+func _get_clamped_camera_position(candidate: Vector2) -> Vector2:
 	var rect = get_world_rect()
 	var half = _get_visible_world_size() * 0.5
 	var min_x = rect.position.x + half.x
 	var max_x = rect.position.x + rect.size.x - half.x
 	var min_y = rect.position.y + half.y
 	var max_y = rect.position.y + rect.size.y - half.y
+	var clamped := candidate
 
 	if min_x > max_x:
-		camera.global_position.x = rect.position.x + rect.size.x * 0.5
+		clamped.x = rect.position.x + rect.size.x * 0.5
 	else:
-		camera.global_position.x = clampf(camera.global_position.x, min_x, max_x)
+		clamped.x = clampf(clamped.x, min_x, max_x)
 	if min_y > max_y:
-		camera.global_position.y = rect.position.y + rect.size.y * 0.5
+		clamped.y = rect.position.y + rect.size.y * 0.5
 	else:
-		camera.global_position.y = clampf(camera.global_position.y, min_y, max_y)
+		clamped.y = clampf(clamped.y, min_y, max_y)
+	return clamped
+
+
+func _clamp_camera() -> void:
+	camera.global_position = _get_clamped_camera_position(camera.global_position)
 
 
 func _pan_camera_by_screen_delta(delta: Vector2) -> void:
 	if delta.length_squared() > 0.001:
-		_clear_selection_for_camera_move()
+		_clear_selection_once_for_camera_move()
 	camera.global_position -= _screen_delta_to_world_delta(delta)
 	_clamp_camera()
 
@@ -1446,7 +1545,7 @@ func _follow_active_agent(delta: float) -> bool:
 	var active_agent = Global.active_agent
 	if not is_instance_valid(active_agent):
 		return false
-	if bool(active_agent.get("dead")):
+	if Global.to_bool(active_agent.get("dead")):
 		return false
 	if not _is_active_agent_user_moving(active_agent):
 		return false
@@ -1504,12 +1603,16 @@ func _get_camera_pan_vector() -> Vector2:
 	return pan.limit_length()
 
 
+func is_camera_user_panning() -> bool:
+	return _desktop_dragging or _touch_drag_id != -1 or _keyboard_camera_pan_active or Time.get_ticks_msec() < _external_camera_pan_until_msec
+
+
 func _ensure_camera_pan_actions() -> void:
 	var key_map = {
-		CAM_LEFT_ACTION: [KEY_A],
-		CAM_RIGHT_ACTION: [KEY_D],
-		CAM_UP_ACTION: [KEY_W],
-		CAM_DOWN_ACTION: [KEY_S]
+		CAM_LEFT_ACTION: [KEY_A, KEY_LEFT],
+		CAM_RIGHT_ACTION: [KEY_D, KEY_RIGHT],
+		CAM_UP_ACTION: [KEY_W, KEY_UP],
+		CAM_DOWN_ACTION: [KEY_S, KEY_DOWN]
 	}
 	for action in key_map.keys():
 		if not InputMap.has_action(action):
@@ -1543,12 +1646,14 @@ func _try_start_desktop_pan(button: MouseButton, screen_pos: Vector2) -> void:
 	_desktop_dragging = true
 	_desktop_drag_button = button
 	_desktop_drag_last = screen_pos
+	_camera_pan_selection_cleared = false
 
 
 func _stop_desktop_pan(button: MouseButton) -> void:
 	if _desktop_dragging and _desktop_drag_button == button:
 		_desktop_dragging = false
 		_desktop_drag_button = MOUSE_BUTTON_NONE
+		_camera_pan_selection_cleared = false
 
 
 func suppress_camera_pan_input(duration_sec: float = 0.30) -> void:
@@ -1560,6 +1665,8 @@ func _cancel_camera_pan_drag_state() -> void:
 	_desktop_dragging = false
 	_desktop_drag_button = MOUSE_BUTTON_NONE
 	_touch_drag_id = -1
+	_keyboard_camera_pan_active = false
+	_camera_pan_selection_cleared = false
 
 
 func _is_camera_pan_input_suppressed() -> bool:

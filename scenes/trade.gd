@@ -30,6 +30,7 @@ var village_ephemeral_trade_visual := false
 var _village_trail_line: Line2D = null
 var _village_trail_finalized := false
 var _village_trail_start := Vector2.ZERO
+var _delivered := false
 
 const DROP_FADE_SECONDS := 0.12
 const TRADE_REFERENCE_FPS := 60.0
@@ -40,7 +41,16 @@ const AGGREGATE_LABEL_COLOR := Color(1.0, 1.0, 1.0, 0.95)
 const VILLAGE_TRAIL_POINT_EPSILON := 0.5
 
 
+func _ready() -> void:
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	var sprite: Node = get_node_or_null("Sprite2D")
+	if is_instance_valid(sprite) and sprite is CanvasItem:
+		sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	_set_physics_delivery_enabled(false)
+
+
 func set_variables(path_dict) -> void:
+	_delivered = false
 	_reset_village_trail_state()
 	start_agent = path_dict.get("from_agent")
 	end_agent = path_dict.get("to_agent")
@@ -56,9 +66,9 @@ func set_variables(path_dict) -> void:
 	created_at_msec = int(path_dict.get("created_at_msec", 0))
 	if created_at_msec <= 0:
 		created_at_msec = Time.get_ticks_msec()
-	liquidity_cycle_trade = bool(path_dict.get("liquidity_cycle_trade", false))
+	liquidity_cycle_trade = Global.to_bool(path_dict.get("liquidity_cycle_trade", false))
 	liquidity_cycle_origin_id = int(path_dict.get("liquidity_cycle_origin_id", 0))
-	village_ephemeral_trade_visual = bool(path_dict.get("village_ephemeral_trade_visual", false))
+	village_ephemeral_trade_visual = Global.to_bool(path_dict.get("village_ephemeral_trade_visual", false))
 	position = start_agent.global_position
 	_village_trail_start = global_position
 	_refresh_trade_amount_visual()
@@ -72,15 +82,12 @@ func set_pool_owner(owner: Node) -> void:
 func activate_trade(path_dict: Dictionary) -> void:
 	set_process(true)
 	visible = true
+	_delivered = false
 	_dropping = false
 	_drop_elapsed = 0.0
 	_reset_village_trail_state()
 	modulate = Color.WHITE
-	var shape = get_node_or_null("CollisionShape2D")
-	if is_instance_valid(shape):
-		shape.set_deferred("disabled", false)
-	set_deferred("monitorable", true)
-	set_deferred("monitoring", true)
+	_set_physics_delivery_enabled(false)
 	set_variables(path_dict)
 
 
@@ -152,22 +159,41 @@ func finish_trade() -> void:
 	_despawn()
 
 
+func _set_physics_delivery_enabled(enabled: bool) -> void:
+	set_deferred("monitorable", enabled)
+	set_deferred("monitoring", enabled)
+	var shape = get_node_or_null("CollisionShape2D")
+	if is_instance_valid(shape):
+		shape.set_deferred("disabled", not enabled)
+
+
+func _deliver_to_endpoint() -> void:
+	if _delivered:
+		return
+	_delivered = true
+	_update_village_trade_trail()
+	if is_instance_valid(end_agent) and end_agent.has_method("_on_area_entered"):
+		end_agent.call("_on_area_entered", self)
+	else:
+		finish_trade()
+
+
 func _is_endpoint_locked(agent: Variant) -> bool:
 	if not is_instance_valid(agent):
 		return false
-	if bool(agent.get("dead")):
+	if Global.to_bool(agent.get("dead")):
 		return false
 	if agent.has_method("is_trade_locked_by_user_move"):
-		return bool(agent.call("is_trade_locked_by_user_move"))
+		return Global.to_bool(agent.call("is_trade_locked_by_user_move"))
 	return false
 
 
 func _is_village_trade_endpoint(agent: Variant) -> bool:
-	return is_instance_valid(agent) and bool(agent.get_meta("story_village_actor", false))
+	return is_instance_valid(agent) and Global.to_bool(agent.get_meta("story_village_actor", false))
 
 
 func _should_pause_for_village_endpoint_lock() -> bool:
-	if not bool(liquidity_cycle_trade) and not bool(village_ephemeral_trade_visual):
+	if not Global.to_bool(liquidity_cycle_trade) and not Global.to_bool(village_ephemeral_trade_visual):
 		return false
 	return _is_village_trade_endpoint(start_agent) or _is_village_trade_endpoint(end_agent)
 
@@ -177,11 +203,7 @@ func _begin_drop() -> void:
 		return
 	_dropping = true
 	_drop_elapsed = 0.0
-	set_deferred("monitoring", false)
-	set_deferred("monitorable", false)
-	var shape = get_node_or_null("CollisionShape2D")
-	if is_instance_valid(shape):
-		shape.set_deferred("disabled", true)
+	_set_physics_delivery_enabled(false)
 
 
 func _advance_drop(delta: float) -> void:
@@ -259,13 +281,15 @@ func _step_axis_toward(current: float, target: float, max_step: float) -> float:
 
 
 func _process(delta: float) -> void:
+	if _delivered:
+		return
 	if not is_instance_valid(end_agent):
 		_despawn()
 		return
 	if not is_instance_valid(start_agent):
 		_despawn()
 		return
-	if bool(end_agent.get("dead")) or bool(start_agent.get("dead")):
+	if Global.to_bool(end_agent.get("dead")) or Global.to_bool(start_agent.get("dead")):
 		_despawn()
 		return
 
@@ -297,6 +321,9 @@ func _process(delta: float) -> void:
 
 	position = new_pos
 	_update_village_trade_trail()
+	if global_position.distance_squared_to(end_agent.global_position) <= TRADE_AXIS_EPSILON * TRADE_AXIS_EPSILON:
+		_deliver_to_endpoint()
+		return
 
 	var world_rect = Global.get_world_rect(self)
 	if not world_rect.has_point(position):

@@ -57,10 +57,10 @@ static func _is_priority_dirty_agent(agent: Variant) -> bool:
 	if is_instance_valid(Global.active_agent) and agent == Global.active_agent:
 		return true
 	var dragging_variant = agent.get("is_dragging")
-	if typeof(dragging_variant) == TYPE_BOOL and bool(dragging_variant):
+	if typeof(dragging_variant) == TYPE_BOOL and Global.to_bool(dragging_variant):
 		return true
 	var keyboard_variant = agent.get("_keyboard_moving")
-	return typeof(keyboard_variant) == TYPE_BOOL and bool(keyboard_variant)
+	return typeof(keyboard_variant) == TYPE_BOOL and Global.to_bool(keyboard_variant)
 
 
 static func _take_dirty_agents(dirty_store: Dictionary, max_count: int, skip_keys: Dictionary = {}) -> Array:
@@ -78,7 +78,7 @@ static func _take_dirty_agents(dirty_store: Dictionary, max_count: int, skip_key
 			if not priority_pass and _is_priority_dirty_agent(agent):
 				continue
 			processed_keys.append(key)
-			if is_instance_valid(agent) and not bool(agent.get("dead")):
+			if is_instance_valid(agent) and not Global.to_bool(agent.get("dead")):
 				agents.append(agent)
 	for key in processed_keys:
 		dirty_store.erase(key)
@@ -92,7 +92,7 @@ static func _count_live_agents(agents_root: Node) -> int:
 	for agent in agents_root.get_children():
 		if not is_instance_valid(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if str(agent.get("type")) == "cloud":
 			continue

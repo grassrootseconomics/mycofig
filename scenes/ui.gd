@@ -27,10 +27,7 @@ const AUTO_SPAWN_SWEEP_STEPS := 48
 const PARENT_BOUNDED_AUTO_ATTEMPTS := 96
 const PARENT_BOUNDED_MAX_TILES := 4
 const PARENT_BOUNDED_TYPES := {
-	"myco": true,
-	"bean": true,
-	"squash": true,
-	"maize": true
+	"myco": true
 }
 const INVENTORY_SLOT_ITEMS := ["bean", "squash", "maize", "tree", "myco", "basket"]
 const INVENTORY_BASKET_SLOT_INDEX := 5
@@ -66,6 +63,7 @@ const STORY_TUTORIAL_CONTINUE_BUTTON_SIZE := Vector2(132, 40)
 const STORY_TUTORIAL_CHALLENGE_BUTTON_SIZE := Vector2(220, 42)
 const STORY_TUTORIAL_CONTINUE_TEXT := "Let's go!"
 const STORY_TUTORIAL_CHALLENGE_TEXT := "Give me a Challenge!"
+const STORY_TUTORIAL_CONTINUE_GARDENING_TEXT := "Continue Gardening"
 const CHALLENGE_LOSS_CONTINUE_TEXT := "View My Score"
 const STORY_FACTS_BUTTON_SIZE := Vector2(196, 42)
 const STORY_FACTS_PANEL_SIZE := Vector2(640, 430)
@@ -166,10 +164,13 @@ var _slot_lock_glyphs: Dictionary = {}
 var _slot_selection_frames: Dictionary = {}
 var _slot_sparkle_rings: Dictionary = {}
 var _slot_phase5_sparkle_stars: Dictionary = {}
-var _back_confirm_dialog: ConfirmationDialog = null
+var _back_confirm_panel: Panel = null
+var _back_confirm_back_button: Button = null
+var _back_confirm_stop_button: Button = null
 var _minimap_drag_locked := false
 var _tutorial_toggle_button: Button = null
 var _tutorial_continue_button: Button = null
+var _tutorial_continue_gardening_button: Button = null
 var _tutorial_collapsed := false
 var _tutorial_last_visible := false
 var _tutorial_last_text := ""
@@ -238,15 +239,19 @@ var _story_facts_seen_phases: Dictionary = {}
 var _story_facts_current_phase := 0
 var _story_facts_sparkle_elapsed := 0.0
 var _story_facts_sparkle_spawn_elapsed := STORY_FACTS_SPARKLE_INTERVAL
-var _challenge_loss_dialog: AcceptDialog = null
+var _challenge_loss_panel: Panel = null
+var _challenge_loss_label: Label = null
+var _challenge_loss_continue_button: Button = null
 var _last_rank_key := -1
 var _rank_flash_tween: Tween = null
 var _pause_container_ref: MarginContainer = null
 var _quit_container_ref: MarginContainer = null
 var _pause_button_ref: Button = null
+var _speed_button_ref: Button = null
 var _quit_button_ref: Button = null
 var _zoom_button_ref: Button = null
 var _ui_layout_elapsed := 0.0
+var _last_ui_unscaled_msec := 0
 var _ui_layout_dirty := true
 var _last_inventory_rect := Rect2(Vector2.ZERO, Vector2.ZERO)
 var _last_tutorial_visible := false
@@ -257,6 +262,8 @@ func _ready() -> void:
 	#$PalletContainer2/HBoxContainer/ActiveTexture.texture = Global.active_agent.sprite_texture
 	#resContainer = $MarginContainer/HBoxContainer/ResVBoxContainer
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	_last_ui_unscaled_msec = Time.get_ticks_msec()
+	Global.apply_gameplay_speed()
 	inventory_spawn_rng.randomize()
 	_ensure_drag_preview()
 	_cache_layout_nodes()
@@ -330,8 +337,11 @@ func _cache_layout_nodes() -> void:
 	_pause_container_ref = find_child("MarginCMarginContainer2ontainer", true, false) as MarginContainer
 	_quit_container_ref = find_child("QuitContainer", true, false) as MarginContainer
 	_pause_button_ref = find_child("PauseButton", true, false) as Button
+	_speed_button_ref = find_child("SpeedButton", true, false) as Button
 	_quit_button_ref = find_child("QuitButton", true, false) as Button
 	_zoom_button_ref = find_child("ZoomButton", true, false) as Button
+	_connect_gameplay_speed_signal()
+	_sync_speed_button_label()
 	_connect_world_zoom_signal()
 	_sync_zoom_button_label()
 	_ensure_story_facts_button()
@@ -382,6 +392,13 @@ func _get_pause_button() -> Button:
 	return _pause_button_ref
 
 
+func _get_speed_button() -> Button:
+	if is_instance_valid(_speed_button_ref):
+		return _speed_button_ref
+	_speed_button_ref = find_child("SpeedButton", true, false) as Button
+	return _speed_button_ref
+
+
 func _get_quit_button() -> Button:
 	if is_instance_valid(_quit_button_ref):
 		return _quit_button_ref
@@ -409,11 +426,26 @@ func _sync_zoom_button_label() -> void:
 	var zoom_button: Button = _get_zoom_button()
 	if not is_instance_valid(zoom_button):
 		return
-	var zoom_enabled := Global.world_zoom_enabled
+	var zoom_enabled: bool = Global.to_bool(Global.world_zoom_enabled)
 	var world = _get_world_foundation()
 	if is_instance_valid(world) and world.has_method("is_world_zoom_enabled"):
-		zoom_enabled = bool(world.call("is_world_zoom_enabled"))
+		zoom_enabled = Global.to_bool(world.call("is_world_zoom_enabled"))
 	zoom_button.text = "Zoom Out" if zoom_enabled else "Zoom In"
+
+
+func _connect_gameplay_speed_signal() -> void:
+	if not Global.has_signal("gameplay_speed_changed"):
+		return
+	var callback := Callable(self, "_on_gameplay_speed_changed")
+	if not Global.is_connected("gameplay_speed_changed", callback):
+		Global.connect("gameplay_speed_changed", callback)
+
+
+func _sync_speed_button_label() -> void:
+	var speed_button: Button = _get_speed_button()
+	if not is_instance_valid(speed_button):
+		return
+	speed_button.text = Global.get_gameplay_speed_label()
 
 
 func _embed_pause_quit_controls_next_to_minimap() -> void:
@@ -474,7 +506,7 @@ func _is_story_basket_slot_unlocked() -> bool:
 	if Global.mode == "story":
 		return int(Global.story_chapter_id) >= 5
 	if Global.has_method("is_challenge_dual_village_mode"):
-		return bool(Global.is_challenge_dual_village_mode())
+		return Global.to_bool(Global.is_challenge_dual_village_mode())
 	return false
 
 
@@ -668,6 +700,17 @@ func _make_story_instruction_button_style(bg_color: Color) -> StyleBoxFlat:
 	style.content_margin_top = 8
 	style.content_margin_bottom = 8
 	return style
+
+
+func _style_story_instruction_button(button: Button, normal_color: Color, hover_color: Color, pressed_color: Color) -> void:
+	if not is_instance_valid(button):
+		return
+	button.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+	button.add_theme_color_override("font_hover_color", Color(1, 1, 1, 1))
+	button.add_theme_color_override("font_pressed_color", Color(1, 1, 1, 1))
+	button.add_theme_stylebox_override("normal", _make_story_instruction_button_style(normal_color))
+	button.add_theme_stylebox_override("hover", _make_story_instruction_button_style(hover_color))
+	button.add_theme_stylebox_override("pressed", _make_story_instruction_button_style(pressed_color))
 
 
 func _make_story_facts_panel_style() -> StyleBoxFlat:
@@ -919,7 +962,7 @@ func _refresh_inventory_phase1_sparkle_visuals() -> void:
 		var item_count = int(Global.inventory.get(item_name, 0))
 		if item_count <= 0 and not _story_inventory_sparkle_ignore_counts:
 			continue
-		var show_phase1 = _story_phase1_sparkle_active and bool(_story_phase1_pending_types.get(item_name, false))
+		var show_phase1 = _story_phase1_sparkle_active and Global.to_bool(_story_phase1_pending_types.get(item_name, false))
 		var show_phase5_basket = _story_phase5_basket_sparkle_active and item_name == "basket"
 		if show_phase5_basket:
 			ring.add_theme_stylebox_override("panel", _make_inventory_phase5_basket_sparkle_ring_style())
@@ -986,7 +1029,7 @@ func set_story_inventory_sparkle_targets(phase1_active: bool, phase1_pending_typ
 	_story_inventory_sparkle_ignore_counts = ignore_counts
 	_story_phase1_pending_types.clear()
 	for key in phase1_pending_types.keys():
-		_story_phase1_pending_types[str(key)] = bool(phase1_pending_types[key])
+		_story_phase1_pending_types[str(key)] = Global.to_bool(phase1_pending_types[key])
 	if not _story_phase1_sparkle_active and not _story_phase5_basket_sparkle_active:
 		_story_phase1_sparkle_time = 0.0
 		_story_inventory_sparkle_ignore_counts = false
@@ -1007,7 +1050,7 @@ func _ensure_inventory_backplates() -> void:
 		if not is_instance_valid(icon):
 			continue
 		var existing_parent = icon.get_parent()
-		if existing_parent is Panel and bool(existing_parent.get_meta("inventory_backplate", false)):
+		if existing_parent is Panel and Global.to_bool(existing_parent.get_meta("inventory_backplate", false)):
 			_slot_backplates[icon] = existing_parent
 			_ensure_slot_sparkle_ring(icon, existing_parent)
 			_ensure_slot_phase5_sparkle_stars(icon, existing_parent)
@@ -1125,6 +1168,8 @@ func show_story_instruction(text_value: String, phase_id: int = 0) -> void:
 	_story_instruction_phase_id = phase_id
 	_sync_story_continue_button_text()
 	_apply_responsive_layout()
+	if is_instance_valid(_challenge_loss_panel):
+		_challenge_loss_panel.visible = false
 	if is_instance_valid(_tutorial_label):
 		_tutorial_label.text = text_value
 	if is_instance_valid(_tutorial_panel):
@@ -1144,7 +1189,7 @@ func show_challenge_loss_instruction(text_value: String) -> void:
 	_story_instruction_phase_id = 0
 	if is_instance_valid(_tutorial_panel):
 		_tutorial_panel.visible = false
-	_show_challenge_loss_dialog(text_value)
+	_show_challenge_loss_panel(text_value)
 	_sync_story_instruction_bar_demo_state()
 	_apply_tutorial_panel_state()
 	_update_story_instruction_arrows()
@@ -1578,7 +1623,7 @@ func _get_phase5_nontrading_villagers_arrow_target() -> Dictionary:
 			"pos": Vector2.ZERO
 		}
 	var result = level_root.call("get_story_phase5_nontrading_lower_villagers_center_world")
-	if typeof(result) != TYPE_DICTIONARY or not bool(result.get("ok", false)):
+	if typeof(result) != TYPE_DICTIONARY or not Global.to_bool(result.get("ok", false)):
 		return {
 			"ok": false,
 			"pos": Vector2.ZERO
@@ -1598,7 +1643,7 @@ func _get_phase5_intro_tuktuk_arrow_target() -> Dictionary:
 			"pos": Vector2.ZERO
 		}
 	var result = level_root.call("get_story_phase5_intro_tuktuk_world_position")
-	if typeof(result) != TYPE_DICTIONARY or not bool(result.get("ok", false)):
+	if typeof(result) != TYPE_DICTIONARY or not Global.to_bool(result.get("ok", false)):
 		return {
 			"ok": false,
 			"pos": Vector2.ZERO
@@ -1622,7 +1667,7 @@ func _update_story_instruction_arrows() -> void:
 	var label_rect = _tutorial_label.get_global_rect() if is_instance_valid(_tutorial_label) else panel_rect
 	if _story_instruction_phase_id == 2:
 		var target_result = _get_phase2_harvest_arrow_target()
-		if not bool(target_result.get("ok", false)):
+		if not Global.to_bool(target_result.get("ok", false)):
 			_set_all_story_arrows_visible(false)
 			return
 		var harvest_target = target_result.get("pos", Vector2.ZERO)
@@ -1633,7 +1678,7 @@ func _update_story_instruction_arrows() -> void:
 		return
 	if _story_instruction_phase_id == 3:
 		var minimap_result = _get_phase3_minimap_arrow_target()
-		if bool(minimap_result.get("ok", false)):
+		if Global.to_bool(minimap_result.get("ok", false)):
 			var minimap_target = minimap_result.get("pos", Vector2.ZERO)
 			var minimap_dir = (minimap_target - label_rect.get_center()).normalized()
 			var minimap_tip = minimap_target - minimap_dir * 28.0
@@ -1643,7 +1688,7 @@ func _update_story_instruction_arrows() -> void:
 		else:
 			_set_story_arrow_visible(0, false)
 		var bar_result = _get_phase3_resource_bar_arrow_target()
-		if bool(bar_result.get("ok", false)):
+		if Global.to_bool(bar_result.get("ok", false)):
 			var bar_target = bar_result.get("pos", Vector2.ZERO)
 			var bar_start = Vector2(label_rect.position.x - 14.0, label_rect.position.y + label_rect.size.y * 0.62)
 			var bar_control = (bar_start + bar_target) * 0.5 + Vector2(-96.0, -58.0)
@@ -1657,7 +1702,7 @@ func _update_story_instruction_arrows() -> void:
 		var basket_control = (basket_start + basket_target) * 0.5 + Vector2(96.0, 72.0)
 		_set_story_arrow_shape(0, basket_start, basket_control, basket_target)
 		var tuktuk_result = _get_phase5_intro_tuktuk_arrow_target()
-		if bool(tuktuk_result.get("ok", false)):
+		if Global.to_bool(tuktuk_result.get("ok", false)):
 			var tuktuk_target = tuktuk_result.get("pos", Vector2.ZERO)
 			var tuktuk_start = Vector2(label_rect.position.x + label_rect.size.x * 0.58, label_rect.position.y + label_rect.size.y * 0.78)
 			var tuktuk_control = (tuktuk_start + tuktuk_target) * 0.5 + Vector2(44.0, 76.0)
@@ -1871,6 +1916,8 @@ func _apply_runtime_layout(force: bool = false) -> void:
 	_layout_quit_container()
 	_layout_tutorial_container()
 	_layout_story_facts_panel()
+	_layout_challenge_loss_panel()
+	_layout_back_confirm_panel()
 	_position_tutorial_toggle()
 	_ui_layout_dirty = false
 
@@ -2029,6 +2076,7 @@ func _apply_responsive_layout() -> void:
 	var compact = _is_compact_ui()
 	var tiny = _is_tiny_ui()
 	var story_instructions = _is_guidance_instruction_mode()
+	var show_continue_gardening = _should_show_continue_gardening_button()
 	var inventory: MarginContainer = _inventory_panel
 	if is_instance_valid(inventory):
 		var margin_px = 10 if compact else 14
@@ -2062,19 +2110,24 @@ func _apply_responsive_layout() -> void:
 		minimap_row.add_theme_constant_override("separation", 12 if compact else 8)
 	var tutorial_label: Label = _tutorial_label
 	if is_instance_valid(tutorial_label):
+		var label_bottom_padding := 18.0
+		if story_instructions:
+			label_bottom_padding = 124.0 if show_continue_gardening else 66.0
 		tutorial_label.add_theme_font_size_override("font_size", 19 if tiny else (18 if compact else 17))
 		tutorial_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		tutorial_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		tutorial_label.offset_left = 24.0 if story_instructions else 16.0
 		tutorial_label.offset_top = 20.0 if story_instructions else 14.0
 		tutorial_label.offset_right = -24.0 if story_instructions else -18.0
-		tutorial_label.offset_bottom = -66.0 if story_instructions else -18.0
+		tutorial_label.offset_bottom = -label_bottom_padding
 	var max_expanded_width = STORY_TUTORIAL_PANEL_EXPANDED_SIZE.x if story_instructions else TUTORIAL_PANEL_EXPANDED_SIZE.x
 	var min_expanded_width = 300.0 if story_instructions else 248.0
 	var expanded_width = minf(max_expanded_width, maxf(safe_rect.size.x - _get_safe_edge_margin() * 2.0, min_expanded_width))
 	var expanded_height = 188.0 if tiny else (182.0 if compact else TUTORIAL_PANEL_EXPANDED_SIZE.y)
 	if story_instructions:
 		expanded_height = 246.0 if tiny else (262.0 if compact else STORY_TUTORIAL_PANEL_EXPANDED_SIZE.y)
+		if show_continue_gardening:
+			expanded_height += 64.0
 	_tutorial_expanded_size_base = Vector2(expanded_width, expanded_height)
 	_tutorial_expanded_size = _tutorial_expanded_size_base
 	_tutorial_collapsed_size = Vector2(52, 52) if compact else TUTORIAL_PANEL_COLLAPSED_SIZE
@@ -2099,19 +2152,50 @@ func _apply_responsive_layout() -> void:
 		_tutorial_continue_button.anchor_right = 0.5
 		_tutorial_continue_button.anchor_top = 1.0
 		_tutorial_continue_button.anchor_bottom = 1.0
-		_tutorial_continue_button.offset_left = -continue_size.x * 0.5
-		_tutorial_continue_button.offset_right = continue_size.x * 0.5
-		_tutorial_continue_button.offset_top = -continue_size.y - 12.0
-		_tutorial_continue_button.offset_bottom = -12.0
 		_tutorial_continue_button.add_theme_font_size_override("font_size", 18 if compact else 16)
+		var garden_size = Vector2(214, 48) if compact else Vector2(196, 44)
+		if tiny:
+			garden_size = Vector2(232, 50)
+		if is_instance_valid(_tutorial_continue_gardening_button):
+			_tutorial_continue_gardening_button.custom_minimum_size = garden_size
+			_tutorial_continue_gardening_button.size = garden_size
+			_tutorial_continue_gardening_button.anchor_left = 0.5
+			_tutorial_continue_gardening_button.anchor_right = 0.5
+			_tutorial_continue_gardening_button.anchor_top = 1.0
+			_tutorial_continue_gardening_button.anchor_bottom = 1.0
+			_tutorial_continue_gardening_button.add_theme_font_size_override("font_size", 18 if compact else 16)
+		var button_gap := 12.0
+		var buttons_fit_width: bool = garden_size.x + continue_size.x + button_gap + 32.0 <= expanded_width
+		if show_continue_gardening and is_instance_valid(_tutorial_continue_gardening_button) and buttons_fit_width:
+			var total_width = garden_size.x + continue_size.x + button_gap
+			var start_x = -total_width * 0.5
+			_tutorial_continue_gardening_button.offset_left = start_x
+			_tutorial_continue_gardening_button.offset_right = start_x + garden_size.x
+			_tutorial_continue_gardening_button.offset_top = -garden_size.y - 12.0
+			_tutorial_continue_gardening_button.offset_bottom = -12.0
+			_tutorial_continue_button.offset_left = start_x + garden_size.x + button_gap
+			_tutorial_continue_button.offset_right = start_x + total_width
+			_tutorial_continue_button.offset_top = -continue_size.y - 12.0
+			_tutorial_continue_button.offset_bottom = -12.0
+		else:
+			_tutorial_continue_button.offset_left = -continue_size.x * 0.5
+			_tutorial_continue_button.offset_right = continue_size.x * 0.5
+			_tutorial_continue_button.offset_top = -continue_size.y - 12.0
+			_tutorial_continue_button.offset_bottom = -12.0
+			if is_instance_valid(_tutorial_continue_gardening_button):
+				_tutorial_continue_gardening_button.offset_left = -garden_size.x * 0.5
+				_tutorial_continue_gardening_button.offset_right = garden_size.x * 0.5
+				_tutorial_continue_gardening_button.offset_top = -garden_size.y - continue_size.y - button_gap - 12.0
+				_tutorial_continue_gardening_button.offset_bottom = -continue_size.y - button_gap - 12.0
 	if is_instance_valid(_story_facts_button):
 		_story_facts_button.custom_minimum_size = Vector2(214, 48) if compact else STORY_FACTS_BUTTON_SIZE
 		_story_facts_button.add_theme_font_size_override("font_size", 18 if compact else 16)
 	var pause_button: Button = _get_pause_button()
+	var speed_button: Button = _get_speed_button()
 	var quit_button: Button = _get_quit_button()
 	var zoom_button: Button = _get_zoom_button()
 	var pause_size = SIDE_BUTTON_SIZE_TINY if tiny else (SIDE_BUTTON_SIZE_COMPACT if compact else SIDE_BUTTON_SIZE_DEFAULT)
-	for button in [pause_button, quit_button, zoom_button]:
+	for button in [pause_button, speed_button, quit_button, zoom_button]:
 		if not is_instance_valid(button):
 			continue
 		button.custom_minimum_size = pause_size
@@ -2148,14 +2232,25 @@ func refund_inventory_item(agent_name: String, amount: int = 1) -> void:
 
 
 
+func _get_ui_unscaled_delta(fallback_delta: float) -> float:
+	var now_msec := Time.get_ticks_msec()
+	if _last_ui_unscaled_msec <= 0:
+		_last_ui_unscaled_msec = now_msec
+		return fallback_delta
+	var elapsed := maxf(float(now_msec - _last_ui_unscaled_msec) / 1000.0, 0.0)
+	_last_ui_unscaled_msec = now_msec
+	return elapsed
+
+
 func _process(delta: float) -> void:
+	var ui_delta := _get_ui_unscaled_delta(delta)
 	_update_minimap_input_lock()
-	_update_inventory_phase1_sparkle_animation(delta)
-	_update_story_facts_button_sparkle(delta)
+	_update_inventory_phase1_sparkle_animation(ui_delta)
+	_update_story_facts_button_sparkle(ui_delta)
 	_update_selected_inventory_hover_hint()
 	_refresh_tutorial_panel_state()
-	_update_layout_pass(delta)
-	_update_story_phase3_direction_prompt(delta)
+	_update_layout_pass(ui_delta)
+	_update_story_phase3_direction_prompt(ui_delta)
 	_update_story_instruction_arrows()
 
 
@@ -2238,13 +2333,30 @@ func _ensure_tutorial_continue_button() -> void:
 		_tutorial_continue_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		_tutorial_continue_button.pressed.connect(_on_tutorial_continue_pressed)
 		tutorial.add_child(_tutorial_continue_button)
-	_tutorial_continue_button.add_theme_color_override("font_color", Color(1, 1, 1, 1))
-	_tutorial_continue_button.add_theme_color_override("font_hover_color", Color(1, 1, 1, 1))
-	_tutorial_continue_button.add_theme_color_override("font_pressed_color", Color(1, 1, 1, 1))
-	_tutorial_continue_button.add_theme_stylebox_override("normal", _make_story_instruction_button_style(Color(0.18, 0.45, 0.20, 0.96)))
-	_tutorial_continue_button.add_theme_stylebox_override("hover", _make_story_instruction_button_style(Color(0.24, 0.55, 0.24, 0.98)))
-	_tutorial_continue_button.add_theme_stylebox_override("pressed", _make_story_instruction_button_style(Color(0.12, 0.33, 0.15, 1.0)))
+	_style_story_instruction_button(
+		_tutorial_continue_button,
+		Color(0.18, 0.45, 0.20, 0.96),
+		Color(0.24, 0.55, 0.24, 0.98),
+		Color(0.12, 0.33, 0.15, 1.0)
+	)
 	_tutorial_continue_button.visible = false
+	if not is_instance_valid(_tutorial_continue_gardening_button):
+		_tutorial_continue_gardening_button = Button.new()
+		_tutorial_continue_gardening_button.name = "ContinueGardeningButton"
+		_tutorial_continue_gardening_button.text = STORY_TUTORIAL_CONTINUE_GARDENING_TEXT
+		_tutorial_continue_gardening_button.focus_mode = Control.FOCUS_NONE
+		_tutorial_continue_gardening_button.process_mode = Node.PROCESS_MODE_ALWAYS
+		_tutorial_continue_gardening_button.z_index = 40
+		_tutorial_continue_gardening_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		_tutorial_continue_gardening_button.pressed.connect(_on_tutorial_continue_gardening_pressed)
+		tutorial.add_child(_tutorial_continue_gardening_button)
+	_style_story_instruction_button(
+		_tutorial_continue_gardening_button,
+		Color(0.22, 0.45, 0.20, 0.96),
+		Color(0.28, 0.55, 0.24, 0.98),
+		Color(0.14, 0.34, 0.14, 1.0)
+	)
+	_tutorial_continue_gardening_button.visible = false
 	_request_layout_update()
 
 
@@ -2255,6 +2367,10 @@ func _sync_story_continue_button_text() -> void:
 		_tutorial_continue_button.text = CHALLENGE_LOSS_CONTINUE_TEXT
 		return
 	_tutorial_continue_button.text = STORY_TUTORIAL_CHALLENGE_TEXT if _story_instruction_phase_id == 6 else STORY_TUTORIAL_CONTINUE_TEXT
+
+
+func _should_show_continue_gardening_button() -> bool:
+	return _is_story_instruction_mode() and _story_instruction_phase_id == 6 and not _challenge_loss_instruction_active
 
 
 func _set_tutorial_collapsed(collapsed: bool) -> void:
@@ -2278,6 +2394,8 @@ func _apply_tutorial_panel_state() -> void:
 	if is_instance_valid(_tutorial_continue_button):
 		_sync_story_continue_button_text()
 		_tutorial_continue_button.visible = content_visible and _is_guidance_instruction_mode()
+	if is_instance_valid(_tutorial_continue_gardening_button):
+		_tutorial_continue_gardening_button.visible = content_visible and _should_show_continue_gardening_button()
 	if not _tutorial_collapsed:
 		_update_tutorial_expanded_size_for_text()
 	var target_size = _tutorial_collapsed_size if _tutorial_collapsed else _tutorial_expanded_size
@@ -2442,6 +2560,89 @@ func _layout_story_facts_panel() -> void:
 		_story_facts_label.size = label_area_size
 
 
+func _layout_back_confirm_panel() -> void:
+	if not is_instance_valid(_back_confirm_panel):
+		return
+	var safe_rect = _get_padded_safe_view_rect()
+	var compact = _is_compact_ui()
+	var tiny = _is_tiny_ui()
+	var stacked = tiny or safe_rect.size.x < 430.0
+	var outer_margin := 18.0 if compact else 20.0
+	var gap := 12.0 if compact else 14.0
+	var button_height := 56.0 if compact else 52.0
+	var panel_width = minf(560.0, maxf(safe_rect.size.x - 32.0, 300.0))
+	panel_width = minf(panel_width, safe_rect.size.x)
+	var panel_height = button_height + outer_margin * 2.0
+	if stacked:
+		panel_width = minf(360.0, safe_rect.size.x)
+		panel_height = button_height * 2.0 + gap + outer_margin * 2.0
+	var panel_size = Vector2(panel_width, panel_height)
+	_back_confirm_panel.custom_minimum_size = panel_size
+	_back_confirm_panel.size = panel_size
+	_back_confirm_panel.global_position = Vector2(
+		round(safe_rect.position.x + (safe_rect.size.x - panel_size.x) * 0.5),
+		round(safe_rect.position.y + (safe_rect.size.y - panel_size.y) * 0.5)
+	)
+
+	var button_width = panel_size.x - outer_margin * 2.0
+	if not stacked:
+		button_width = (panel_size.x - outer_margin * 2.0 - gap) * 0.5
+	var button_size = Vector2(button_width, button_height)
+	for button in [_back_confirm_back_button, _back_confirm_stop_button]:
+		if not is_instance_valid(button):
+			continue
+		button.custom_minimum_size = button_size
+		button.size = button_size
+		button.add_theme_font_size_override("font_size", 19 if compact else 17)
+	if is_instance_valid(_back_confirm_back_button):
+		_back_confirm_back_button.position = Vector2(outer_margin, outer_margin)
+	if is_instance_valid(_back_confirm_stop_button):
+		if stacked:
+			_back_confirm_stop_button.position = Vector2(outer_margin, outer_margin + button_height + gap)
+		else:
+			_back_confirm_stop_button.position = Vector2(outer_margin + button_width + gap, outer_margin)
+
+
+func _layout_challenge_loss_panel() -> void:
+	if not is_instance_valid(_challenge_loss_panel):
+		return
+	var safe_rect: Rect2 = _get_padded_safe_view_rect()
+	var compact: bool = _is_compact_ui()
+	var tiny: bool = _is_tiny_ui()
+	var outer_margin: float = 20.0 if compact else 22.0
+	var gap: float = 16.0 if compact else 18.0
+	var button_height: float = 56.0 if compact else 52.0
+	if tiny:
+		outer_margin = 18.0
+		gap = 14.0
+		button_height = 54.0
+	var panel_width: float = minf(560.0, maxf(safe_rect.size.x - 32.0, 300.0))
+	panel_width = minf(panel_width, safe_rect.size.x)
+	var panel_height: float = 196.0 if compact else 188.0
+	if tiny:
+		panel_height = 178.0
+	panel_height = minf(panel_height, safe_rect.size.y)
+	var panel_size: Vector2 = Vector2(panel_width, panel_height)
+	_challenge_loss_panel.custom_minimum_size = panel_size
+	_challenge_loss_panel.size = panel_size
+	_challenge_loss_panel.global_position = Vector2(
+		round(safe_rect.position.x + (safe_rect.size.x - panel_size.x) * 0.5),
+		round(safe_rect.position.y + (safe_rect.size.y - panel_size.y) * 0.5)
+	)
+	var content_width: float = panel_size.x - outer_margin * 2.0
+	var label_height: float = maxf(60.0, panel_size.y - outer_margin * 2.0 - gap - button_height)
+	if is_instance_valid(_challenge_loss_label):
+		_challenge_loss_label.position = Vector2(outer_margin, outer_margin)
+		_challenge_loss_label.size = Vector2(content_width, label_height)
+		_challenge_loss_label.add_theme_font_size_override("font_size", 24 if compact else 26)
+	if is_instance_valid(_challenge_loss_continue_button):
+		var button_size: Vector2 = Vector2(content_width, button_height)
+		_challenge_loss_continue_button.custom_minimum_size = button_size
+		_challenge_loss_continue_button.size = button_size
+		_challenge_loss_continue_button.position = Vector2(outer_margin, outer_margin + label_height + gap)
+		_challenge_loss_continue_button.add_theme_font_size_override("font_size", 20 if compact else 18)
+
+
 func _refresh_tutorial_panel_state() -> void:
 	var tutorial = _tutorial_panel
 	if not is_instance_valid(tutorial):
@@ -2499,6 +2700,16 @@ func _on_tutorial_continue_pressed() -> void:
 		_unlock_story_facts_button()
 	if is_instance_valid(level_root) and level_root.has_method("on_story_instruction_continue"):
 		level_root.call("on_story_instruction_continue", phase_id)
+
+
+func _on_tutorial_continue_gardening_pressed() -> void:
+	var phase_id = _story_instruction_phase_id
+	_suppress_minimap_input_handoff()
+	_set_tutorial_collapsed(true)
+	if _is_guidance_instruction_mode():
+		set_pause_state(false)
+	if _is_story_instruction_mode() and phase_id >= 1 and phase_id <= 6:
+		_unlock_story_facts_button()
 
 
 func _on_score_timer_timeout() -> void:
@@ -2561,7 +2772,7 @@ func _story_facts_should_sparkle() -> bool:
 		return false
 	if not is_instance_valid(_story_facts_button) or not _story_facts_button.visible:
 		return false
-	return not bool(_story_facts_seen_phases.get(_story_facts_current_phase, false))
+	return not Global.to_bool(_story_facts_seen_phases.get(_story_facts_current_phase, false))
 
 
 func _sync_story_facts_button_state() -> void:
@@ -2917,98 +3128,95 @@ func _end_inventory_drag() -> void:
 		drag_preview_outline.clear_points()
 
 
-func _style_quit_like_dialog_label(dialog: AcceptDialog) -> void:
-	if not is_instance_valid(dialog):
+func _ensure_challenge_loss_panel() -> void:
+	if is_instance_valid(_challenge_loss_panel):
 		return
-	if not dialog.has_method("get_label"):
-		return
-	var dialog_label = dialog.call("get_label")
-	if dialog_label is Label:
-		var label_node: Label = dialog_label
-		label_node.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		label_node.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		label_node.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		label_node.add_theme_font_size_override("font_size", 22 if _is_compact_ui() else 19)
-		label_node.add_theme_color_override("font_color", Color(1, 1, 1, 0.97))
+	_challenge_loss_panel = Panel.new()
+	_challenge_loss_panel.name = "ChallengeLossPanel"
+	_challenge_loss_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	_challenge_loss_panel.z_index = 195
+	_challenge_loss_panel.visible = false
+	_challenge_loss_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_challenge_loss_panel.add_theme_stylebox_override("panel", _make_story_facts_panel_style())
+	add_child(_challenge_loss_panel)
+
+	_challenge_loss_label = Label.new()
+	_challenge_loss_label.name = "ChallengeLossLabel"
+	_challenge_loss_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_challenge_loss_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_challenge_loss_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_challenge_loss_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.98))
+	_challenge_loss_label.add_theme_color_override("font_outline_color", Color(0.10, 0.04, 0.01, 0.72))
+	_challenge_loss_label.add_theme_constant_override("outline_size", 3)
+	_challenge_loss_panel.add_child(_challenge_loss_label)
+
+	_challenge_loss_continue_button = Button.new()
+	_challenge_loss_continue_button.name = "ChallengeLossScoreButton"
+	_challenge_loss_continue_button.text = CHALLENGE_LOSS_CONTINUE_TEXT
+	_challenge_loss_continue_button.focus_mode = Control.FOCUS_NONE
+	_challenge_loss_continue_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	_challenge_loss_continue_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_style_story_facts_button(_challenge_loss_continue_button, Color(0.22, 0.45, 0.20, 0.96))
+	_challenge_loss_continue_button.pressed.connect(_on_challenge_loss_continue_pressed)
+	_challenge_loss_panel.add_child(_challenge_loss_continue_button)
+	_layout_challenge_loss_panel()
 
 
-func _ensure_challenge_loss_dialog() -> void:
-	if is_instance_valid(_challenge_loss_dialog):
-		return
-	_challenge_loss_dialog = AcceptDialog.new()
-	_challenge_loss_dialog.name = "ChallengeLossDialog"
-	_challenge_loss_dialog.title = "Game Over"
-	_challenge_loss_dialog.add_theme_stylebox_override("panel", _make_quit_dialog_panel_style())
-	_challenge_loss_dialog.add_theme_color_override("title_color", Color(1, 1, 1, 0.98))
-	_style_quit_like_dialog_label(_challenge_loss_dialog)
-	var ok_button = _challenge_loss_dialog.get_ok_button()
-	if is_instance_valid(ok_button):
-		ok_button.text = CHALLENGE_LOSS_CONTINUE_TEXT
-		ok_button.custom_minimum_size = Vector2(200, 56)
-		ok_button.add_theme_font_size_override("font_size", 18)
-		ok_button.add_theme_color_override("font_color", Color(1, 1, 1, 0.98))
-		ok_button.add_theme_stylebox_override("normal", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG))
-		ok_button.add_theme_stylebox_override("hover", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG_HOVER))
-		ok_button.add_theme_stylebox_override("pressed", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG_PRESSED))
-	_challenge_loss_dialog.confirmed.connect(_on_challenge_loss_dialog_confirmed)
-	_challenge_loss_dialog.canceled.connect(_on_challenge_loss_dialog_confirmed)
-	add_child(_challenge_loss_dialog)
-
-
-func _show_challenge_loss_dialog(text_value: String) -> void:
+func _show_challenge_loss_panel(text_value: String) -> void:
 	set_pause_state(true)
-	_ensure_challenge_loss_dialog()
-	if not is_instance_valid(_challenge_loss_dialog):
+	_ensure_challenge_loss_panel()
+	if not is_instance_valid(_challenge_loss_panel):
 		return
-	_challenge_loss_dialog.dialog_text = text_value
-	_style_quit_like_dialog_label(_challenge_loss_dialog)
-	var popup_size = Vector2i(460, 200)
-	if _is_compact_ui():
-		popup_size = Vector2i(520, 240)
-	_challenge_loss_dialog.popup_centered(popup_size)
+	if is_instance_valid(_challenge_loss_label):
+		_challenge_loss_label.text = text_value
+	_layout_challenge_loss_panel()
+	_challenge_loss_panel.visible = true
 
 
-func _on_challenge_loss_dialog_confirmed() -> void:
+func _on_challenge_loss_continue_pressed() -> void:
 	if not _challenge_loss_instruction_active:
 		return
 	_challenge_loss_instruction_active = false
+	if is_instance_valid(_challenge_loss_panel):
+		_challenge_loss_panel.visible = false
 	set_pause_state(false)
 	var level_root = get_parent()
 	if is_instance_valid(level_root) and level_root.has_method("on_challenge_loss_score_continue"):
 		level_root.call("on_challenge_loss_score_continue")
 
 
-func _ensure_back_confirm_dialog() -> void:
-	if is_instance_valid(_back_confirm_dialog):
+func _ensure_back_confirm_panel() -> void:
+	if is_instance_valid(_back_confirm_panel):
 		return
-	_back_confirm_dialog = ConfirmationDialog.new()
-	_back_confirm_dialog.name = "BackConfirmDialog"
-	_back_confirm_dialog.title = "Quit game?"
-	_back_confirm_dialog.dialog_text = "Are you sure you want to quit?"
-	_back_confirm_dialog.add_theme_stylebox_override("panel", _make_quit_dialog_panel_style())
-	_back_confirm_dialog.add_theme_color_override("title_color", Color(1, 1, 1, 0.98))
-	_style_quit_like_dialog_label(_back_confirm_dialog)
-	var ok_button = _back_confirm_dialog.get_ok_button()
-	if is_instance_valid(ok_button):
-		ok_button.text = "Yes"
-		ok_button.custom_minimum_size = Vector2(140, 56)
-		ok_button.add_theme_font_size_override("font_size", 18)
-		ok_button.add_theme_color_override("font_color", Color(1, 1, 1, 0.98))
-		ok_button.add_theme_stylebox_override("normal", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG))
-		ok_button.add_theme_stylebox_override("hover", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG_HOVER))
-		ok_button.add_theme_stylebox_override("pressed", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG_PRESSED))
-	var cancel_button = _back_confirm_dialog.get_cancel_button()
-	if is_instance_valid(cancel_button):
-		cancel_button.text = "No"
-		cancel_button.custom_minimum_size = Vector2(140, 56)
-		cancel_button.add_theme_font_size_override("font_size", 18)
-		cancel_button.add_theme_color_override("font_color", Color(1, 1, 1, 0.98))
-		cancel_button.add_theme_stylebox_override("normal", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG_CANCEL))
-		cancel_button.add_theme_stylebox_override("hover", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG_CANCEL_HOVER))
-		cancel_button.add_theme_stylebox_override("pressed", _make_quit_dialog_button_style(QUIT_DIALOG_BUTTON_BG_CANCEL_PRESSED))
-	_back_confirm_dialog.confirmed.connect(_on_back_confirmed)
-	_back_confirm_dialog.canceled.connect(_on_back_confirm_canceled)
-	add_child(_back_confirm_dialog)
+	_back_confirm_panel = Panel.new()
+	_back_confirm_panel.name = "BackConfirmPanel"
+	_back_confirm_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	_back_confirm_panel.z_index = 190
+	_back_confirm_panel.visible = false
+	_back_confirm_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_back_confirm_panel.add_theme_stylebox_override("panel", _make_story_facts_panel_style())
+	add_child(_back_confirm_panel)
+
+	_back_confirm_back_button = Button.new()
+	_back_confirm_back_button.name = "BackToGameButton"
+	_back_confirm_back_button.text = "Back to Game"
+	_back_confirm_back_button.focus_mode = Control.FOCUS_NONE
+	_back_confirm_back_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	_back_confirm_back_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_style_story_facts_button(_back_confirm_back_button, Color(0.22, 0.45, 0.20, 0.96))
+	_back_confirm_back_button.pressed.connect(_on_back_confirm_canceled)
+	_back_confirm_panel.add_child(_back_confirm_back_button)
+
+	_back_confirm_stop_button = Button.new()
+	_back_confirm_stop_button.name = "StopGardeningButton"
+	_back_confirm_stop_button.text = "Stop Gardening"
+	_back_confirm_stop_button.focus_mode = Control.FOCUS_NONE
+	_back_confirm_stop_button.process_mode = Node.PROCESS_MODE_ALWAYS
+	_back_confirm_stop_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_style_story_facts_button(_back_confirm_stop_button, Color(0.64, 0.18, 0.06, 0.96))
+	_back_confirm_stop_button.pressed.connect(_on_back_confirmed)
+	_back_confirm_panel.add_child(_back_confirm_stop_button)
+	_layout_back_confirm_panel()
 
 
 func set_pause_state(paused: bool) -> void:
@@ -3020,22 +3228,21 @@ func set_pause_state(paused: bool) -> void:
 
 func show_back_to_menu_confirm() -> void:
 	set_pause_state(true)
-	_ensure_back_confirm_dialog()
-	if is_instance_valid(_back_confirm_dialog):
-		var compact = _is_compact_ui()
-		var popup_size = Vector2i(460, 200)
-		if compact:
-			popup_size = Vector2i(520, 240)
-		_back_confirm_dialog.popup_centered(popup_size)
+	_ensure_back_confirm_panel()
+	if is_instance_valid(_back_confirm_panel):
+		_layout_back_confirm_panel()
+		_back_confirm_panel.visible = true
 
 
 func hide_back_to_menu_confirm() -> void:
-	if is_instance_valid(_back_confirm_dialog):
-		_back_confirm_dialog.hide()
+	if is_instance_valid(_back_confirm_panel):
+		_back_confirm_panel.visible = false
 
 
 func _on_back_confirmed() -> void:
+	hide_back_to_menu_confirm()
 	set_pause_state(false)
+	Global.reset_gameplay_speed()
 	emit_signal("request_back_to_menu")
 
 
@@ -3196,7 +3403,7 @@ func _is_valid_auto_spawn_position(pos: Vector2, agents_root: Node, anchor: Node
 		return false
 	var world = _get_world_foundation()
 	if is_instance_valid(world) and world.has_method("is_world_pos_revealed"):
-		if not bool(world.is_world_pos_revealed(pos)):
+		if not Global.to_bool(world.is_world_pos_revealed(pos)):
 			return false
 	var pos_screen = _world_to_screen(pos)
 	var view = get_viewport().get_visible_rect()
@@ -3359,7 +3566,7 @@ func should_block_agent_harvest_at_screen_pos(screen_pos: Vector2) -> bool:
 	if int(Global.inventory.get(_selected_inventory_item, 0)) <= 0:
 		return false
 	var tile_data = _get_world_tile_drop_data(screen_pos)
-	if not bool(tile_data.get("ok", false)):
+	if not Global.to_bool(tile_data.get("ok", false)):
 		return true
 	return _can_place_inventory_item_at_world_pos(_selected_inventory_item, tile_data["pos"])
 
@@ -3383,6 +3590,8 @@ func _get_world_tile_drop_data(screen_pos: Vector2) -> Dictionary:
 		return result
 	if $MarginContainer.get_global_rect().has_point(screen_pos):
 		return result
+	if get_tree().paused and _is_paused_inventory_drop_blocked_at(screen_pos):
+		return result
 	var world_pos = _screen_to_world(screen_pos)
 	var coord = Vector2i(world.world_to_tile(world_pos))
 	if not world.in_bounds(coord):
@@ -3393,12 +3602,62 @@ func _get_world_tile_drop_data(screen_pos: Vector2) -> Dictionary:
 	return result
 
 
+func _is_visible_control_at(control: Control, screen_pos: Vector2) -> bool:
+	return is_instance_valid(control) and control.visible and control.get_global_rect().has_point(screen_pos)
+
+
+func _has_blocking_paused_inventory_overlay() -> bool:
+	return (
+		(is_instance_valid(_back_confirm_panel) and _back_confirm_panel.visible)
+		or (is_instance_valid(_challenge_loss_panel) and _challenge_loss_panel.visible)
+		or (is_instance_valid(_story_facts_panel) and _story_facts_panel.visible)
+	)
+
+
+func _is_paused_inventory_drop_blocked_at(screen_pos: Vector2) -> bool:
+	return (
+		_is_visible_control_at(_get_pause_container(), screen_pos)
+		or _is_visible_control_at(_get_quit_container(), screen_pos)
+		or _is_visible_control_at(_back_confirm_panel, screen_pos)
+		or _is_visible_control_at(_challenge_loss_panel, screen_pos)
+		or _is_visible_control_at(_story_facts_panel, screen_pos)
+		or _is_visible_control_at(_tutorial_panel, screen_pos)
+		or _is_visible_control_at(_endgame_container, screen_pos)
+		or _is_visible_control_at(_high_score_container, screen_pos)
+	)
+
+
+func _is_paused_resource_bar_inspect_blocked_at(screen_pos: Vector2) -> bool:
+	return _is_visible_control_at(_inventory_panel, screen_pos) or _is_paused_inventory_drop_blocked_at(screen_pos)
+
+
+func _set_paused_resource_bar_focus_at(screen_pos: Vector2, persistent: bool = false) -> bool:
+	if _selected_inventory_item != "":
+		return false
+	var level_root = get_parent()
+	var agents_root = _get_agents_root()
+	if not is_instance_valid(level_root) or not is_instance_valid(agents_root):
+		return false
+	if _is_paused_resource_bar_inspect_blocked_at(screen_pos):
+		LevelHelpersRef.set_hover_focus_agent(level_root, null)
+		return false
+	var focus_agent = LevelHelpersRef.resolve_focus_agent_at_screen_pos(level_root, agents_root, screen_pos)
+	if not is_instance_valid(focus_agent):
+		LevelHelpersRef.set_hover_focus_agent(level_root, null)
+		return false
+	if persistent and focus_agent.has_method("activate_resource_bars_for_inspection"):
+		focus_agent.call("activate_resource_bars_for_inspection")
+	else:
+		LevelHelpersRef.set_hover_focus_agent(level_root, focus_agent)
+	return true
+
+
 func _can_place_inventory_item_at_world_pos(item_name: String, world_pos: Vector2) -> bool:
 	if item_name == "":
 		return false
 	var level_root = get_node_or_null("..")
 	if is_instance_valid(level_root) and level_root.has_method("can_place_inventory_item_at_world_pos"):
-		return bool(level_root.can_place_inventory_item_at_world_pos(item_name, world_pos))
+		return Global.to_bool(level_root.can_place_inventory_item_at_world_pos(item_name, world_pos))
 	var world = _get_world_foundation()
 	if not _supports_tile_world(world):
 		return false
@@ -3419,7 +3678,7 @@ func _register_failed_placement_attempt(item_name: String, screen_pos: Vector2) 
 		_reset_failed_placement_attempts()
 		return false
 	var tile_data = _get_world_tile_drop_data(screen_pos)
-	if not bool(tile_data.get("ok", false)):
+	if not Global.to_bool(tile_data.get("ok", false)):
 		_reset_failed_placement_attempts()
 		return false
 	var target_pos: Vector2 = tile_data["pos"]
@@ -3437,14 +3696,14 @@ func _register_failed_placement_attempt(item_name: String, screen_pos: Vector2) 
 
 
 func _uses_two_tile_vertical_hint(item_name: String) -> bool:
-	return item_name == "tree" and not bool(Global.social_mode)
+	return item_name == "tree" and not Global.to_bool(Global.social_mode)
 
 
 func _flash_invalid_selected_tile_hint(screen_pos: Vector2) -> void:
 	if _selected_inventory_item == "":
 		return
 	var tile_data = _get_world_tile_drop_data(screen_pos)
-	if not bool(tile_data.get("ok", false)):
+	if not Global.to_bool(tile_data.get("ok", false)):
 		return
 	var world = _get_world_foundation()
 	if not is_instance_valid(world):
@@ -3466,7 +3725,7 @@ func _update_selected_tile_hint(screen_pos: Vector2, update_connection_preview: 
 		_clear_world_tile_hint()
 		return
 	var tile_data = _get_world_tile_drop_data(screen_pos)
-	if not bool(tile_data.get("ok", false)):
+	if not Global.to_bool(tile_data.get("ok", false)):
 		_clear_world_tile_hint()
 		if update_connection_preview:
 			emit_signal("inventory_drag_preview", _selected_inventory_item, Vector2.ZERO, false)
@@ -3526,7 +3785,7 @@ func _try_place_selected_item_at_screen_pos(screen_pos: Vector2) -> bool:
 	if _selected_inventory_item == "":
 		return false
 	var tile_data = _get_world_tile_drop_data(screen_pos)
-	if not bool(tile_data.get("ok", false)):
+	if not Global.to_bool(tile_data.get("ok", false)):
 		return false
 	var target_pos: Vector2 = tile_data["pos"]
 	return _try_place_selected_item_at_world_pos(target_pos)
@@ -3548,7 +3807,7 @@ func _try_place_selected_item_at_world_pos(target_pos: Vector2) -> bool:
 			return false
 	var level_root = get_node_or_null("..")
 	if is_instance_valid(level_root) and level_root.has_method("try_story_inventory_delivery"):
-		if bool(level_root.try_story_inventory_delivery(spawn_name, target_pos)):
+		if Global.to_bool(level_root.try_story_inventory_delivery(spawn_name, target_pos)):
 			Global.inventory[spawn_name] = int(Global.inventory.get(spawn_name, 0)) - 1
 			refresh_inventory_counts()
 			return true
@@ -3594,7 +3853,7 @@ func _on_inventory_pointer_pressed(screen_pos: Vector2, from_touch: bool = false
 	_pointer_press_pos = screen_pos
 	_last_pointer_pos = screen_pos
 	var press_tile_data = _get_world_tile_drop_data(screen_pos)
-	_pointer_press_tile_ok = bool(press_tile_data.get("ok", false))
+	_pointer_press_tile_ok = Global.to_bool(press_tile_data.get("ok", false))
 	_pointer_press_tile_pos = press_tile_data["pos"] if _pointer_press_tile_ok else Vector2.ZERO
 	_pointer_press_item = ""
 	_pointer_press_selection_changed = false
@@ -3670,8 +3929,48 @@ func _on_inventory_pointer_released(screen_pos: Vector2, from_touch: bool = fals
 	_update_minimap_input_lock()
 
 
+func _is_pause_toggle_input(event: InputEvent) -> bool:
+	if not (event is InputEventKey):
+		return false
+	var key_event := event as InputEventKey
+	if not key_event.pressed or key_event.echo:
+		return false
+	return int(key_event.keycode) == KEY_SPACE or int(key_event.physical_keycode) == KEY_SPACE
+
+
 func _input(event):
-	if get_tree().paused:
+	if _is_pause_toggle_input(event):
+		_on_pause_button_pressed()
+		get_viewport().set_input_as_handled()
+		return
+	var tree_paused := get_tree().paused
+	if tree_paused and _has_blocking_paused_inventory_overlay():
+		return
+	if tree_paused and _selected_inventory_item == "":
+		if event is InputEventMouseMotion:
+			if _is_emulated_mouse_after_touch_suppressed():
+				return
+			_set_paused_resource_bar_focus_at(event.position)
+			return
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+			if _is_emulated_mouse_after_touch_suppressed():
+				return
+			if not _is_paused_resource_bar_inspect_blocked_at(event.position):
+				if event.pressed:
+					_set_paused_resource_bar_focus_at(event.position, true)
+				return
+		if event is InputEventScreenTouch:
+			_suppress_emulated_mouse_after_touch()
+			if event.pressed:
+				if not _is_paused_resource_bar_inspect_blocked_at(event.position):
+					_set_paused_resource_bar_focus_at(event.position, true)
+					return
+	if tree_paused and not (
+		event is InputEventMouseMotion
+		or (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT)
+		or event is InputEventScreenTouch
+		or event is InputEventScreenDrag
+	):
 		return
 	if event is InputEventMouseMotion:
 		if _is_emulated_mouse_after_touch_suppressed():
@@ -3729,11 +4028,15 @@ func set_story_village_marker(world_pos: Vector2, visible: bool) -> void:
 func _on_minimap_camera_requested(world_pos: Vector2) -> void:
 	var world = _get_world_foundation()
 	if is_instance_valid(world) and world.has_method("set_camera_world_center"):
-		world.set_camera_world_center(world_pos)
+		world.set_camera_world_center(world_pos, false)
 
 
 func _on_world_zoom_changed(_enabled: bool, _zoom: Vector2) -> void:
 	_sync_zoom_button_label()
+
+
+func _on_gameplay_speed_changed(_multiplier: float, _label: String) -> void:
+	_sync_speed_button_label()
 
 
 func _on_zoom_button_pressed() -> void:
@@ -3743,6 +4046,11 @@ func _on_zoom_button_pressed() -> void:
 	else:
 		Global.world_zoom_enabled = not Global.world_zoom_enabled
 	_sync_zoom_button_label()
+
+
+func _on_speed_button_pressed() -> void:
+	Global.cycle_gameplay_speed()
+	_sync_speed_button_label()
 
 
 func _on_choose_myco_mouse_entered() -> void:
@@ -3790,6 +4098,7 @@ func _on_choose_tree_mouse_exited() -> void:
 func _on_restart_button_pressed() -> void:
 	set_pause_state(false)
 	hide_back_to_menu_confirm()
+	Global.reset_gameplay_speed()
 	Global.update_high_score()
 	Global.score = 0
 	get_tree().call_deferred("change_scene_to_file","res://scenes/title_screen.tscn")

@@ -63,7 +63,7 @@ func _story_farmer_get_level_root() -> Node:
 
 
 func _is_story_farmer_actor() -> bool:
-	if not bool(get_meta("story_villager", false)):
+	if not Global.to_bool(get_meta("story_villager", false)):
 		return false
 	return str(type) == "farmer"
 
@@ -79,7 +79,7 @@ func _story_farmer_auto_harvest_enabled(level_root: Node) -> bool:
 		return false
 	if not level_root.has_method("story_farmer_auto_harvest_is_enabled"):
 		return false
-	return bool(level_root.call("story_farmer_auto_harvest_is_enabled", self))
+	return Global.to_bool(level_root.call("story_farmer_auto_harvest_is_enabled", self))
 
 
 func _story_farmer_harvest_trip_active() -> bool:
@@ -99,7 +99,7 @@ func _story_farmer_stop_harvest_tween() -> void:
 
 
 func _story_farmer_is_walking() -> bool:
-	return not bool(dead) and _is_farmer_actor() and (
+	return not Global.to_bool(dead) and _is_farmer_actor() and (
 		_story_farmer_harvest_state == STORY_FARMER_HARVEST_MOVING_TO_CROP
 		or _story_farmer_harvest_state == STORY_FARMER_HARVEST_RETURNING_HOME
 	)
@@ -130,7 +130,7 @@ func _story_farmer_update_walk_animation(delta: float) -> void:
 	if not _is_farmer_actor() or not is_instance_valid(sprite):
 		_story_farmer_reset_walk_animation()
 		return
-	if bool(dead):
+	if Global.to_bool(dead):
 		_story_farmer_reset_walk_animation()
 		_story_farmer_walk_last_global_position = global_position
 		_story_farmer_walk_last_global_position_set = true
@@ -222,9 +222,9 @@ func _story_farmer_finalize_carried_harvest(level_root: Node) -> void:
 	var delivered := false
 	if is_instance_valid(_story_farmer_carried_harvest_source):
 		if _story_farmer_carried_harvest_source.has_method("finalize_farmer_harvest_delivery"):
-			delivered = bool(_story_farmer_carried_harvest_source.call("finalize_farmer_harvest_delivery", self))
+			delivered = Global.to_bool(_story_farmer_carried_harvest_source.call("finalize_farmer_harvest_delivery", self))
 		elif _story_farmer_carried_harvest_source.has_method("try_harvest_to_farmer"):
-			delivered = bool(_story_farmer_carried_harvest_source.call("try_harvest_to_farmer", self))
+			delivered = Global.to_bool(_story_farmer_carried_harvest_source.call("try_harvest_to_farmer", self))
 	if delivered and is_instance_valid(level_root) and level_root.has_method("story_farmer_on_harvest_success"):
 		level_root.call("story_farmer_on_harvest_success", self, delivered_type)
 	_story_farmer_clear_carry_state()
@@ -251,12 +251,12 @@ func notify_tuktuk_capture_started() -> void:
 func _story_farmer_is_harvest_target_valid(crop_target: Variant) -> bool:
 	if not is_instance_valid(crop_target):
 		return false
-	if bool(crop_target.get("dead")):
+	if Global.to_bool(crop_target.get("dead")):
 		return false
 	if not crop_target.has_method("try_harvest_to_farmer"):
 		return false
 	if crop_target.has_method("can_drag_for_inventory_harvest"):
-		if not bool(crop_target.call("can_drag_for_inventory_harvest")):
+		if not Global.to_bool(crop_target.call("can_drag_for_inventory_harvest")):
 			return false
 	return true
 
@@ -349,9 +349,9 @@ func _on_story_farmer_arrived_at_crop() -> void:
 	var harvest_type = str(harvest_source.get("type"))
 	var harvested := false
 	if harvest_source.has_method("begin_farmer_harvest_delivery"):
-		harvested = bool(harvest_source.call("begin_farmer_harvest_delivery", self))
+		harvested = Global.to_bool(harvest_source.call("begin_farmer_harvest_delivery", self))
 	elif harvest_source.has_method("try_harvest_to_farmer"):
-		harvested = bool(harvest_source.call("try_harvest_to_farmer", self))
+		harvested = Global.to_bool(harvest_source.call("try_harvest_to_farmer", self))
 	if not harvested:
 		_story_farmer_cancel_trip_and_return_home(level_root)
 		return
@@ -405,7 +405,7 @@ func _story_farmer_tick_auto_harvest(level_root: Node) -> bool:
 			_story_farmer_reset_harvest_state(level_root)
 		return false
 	if is_instance_valid(level_root) and level_root.has_method("story_farmer_has_pending_inbound_trades"):
-		if bool(level_root.call("story_farmer_has_pending_inbound_trades", self)):
+		if Global.to_bool(level_root.call("story_farmer_has_pending_inbound_trades", self)):
 			return false
 	if not logistics_ready:
 		return false
@@ -423,7 +423,7 @@ func _process(delta: float) -> void:
 
 
 func _is_story_village_person_actor() -> bool:
-	if not bool(get_meta("story_village_actor", false)):
+	if not Global.to_bool(get_meta("story_village_actor", false)):
 		return false
 	var role = str(type)
 	return role == "farmer" or role == "vendor" or role == "cook"
@@ -440,7 +440,7 @@ func _keep_villager_opaque() -> void:
 
 
 func _is_villager_child() -> bool:
-	return bool(get_meta("villager_child", false))
+	return Global.to_bool(get_meta("villager_child", false))
 
 
 func _apply_mature_villager_scale_floor() -> void:
@@ -459,7 +459,7 @@ func _apply_mature_villager_scale_floor() -> void:
 
 
 func _should_use_villager_r_liquidity_cycle() -> bool:
-	if not bool(Global.villager_r_medium_only):
+	if not Global.to_bool(Global.villager_r_medium_only):
 		return false
 	return _is_story_village_person_actor()
 
@@ -480,7 +480,7 @@ func _can_villager_family_reproduce() -> bool:
 		return false
 	if _is_villager_child():
 		return false
-	if bool(get_meta("story_disable_birth", false)):
+	if Global.to_bool(get_meta("story_disable_birth", false)):
 		return false
 	if not Global.baby_mode:
 		return false
@@ -596,7 +596,7 @@ func _count_inflight_liquidity_swaps_for_self() -> int:
 		if not is_instance_valid(trade_packet):
 			continue
 		var liquidity_trade_value = trade_packet.get("liquidity_cycle_trade")
-		if not bool(liquidity_trade_value):
+		if not Global.to_bool(liquidity_trade_value):
 			continue
 		var liquidity_origin_value = trade_packet.get("liquidity_cycle_origin_id")
 		var liquidity_origin_id := 0
@@ -718,13 +718,13 @@ func _can_bank_offer_r_to_target(target: Node, offered_res: String, requested_re
 
 
 func _is_village_bank_node(agent: Variant) -> bool:
-	return is_instance_valid(agent) and str(agent.get("type")) == "bank" and bool(agent.get_meta("story_village_actor", false))
+	return is_instance_valid(agent) and str(agent.get("type")) == "bank" and Global.to_bool(agent.get_meta("story_village_actor", false))
 
 
 func _is_village_person_node(agent: Variant) -> bool:
 	if not is_instance_valid(agent):
 		return false
-	if not bool(agent.get_meta("story_village_actor", false)):
+	if not Global.to_bool(agent.get_meta("story_village_actor", false)):
 		return false
 	var agent_type = str(agent.get("type"))
 	return agent_type == "farmer" or agent_type == "vendor" or agent_type == "cook"
@@ -803,7 +803,7 @@ func _try_send_direct_person_liquidity_swap(requested_res: String, debug_mode: b
 			continue
 		if not _is_village_person_node(child):
 			continue
-		if bool(child.get("dead")):
+		if Global.to_bool(child.get("dead")):
 			continue
 		if not _can_reach_direct_person_trade(child):
 			continue
@@ -1082,7 +1082,7 @@ func _refund_rejected_r_swap(trade_packet: Area2D) -> bool:
 		"trade_type": "send",
 		"return_res": null,
 		"return_amt": null,
-		"liquidity_cycle_trade": bool(trade_packet.get("liquidity_cycle_trade")),
+		"liquidity_cycle_trade": Global.to_bool(trade_packet.get("liquidity_cycle_trade")),
 		"liquidity_cycle_origin_id": int(trade_packet.get("liquidity_cycle_origin_id"))
 	}
 	return _emit_or_queue_trade(refund_path)
@@ -1092,7 +1092,7 @@ func logistics():
 	var level_root = _story_farmer_get_level_root()
 	if _story_farmer_tick_auto_harvest(level_root):
 		return
-	if str(type) == "bank" and bool(get_meta("bank_disabled", false)):
+	if str(type) == "bank" and Global.to_bool(get_meta("bank_disabled", false)):
 		logistics_ready = false
 		is_trading = false
 		return
@@ -1102,7 +1102,7 @@ func logistics():
 		return
 	var farmer_trade_any_n := false
 	if _is_story_farmer_actor() and is_instance_valid(level_root) and level_root.has_method("story_farmer_should_trade_any_n"):
-		farmer_trade_any_n = bool(level_root.call("story_farmer_should_trade_any_n", self))
+		farmer_trade_any_n = Global.to_bool(level_root.call("story_farmer_should_trade_any_n", self))
 	#wait for timer
 	var excess_res = null
 	var high_amt_excess = 0
@@ -1297,7 +1297,7 @@ func _on_area_entered(ztrade: Area2D) -> void:
 				"trade_type": "send",
 				"return_res": null,
 				"return_amt": null,
-				"liquidity_cycle_trade": bool(ztrade.get("liquidity_cycle_trade")),
+				"liquidity_cycle_trade": Global.to_bool(ztrade.get("liquidity_cycle_trade")),
 				"liquidity_cycle_origin_id": liquidity_origin_id
 			}
 			_emit_or_queue_trade(return_path)
@@ -1342,7 +1342,7 @@ func _on_growth_timer_timeout() -> void:
 		return
 	if _is_villager_child():
 		return
-	var disable_story_farmer_production = bool(get_meta("story_disable_farmer_production", false))
+	var disable_story_farmer_production = Global.to_bool(get_meta("story_disable_farmer_production", false))
 	if not disable_story_farmer_production and prod_res.size() > 0 and prod_res[0] != null:
 		for res in prod_res:
 			assets[res]+=3

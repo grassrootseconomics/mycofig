@@ -243,7 +243,7 @@ static func _pointer_over_core_ui(level_root: Node, screen_pos: Vector2) -> bool
 static func _agent_supports_hover_focus(agent: Variant) -> bool:
 	if not is_instance_valid(agent):
 		return false
-	if bool(agent.get("dead")):
+	if Global.to_bool(agent.get("dead")):
 		return false
 	if str(agent.get("type")) == "cloud":
 		return false
@@ -255,9 +255,9 @@ static func _screen_over_agent(agent: Node, screen_pos: Vector2) -> bool:
 		return false
 	var world_pos = Global.screen_to_world(agent, screen_pos)
 	if agent.has_method("_is_focus_hit"):
-		return bool(agent.call("_is_focus_hit", world_pos))
+		return Global.to_bool(agent.call("_is_focus_hit", world_pos))
 	if agent.has_method("_is_press_hit"):
-		return bool(agent.call("_is_press_hit", world_pos))
+		return Global.to_bool(agent.call("_is_press_hit", world_pos))
 	var sprite = agent.get("sprite")
 	if not is_instance_valid(sprite) or not sprite.has_method("get_rect"):
 		return false
@@ -513,7 +513,7 @@ static func update_agent_hover_focus(level_root: Node, agents_root: Node) -> voi
 	if Global.is_dragging:
 		var dragging_agent: Node = null
 		for agent in agents_root.get_children():
-			if _agent_supports_hover_focus(agent) and bool(agent.get("is_dragging")):
+			if _agent_supports_hover_focus(agent) and Global.to_bool(agent.get("is_dragging")):
 				dragging_agent = agent
 				break
 		_set_hover_focus_agent(level_root, dragging_agent)
@@ -715,7 +715,7 @@ static func _clamp_tile_to_world(world: Node, coord: Vector2i) -> Vector2i:
 static func _is_tile_blocking_agent(agent: Node) -> bool:
 	if not is_instance_valid(agent):
 		return false
-	if bool(agent.get("dead")):
+	if Global.to_bool(agent.get("dead")):
 		return false
 	return str(agent.get("type")) != "cloud"
 
@@ -732,7 +732,7 @@ static func _is_two_tile_vertical_tree(agent: Node) -> bool:
 	if str(agent.get("type")) != "tree":
 		return false
 	# Plants-mode tree occupies base tile + tile above from seedling onward.
-	return not bool(Global.social_mode)
+	return not Global.to_bool(Global.social_mode)
 
 
 static func _get_agent_sprite_node(agent: Node) -> Node2D:
@@ -852,10 +852,10 @@ static func _can_place_agent_on_soil_tiles(world: Node, candidate_agent: Variant
 	var agent_type = str(candidate_agent.get("type"))
 	for coord_variant in coords:
 		if agent_type == "myco" and world.has_method("can_place_myco_on_tile"):
-			if not bool(world.call("can_place_myco_on_tile", Vector2i(coord_variant))):
+			if not Global.to_bool(world.call("can_place_myco_on_tile", Vector2i(coord_variant))):
 				return false
 			continue
-		if not bool(world.call("can_place_ecology_on_tile", Vector2i(coord_variant))):
+		if not Global.to_bool(world.call("can_place_ecology_on_tile", Vector2i(coord_variant))):
 			return false
 	return true
 
@@ -948,7 +948,7 @@ static func _can_share_trade_network(seeker: Variant, candidate: Variant) -> boo
 		return true
 	if not seeker.has_method("_can_share_story_trade_network"):
 		return true
-	return bool(seeker.call("_can_share_story_trade_network", candidate))
+	return Global.to_bool(seeker.call("_can_share_story_trade_network", candidate))
 
 
 static func _is_trade_hub_candidate(seeker: Variant, candidate: Variant) -> bool:
@@ -958,7 +958,7 @@ static func _is_trade_hub_candidate(seeker: Variant, candidate: Variant) -> bool
 		return false
 	if is_instance_valid(seeker) and candidate == seeker:
 		return false
-	if bool(candidate.get("dead")):
+	if Global.to_bool(candidate.get("dead")):
 		return false
 	var candidate_type = str(candidate.get("type"))
 	if candidate_type != "myco" and candidate_type != "basket" and not _is_village_bank_trade_hub(seeker, candidate) and not _is_village_person_trade_hub(seeker, candidate):
@@ -969,7 +969,7 @@ static func _is_trade_hub_candidate(seeker: Variant, candidate: Variant) -> bool
 static func is_trade_hub_index_candidate(candidate: Variant) -> bool:
 	if not is_instance_valid(candidate):
 		return false
-	if bool(candidate.get("dead")):
+	if Global.to_bool(candidate.get("dead")):
 		return false
 	var candidate_type = str(candidate.get("type"))
 	return candidate_type == "myco" or candidate_type == "basket" or candidate_type == "bank" or _is_village_person_actor(candidate)
@@ -978,7 +978,7 @@ static func is_trade_hub_index_candidate(candidate: Variant) -> bool:
 static func _is_village_person_actor(agent: Variant) -> bool:
 	if not is_instance_valid(agent):
 		return false
-	if not bool(agent.get_meta("story_village_actor", false)):
+	if not Global.to_bool(agent.get_meta("story_village_actor", false)):
 		return false
 	var agent_type = str(agent.get("type"))
 	return agent_type == "farmer" or agent_type == "vendor" or agent_type == "cook"
@@ -987,7 +987,7 @@ static func _is_village_person_actor(agent: Variant) -> bool:
 static func _is_village_trade_actor(agent: Variant) -> bool:
 	if not is_instance_valid(agent):
 		return false
-	if not bool(agent.get_meta("story_village_actor", false)):
+	if not Global.to_bool(agent.get_meta("story_village_actor", false)):
 		return false
 	var agent_type = str(agent.get("type"))
 	if agent_type == "farmer" or agent_type == "vendor" or agent_type == "cook" or agent_type == "bank" or agent_type == "basket":
@@ -1002,7 +1002,7 @@ static func _is_village_bank_trade_hub(seeker: Variant, candidate: Variant) -> b
 		return false
 	if str(candidate.get("type")) != "bank":
 		return false
-	if not bool(candidate.get_meta("story_village_actor", false)):
+	if not Global.to_bool(candidate.get_meta("story_village_actor", false)):
 		return false
 	return _is_village_person_actor(seeker)
 
@@ -1012,7 +1012,7 @@ static func _is_village_person_trade_hub(seeker: Variant, candidate: Variant) ->
 		return false
 	if not is_instance_valid(seeker):
 		return false
-	return bool(seeker.get_meta("story_village_actor", false)) and str(seeker.get("type")) == "bank"
+	return Global.to_bool(seeker.get_meta("story_village_actor", false)) and str(seeker.get("type")) == "bank"
 
 
 static func are_agents_in_neighboring_tiles(level_root: Node, agent_a: Variant, agent_b: Variant, max_tile_delta: int = 1) -> bool:
@@ -1364,7 +1364,7 @@ static func _mark_nearby_agents_dirty_from_occupancy(level_root: Node, agents_ro
 						continue
 					if agent == moved_agent:
 						continue
-					if bool(agent.get("dead")):
+					if Global.to_bool(agent.get("dead")):
 						continue
 					if str(agent.get("type")) == "cloud":
 						continue
@@ -1400,7 +1400,7 @@ static func mark_agents_dirty_for_movement(level_root: Node, agents_root: Node, 
 			continue
 		if agent == moved_agent:
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if str(agent.get("type")) == "cloud":
 			continue
@@ -1432,7 +1432,7 @@ static func mark_agents_dirty_for_spawn(level_root: Node, agents_root: Node, spa
 			continue
 		if agent == spawned_agent:
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if str(agent.get("type")) == "cloud":
 			continue
@@ -1580,7 +1580,7 @@ static func _release_trade_line(lines_root: Node, line: Variant) -> void:
 static func _is_trade_line_agent_valid(agent: Variant) -> bool:
 	if not is_instance_valid(agent):
 		return false
-	if bool(agent.get("dead")):
+	if Global.to_bool(agent.get("dead")):
 		return false
 	return str(agent.get("type")) != "cloud"
 
@@ -1592,7 +1592,7 @@ static func _is_myco_trade_agent(agent: Variant) -> bool:
 static func is_village_trade_visual_endpoint(agent: Variant) -> bool:
 	if not _is_trade_line_agent_valid(agent):
 		return false
-	if not bool(agent.get_meta("story_village_actor", false)):
+	if not Global.to_bool(agent.get_meta("story_village_actor", false)):
 		return false
 	var agent_type = str(agent.get("type"))
 	if agent_type == "farmer" or agent_type == "vendor" or agent_type == "cook" or agent_type == "bank":
@@ -1731,13 +1731,13 @@ static func _is_priority_line_endpoint(agent: Variant) -> bool:
 	if is_instance_valid(Global.active_agent) and agent == Global.active_agent:
 		return true
 	var dragging_variant = agent.get("is_dragging")
-	if typeof(dragging_variant) == TYPE_BOOL and bool(dragging_variant):
+	if typeof(dragging_variant) == TYPE_BOOL and Global.to_bool(dragging_variant):
 		return true
 	var keyboard_variant = agent.get("_keyboard_moving")
-	if typeof(keyboard_variant) == TYPE_BOOL and bool(keyboard_variant):
+	if typeof(keyboard_variant) == TYPE_BOOL and Global.to_bool(keyboard_variant):
 		return true
 	var hover_variant = agent.get("_hover_visual_focus")
-	return typeof(hover_variant) == TYPE_BOOL and bool(hover_variant)
+	return typeof(hover_variant) == TYPE_BOOL and Global.to_bool(hover_variant)
 
 
 static func _line_pair_has_priority_endpoint(endpoint_a: Variant, endpoint_b: Variant) -> bool:
@@ -2033,7 +2033,7 @@ static func create_village_trade_trail_line(lines_root: Node) -> Line2D:
 			if not (candidate_variant is Line2D) or not is_instance_valid(candidate_variant):
 				continue
 			var candidate: Line2D = candidate_variant
-			if not bool(candidate.get_meta("village_trail_active", false)):
+			if not Global.to_bool(candidate.get_meta("village_trail_active", false)):
 				_release_trade_line(lines_root, candidate)
 				cleaned.remove_at(i)
 				break
@@ -2179,10 +2179,10 @@ static func sync_myco_trade_lines(lines_root: Node, agents_root: Node, social_mo
 static func _is_agent_trade_locked(agent: Variant) -> bool:
 	if not is_instance_valid(agent):
 		return false
-	if bool(agent.get("dead")):
+	if Global.to_bool(agent.get("dead")):
 		return false
 	if agent.has_method("is_trade_locked_by_user_move"):
-		return bool(agent.call("is_trade_locked_by_user_move"))
+		return Global.to_bool(agent.call("is_trade_locked_by_user_move"))
 	return false
 
 
@@ -2203,7 +2203,7 @@ static func _refresh_village_pair_lines(lines_root: Node, now_ms: int) -> void:
 			keys_to_remove.append(pair_key)
 			continue
 		var locked = _is_agent_trade_locked(endpoint_a) or _is_agent_trade_locked(endpoint_b)
-		if locked and not bool(meta.get("closing", false)):
+		if locked and not Global.to_bool(meta.get("closing", false)):
 			meta["closing"] = true
 			meta["started_msec"] = now_ms
 			meta["duration_msec"] = maxi(roundi(VILLAGE_TRADE_VISUAL_CLOSE_SECONDS * 1000.0), 1)
@@ -2246,7 +2246,7 @@ static func _refresh_village_trails(lines_root: Node, now_ms: int) -> void:
 		if not (trail_variant is Line2D) or not is_instance_valid(trail_variant):
 			continue
 		var line: Line2D = trail_variant
-		if bool(line.get_meta("village_trail_active", false)):
+		if Global.to_bool(line.get_meta("village_trail_active", false)):
 			remaining.append(line)
 			continue
 		var started_ms = int(line.get_meta("village_line_started_msec", now_ms))
@@ -2277,7 +2277,7 @@ static func refresh_trade_line_visuals(lines_root: Node) -> void:
 			continue
 		if not line.visible:
 			continue
-		if bool(line.get_meta("village_ephemeral_line", false)) or bool(line.get_meta("village_trail_line", false)):
+		if Global.to_bool(line.get_meta("village_ephemeral_line", false)) or Global.to_bool(line.get_meta("village_trail_line", false)):
 			continue
 		var base_color = line.modulate
 		if line.has_meta("base_color"):
@@ -2379,7 +2379,7 @@ static func clear_inventory_connection_preview_lines(preview_lines: Array, immed
 static func _is_preview_candidate(agent: Node) -> bool:
 	if not is_instance_valid(agent):
 		return false
-	if bool(agent.get("dead")):
+	if Global.to_bool(agent.get("dead")):
 		return false
 	return true
 
@@ -2389,13 +2389,13 @@ static func _is_story_mode_runtime() -> bool:
 
 
 static func _is_village_runtime() -> bool:
-	if Global.has_method("is_challenge_dual_village_mode") and bool(Global.is_challenge_dual_village_mode()):
+	if Global.has_method("is_challenge_dual_village_mode") and Global.to_bool(Global.is_challenge_dual_village_mode()):
 		return true
 	return str(Global.mode) == "story"
 
 
 static func _is_story_village_actor_node(node: Variant) -> bool:
-	return is_instance_valid(node) and bool(node.get_meta("story_village_actor", false))
+	return is_instance_valid(node) and Global.to_bool(node.get_meta("story_village_actor", false))
 
 
 static func _is_preview_village_item_type(agent_type: String) -> bool:

@@ -6,6 +6,7 @@ const SHARE_URL := "https://grassecon.org/games/"
 const SHARE_URL_DISPLAY := "grassecon.org/games"
 const SHARE_CARD_DIR := "user://share"
 const SHARE_CARD_PATH := "user://share/social_soil_result.png"
+const SHARE_CARD_DEFAULT_FILENAME := "social_soil_result.png"
 const SHARE_CARD_SIZE := Vector2i(1080, 1920)
 const ANDROID_SHARE_CLASS := "com.godot.game.SocialSoilShare"
 const SHARE_CARD_BIRD_PATH := "res://graphics/bird1.png"
@@ -67,15 +68,20 @@ var _mode_label: Label = null
 var _ge_link: LinkButton = null
 var _share_button: Button = null
 var _main_button: Button = null
+var _quit_button: Button = null
 var _bird_sprite: AnimatedSprite2D = null
 var _is_story_result := false
 var _is_new_high_score := false
 var _info_open := false
 var _web_share_card_base64 := ""
 var _web_share_card_ready := false
+var _desktop_save_dialog: FileDialog = null
+var _desktop_share_card_image: Image = null
+var _desktop_share_pending := false
 
 
 func _ready() -> void:
+	Global.reset_gameplay_speed()
 	_build_layout()
 	_populate_content()
 	_apply_responsive_layout()
@@ -244,6 +250,16 @@ func _build_layout() -> void:
 	_style_return_button()
 	_main_button.pressed.connect(_on_button_pressed)
 	_main_vbox.add_child(_main_button)
+
+	_quit_button = Button.new()
+	_quit_button.name = "QuitGameButton"
+	_quit_button.text = "Quit Game"
+	_quit_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_quit_button.focus_mode = Control.FOCUS_ALL
+	_quit_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_style_quit_button()
+	_quit_button.pressed.connect(_on_quit_game_pressed)
+	_main_vbox.add_child(_quit_button)
 	_update_share_button_visibility()
 
 
@@ -361,6 +377,19 @@ func _style_share_button() -> void:
 	_share_button.add_theme_color_override("font_color", Color(0.9, 0.97, 1.0, 1.0))
 	_share_button.add_theme_color_override("font_hover_color", Color.WHITE)
 	_share_button.add_theme_color_override("font_pressed_color", Color(0.82, 0.94, 1.0, 1.0))
+
+
+func _style_quit_button() -> void:
+	var normal: StyleBoxFlat = _make_panel_style(Color(0.42, 0.06, 0.05, 0.94), Color(1.0, 0.42, 0.36, 0.86), 2, 8)
+	var hover: StyleBoxFlat = _make_panel_style(Color(0.56, 0.09, 0.07, 0.98), Color(1.0, 0.62, 0.54, 1.0), 3, 8)
+	var pressed: StyleBoxFlat = _make_panel_style(Color(0.27, 0.035, 0.03, 0.98), Color(0.82, 0.28, 0.24, 1.0), 2, 8)
+	_quit_button.add_theme_stylebox_override("normal", normal)
+	_quit_button.add_theme_stylebox_override("hover", hover)
+	_quit_button.add_theme_stylebox_override("pressed", pressed)
+	_quit_button.add_theme_stylebox_override("focus", hover)
+	_quit_button.add_theme_color_override("font_color", Color.WHITE)
+	_quit_button.add_theme_color_override("font_hover_color", Color.WHITE)
+	_quit_button.add_theme_color_override("font_pressed_color", Color(1.0, 0.9, 0.88, 1.0))
 
 
 func _make_info_button_style(bg_color: Color, border_color: Color, shadow_alpha: float) -> StyleBoxFlat:
@@ -484,6 +513,8 @@ func _apply_responsive_layout() -> void:
 	var link_size: int = 21
 	var button_size: int = 38
 	var button_height: int = 70
+	var quit_button_size: int = 24
+	var quit_button_height: int = 46
 	var share_button_size: int = 25
 	var share_button_height: int = 54
 	var hero_max_size: int = 66
@@ -506,6 +537,8 @@ func _apply_responsive_layout() -> void:
 		link_size = 20
 		button_size = 34
 		button_height = 64
+		quit_button_size = 22
+		quit_button_height = 42
 		share_button_size = 23
 		share_button_height = 50
 		hero_max_size = 58
@@ -527,6 +560,8 @@ func _apply_responsive_layout() -> void:
 		link_size = 18
 		button_size = 30
 		button_height = 58
+		quit_button_size = 20
+		quit_button_height = 38
 		share_button_size = 21
 		share_button_height = 46
 		hero_max_size = 50
@@ -554,6 +589,9 @@ func _apply_responsive_layout() -> void:
 	_ge_link.add_theme_font_size_override("font_size", link_size)
 	_main_button.add_theme_font_size_override("font_size", button_size)
 	_main_button.custom_minimum_size = Vector2(content_width, button_height)
+	if is_instance_valid(_quit_button):
+		_quit_button.add_theme_font_size_override("font_size", quit_button_size)
+		_quit_button.custom_minimum_size = Vector2(clampf(content_width * 0.5, 190.0, 300.0), quit_button_height)
 	if is_instance_valid(_share_button):
 		_share_button.add_theme_font_size_override("font_size", share_button_size)
 		_share_button.custom_minimum_size = Vector2(content_width, share_button_height)
@@ -620,6 +658,11 @@ func _on_button_pressed() -> void:
 	_return_to_title_screen()
 
 
+func _on_quit_game_pressed() -> void:
+	Global.record_last_score()
+	get_tree().quit()
+
+
 func _is_android_share_available() -> bool:
 	if OS.get_name() != "Android":
 		return false
@@ -630,8 +673,13 @@ func _is_web_share_available() -> bool:
 	return OS.has_feature("web") and Engine.has_singleton("JavaScriptBridge")
 
 
+func _is_desktop_share_available() -> bool:
+	var os_name: String = OS.get_name()
+	return os_name in ["Windows", "macOS", "Linux", "FreeBSD", "NetBSD", "OpenBSD", "BSD"]
+
+
 func _is_share_available() -> bool:
-	return _is_android_share_available() or _is_web_share_available()
+	return _is_android_share_available() or _is_web_share_available() or _is_desktop_share_available()
 
 
 func _update_share_button_visibility() -> void:
@@ -652,6 +700,9 @@ func _apply_web_share_button_state() -> void:
 func _on_share_button_pressed() -> void:
 	if _is_web_share_available():
 		_open_web_share_sheet()
+		return
+	if _is_desktop_share_available():
+		await _open_desktop_share_save_dialog()
 		return
 	if not _is_android_share_available():
 		return
@@ -706,6 +757,84 @@ func _create_share_card_png() -> String:
 		push_warning(str("Could not save share card: ", SHARE_CARD_PATH))
 		return ""
 	return SHARE_CARD_PATH
+
+
+func _set_share_button_busy(busy: bool, label: String = "Share Result") -> void:
+	if not is_instance_valid(_share_button):
+		return
+	_share_button.disabled = busy
+	_share_button.text = label
+
+
+func _try_enable_native_save_dialog(dialog: FileDialog) -> void:
+	if not is_instance_valid(dialog):
+		return
+	for property_info in dialog.get_property_list():
+		if typeof(property_info) == TYPE_DICTIONARY and str(property_info.get("name", "")) == "use_native_dialog":
+			dialog.set("use_native_dialog", true)
+			return
+
+
+func _ensure_desktop_save_dialog() -> void:
+	if is_instance_valid(_desktop_save_dialog):
+		return
+	_desktop_save_dialog = FileDialog.new()
+	_desktop_save_dialog.name = "DesktopShareSaveDialog"
+	_desktop_save_dialog.title = "Save Result Card"
+	_desktop_save_dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	_desktop_save_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_desktop_save_dialog.filters = PackedStringArray(["*.png ; PNG Image"])
+	_desktop_save_dialog.current_file = SHARE_CARD_DEFAULT_FILENAME
+	_desktop_save_dialog.process_mode = Node.PROCESS_MODE_ALWAYS
+	_try_enable_native_save_dialog(_desktop_save_dialog)
+	_desktop_save_dialog.file_selected.connect(_on_desktop_share_save_selected)
+	_desktop_save_dialog.canceled.connect(_on_desktop_share_save_canceled)
+	add_child(_desktop_save_dialog)
+
+
+func _open_desktop_share_save_dialog() -> void:
+	if _desktop_share_pending:
+		return
+	_desktop_share_pending = true
+	_set_share_button_busy(true, "Preparing...")
+	var image: Image = await _render_share_card_image()
+	if image.is_empty():
+		_desktop_share_pending = false
+		_set_share_button_busy(false)
+		push_warning("Could not render share card image.")
+		return
+	_desktop_share_card_image = image
+	_ensure_desktop_save_dialog()
+	if not is_instance_valid(_desktop_save_dialog):
+		_desktop_share_pending = false
+		_desktop_share_card_image = null
+		_set_share_button_busy(false)
+		return
+	_desktop_save_dialog.current_dir = ProjectSettings.globalize_path("user://")
+	_desktop_save_dialog.current_file = SHARE_CARD_DEFAULT_FILENAME
+	_set_share_button_busy(true, "Choose Save Location...")
+	_desktop_save_dialog.popup_centered(Vector2i(760, 560))
+
+
+func _on_desktop_share_save_selected(path: String) -> void:
+	var target_path: String = path
+	if target_path.get_extension().to_lower() != "png":
+		target_path += ".png"
+	if _desktop_share_card_image == null or _desktop_share_card_image.is_empty():
+		push_warning("No share card image is ready to save.")
+	else:
+		var save_error: Error = _desktop_share_card_image.save_png(target_path)
+		if save_error != OK:
+			push_warning(str("Could not save share card: ", target_path))
+	_desktop_share_card_image = null
+	_desktop_share_pending = false
+	_set_share_button_busy(false)
+
+
+func _on_desktop_share_save_canceled() -> void:
+	_desktop_share_card_image = null
+	_desktop_share_pending = false
+	_set_share_button_busy(false)
 
 
 func _render_share_card_image() -> Image:
@@ -896,7 +1025,7 @@ func _open_android_share_sheet(absolute_png_path: String, share_text: String) ->
 	if exception != null:
 		push_warning(str("Android share failed: ", exception))
 		return false
-	return bool(shared)
+	return Global.to_bool(shared)
 
 
 func _open_web_share_sheet() -> bool:

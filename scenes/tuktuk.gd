@@ -95,7 +95,7 @@ func _start_scripted_capture() -> void:
 	_scripted_capture_started_emitted = false
 	position = _scripted_spawn_pos
 	set_rotation(0)
-	if not is_instance_valid(_scripted_target) or bool(_scripted_target.get("dead")):
+	if not is_instance_valid(_scripted_target) or Global.to_bool(_scripted_target.get("dead")):
 		_emit_scripted_capture_finished()
 		call_deferred("queue_free")
 		return
@@ -137,11 +137,11 @@ func reset():
 	for child in children:
 		if not is_instance_valid(child):
 			continue
-		if bool(child.get("dead")):
+		if Global.to_bool(child.get("dead")):
 			continue
 		var valid_target := false
 		if is_instance_valid(level_root) and level_root.has_method("is_valid_predator_target"):
-			valid_target = bool(level_root.is_valid_predator_target(self, child))
+			valid_target = Global.to_bool(level_root.is_valid_predator_target(self, child))
 		else:
 			valid_target = str(child.get("type")) == quarry_type
 		if not valid_target:
@@ -195,7 +195,7 @@ func _try_capture_quarry() -> bool:
 		return false
 	if not is_instance_valid(the_quarry):
 		return false
-	if bool(the_quarry.get("dead")):
+	if Global.to_bool(the_quarry.get("dead")):
 		the_quarry = null
 		quarry_found = false
 		return false
@@ -206,14 +206,14 @@ func _try_capture_quarry() -> bool:
 
 
 func _physics_process(delta: float) -> void:
-	if _scripted_capture_enabled and not caught and (not is_instance_valid(the_quarry) or bool(the_quarry.get("dead"))):
+	if _scripted_capture_enabled and not caught and (not is_instance_valid(the_quarry) or Global.to_bool(the_quarry.get("dead"))):
 		the_quarry = null
 		quarry_found = false
 		_emit_scripted_capture_finished()
 		call_deferred("queue_free")
 		return
 
-	if not is_instance_valid(the_quarry) or bool(the_quarry.get("dead")):
+	if not is_instance_valid(the_quarry) or Global.to_bool(the_quarry.get("dead")):
 		the_quarry = null
 		quarry_found = false
 
@@ -252,7 +252,7 @@ func _on_area_entered(agent: Area2D) -> void:
 		return
 	var level_root = get_node_or_null("../..")
 	if is_instance_valid(level_root) and level_root.has_method("is_valid_predator_target"):
-		if not bool(level_root.is_valid_predator_target(self, agent)):
+		if not Global.to_bool(level_root.is_valid_predator_target(self, agent)):
 			return
 	if is_instance_valid(the_quarry) and agent != the_quarry:
 		return

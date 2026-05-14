@@ -68,6 +68,8 @@ var _title_basket_land_sound_played := false
 var _title_predator_bird_sound_player: AudioStreamPlayer = null
 var _title_tuktuk_engine_sound_player: AudioStreamPlayer = null
 var _title_basket_land_sound_player: AudioStreamPlayer = null
+var _title_quit_button: Button = null
+var _title_quit_requested := false
 
 
 func _get_ge_logo_texture() -> Texture2D:
@@ -160,18 +162,59 @@ func _style_cta_button(button: Button, base_bg: Color, base_border: Color) -> vo
 	button.add_theme_stylebox_override("disabled", _make_cta_style(base_bg.darkened(0.35), base_border.darkened(0.4), 2))
 
 
+func _style_title_quit_button(button: Button) -> void:
+	if not is_instance_valid(button):
+		return
+	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	button.focus_mode = Control.FOCUS_ALL
+	button.add_theme_color_override("font_color", Color.WHITE)
+	button.add_theme_color_override("font_hover_color", Color.WHITE)
+	button.add_theme_color_override("font_pressed_color", Color(1.0, 0.9, 0.88, 1.0))
+	var base_bg := Color(0.42, 0.06, 0.05, 0.94)
+	var base_border := Color(1.0, 0.42, 0.36, 0.86)
+	button.add_theme_stylebox_override("normal", _make_cta_style(base_bg, base_border, 2))
+	button.add_theme_stylebox_override("hover", _make_cta_style(base_bg.lightened(0.12), Color(1.0, 0.62, 0.54, 1.0), 3))
+	button.add_theme_stylebox_override("pressed", _make_cta_style(base_bg.darkened(0.2), Color(0.82, 0.28, 0.24, 1.0), 2))
+	button.add_theme_stylebox_override("focus", _make_cta_style(base_bg.lightened(0.12), Color(1, 1, 1, 0.95), 4))
+
+
+func _ensure_title_quit_button() -> Button:
+	if is_instance_valid(_title_quit_button):
+		return _title_quit_button
+	_title_quit_button = get_node_or_null("QuitGameButton") as Button
+	if not is_instance_valid(_title_quit_button):
+		_title_quit_button = get_node_or_null("CenterContainer/VBoxContainer/QuitGameButton") as Button
+	if is_instance_valid(_title_quit_button) and _title_quit_button.get_parent() != self:
+		var old_parent: Node = _title_quit_button.get_parent()
+		if is_instance_valid(old_parent):
+			old_parent.remove_child(_title_quit_button)
+		add_child(_title_quit_button)
+	if not is_instance_valid(_title_quit_button):
+		_title_quit_button = Button.new()
+		_title_quit_button.name = "QuitGameButton"
+		add_child(_title_quit_button)
+	_title_quit_button.text = "Quit Game"
+	_title_quit_button.z_as_relative = false
+	_title_quit_button.z_index = 70
+	if not _title_quit_button.pressed.is_connected(_on_quit_game_pressed):
+		_title_quit_button.pressed.connect(_on_quit_game_pressed)
+	return _title_quit_button
+
+
 func _setup_primary_buttons() -> void:
 	var story_button: Button = $CenterContainer/VBoxContainer/Tutorial
 	var challenge_button: Button = $CenterContainer/VBoxContainer/ChallengeButton
 	_style_cta_button(story_button, Color(0.15, 0.48, 0.24, 0.95), Color(0.72, 0.95, 0.77, 1.0))
 	_style_cta_button(challenge_button, Color(0.78, 0.34, 0.10, 0.95), Color(1.0, 0.80, 0.52, 1.0))
+	_style_title_quit_button(_ensure_title_quit_button())
 
 
 func _setup_version_label() -> void:
 	var version_label: Label = $VersionLabel
 	if not is_instance_valid(version_label):
 		return
-	var version_text = str(ProjectSettings.get_setting("application/config/version", "1.1.7"))
+	var version_text = str(ProjectSettings.get_setting("application/config/version", "1.1.12"))
 	if not version_text.begins_with("v"):
 		version_text = "v" + version_text
 	version_label.text = version_text
@@ -298,8 +341,11 @@ func _update_title_score_widgets(view_size: Vector2, compact: bool, tiny: bool) 
 	var max_panel_width: float = maxf(220.0, view_size.x - 64.0)
 	var panel_width: float = clampf(menu_rect.size.x, 220.0, max_panel_width)
 	var label_width: float = maxf(200.0, panel_width - 20.0)
-	var last_size := Vector2(label_width, 66.0 if tiny else (72.0 if compact else 78.0))
-	var high_size := Vector2(label_width, 42.0 if tiny else (48.0 if compact else 54.0))
+	var last_size: Vector2 = Vector2(label_width, 66.0 if tiny else (72.0 if compact else 78.0))
+	var high_size: Vector2 = Vector2(label_width, 42.0 if tiny else (48.0 if compact else 54.0))
+	var basket_center: Vector2 = _get_title_basket_score_anchor(view_size, compact)
+	var score_y: float = basket_center.y + _get_title_basket_score_gap(compact, tiny)
+	var score_gap: float = _get_title_score_gap()
 	_style_title_score_label(_last_score_label, 22 if tiny else (24 if compact else 27))
 	_style_title_score_label(_high_score_label, 22 if tiny else (24 if compact else 27))
 	if is_instance_valid(_last_score_label):
@@ -312,16 +358,13 @@ func _update_title_score_widgets(view_size: Vector2, compact: bool, tiny: bool) 
 		_high_score_label.custom_minimum_size = high_size
 		_high_score_label.size = high_size
 		_high_score_label.text = str("High Score: ", Global.format_score_value(Global.high_score))
-	var basket_center: Vector2 = _get_title_basket_score_anchor(view_size, compact)
 	if is_instance_valid(_last_score_label):
-		var last_y = basket_center.y - (98.0 if tiny else (108.0 if compact else 122.0))
-		var link: LinkButton = $CenterContainer/VBoxContainer/LinkButton
-		if is_instance_valid(link):
-			var link_rect = link.get_global_rect()
-			last_y = maxf(last_y, link_rect.position.y + link_rect.size.y + 8.0)
+		var last_y: float = score_y
 		_last_score_label.position = Vector2(round(score_center_x - last_size.x * 0.5), round(last_y))
+		if has_last_score:
+			score_y = last_y + last_size.y + score_gap
 	if is_instance_valid(_high_score_label):
-		var high_y = basket_center.y + (34.0 if tiny else (40.0 if compact else 48.0))
+		var high_y: float = score_y
 		_high_score_label.position = Vector2(round(score_center_x - high_size.x * 0.5), round(high_y))
 	_layout_title_score_panel(_last_score_panel, _last_score_label, has_last_score)
 	_layout_title_score_panel(_high_score_panel, _high_score_label, has_high_score)
@@ -417,7 +460,13 @@ func _ensure_title_basket_land_sound_player() -> AudioStreamPlayer:
 	return _title_basket_land_sound_player
 
 
+func _can_run_title_flyby_audio() -> bool:
+	return DisplayServer.get_name() != "headless"
+
+
 func _play_title_basket_land_sound() -> void:
+	if not _can_run_title_flyby_audio():
+		return
 	var player: AudioStreamPlayer = _ensure_title_basket_land_sound_player()
 	if not is_instance_valid(player):
 		return
@@ -452,6 +501,8 @@ func _move_title_loop_volume(player: AudioStreamPlayer, target_db: float, silent
 
 
 func _update_title_flyby_audio(delta: float) -> void:
+	if not _can_run_title_flyby_audio():
+		return
 	var bird_target_db := TITLE_PREDATOR_BIRD_SILENT_VOLUME_DB
 	if is_instance_valid(_title_bird_sprite) and _title_bird_sprite.visible and str(_title_flyby_phase).begins_with("bird"):
 		bird_target_db = _get_title_flyby_target_volume(_title_bird_sprite.global_position, TITLE_PREDATOR_BIRD_ACTIVE_VOLUME_DB, TITLE_PREDATOR_BIRD_DISTANT_VOLUME_DB)
@@ -524,18 +575,108 @@ func _get_title_basket_sprite() -> Sprite2D:
 	return get_node_or_null("CenterContainer/Basket") as Sprite2D
 
 
+func _get_title_quit_bottom_margin(compact: bool, tiny: bool) -> float:
+	return 10.0 if tiny else (12.0 if compact else 16.0)
+
+
+func _get_title_quit_height(compact: bool, tiny: bool) -> float:
+	if tiny:
+		return 38.0
+	return 42.0 if compact else 46.0
+
+
+func _get_title_version_gap(tiny: bool) -> float:
+	return 5.0 if tiny else 7.0
+
+
+func _get_title_version_label_size() -> Vector2:
+	var version_label: Label = get_node_or_null("VersionLabel") as Label
+	if not is_instance_valid(version_label):
+		return Vector2(112.0, 24.0)
+	var label_size: Vector2 = version_label.size
+	if label_size.x <= 1.0 or label_size.y <= 1.0:
+		label_size = version_label.custom_minimum_size
+	if label_size.x <= 1.0 or label_size.y <= 1.0:
+		label_size = Vector2(112.0, 24.0)
+	return label_size
+
+
+func _get_title_version_top_y(view_size: Vector2, compact: bool, tiny: bool) -> float:
+	var version_size: Vector2 = _get_title_version_label_size()
+	var quit_top_y: float = view_size.y - _get_title_quit_height(compact, tiny) - _get_title_quit_bottom_margin(compact, tiny)
+	return quit_top_y - version_size.y - _get_title_version_gap(tiny)
+
+
+func _get_title_score_gap() -> float:
+	return 8.0
+
+
+func _get_title_basket_after_ge_gap(compact: bool, tiny: bool) -> float:
+	if tiny:
+		return 22.0
+	return 26.0 if compact else 30.0
+
+
+func _get_title_basket_score_gap(compact: bool, tiny: bool) -> float:
+	if tiny:
+		return 22.0
+	return 26.0 if compact else 30.0
+
+
+func _get_title_score_stack_height(compact: bool, tiny: bool) -> float:
+	var has_last_score: bool = int(Global.last_score) > 0
+	var has_high_score: bool = int(Global.high_score) > 0
+	var height: float = 0.0
+	if has_last_score:
+		height += 66.0 if tiny else (72.0 if compact else 78.0)
+	if has_high_score:
+		if height > 0.0:
+			height += _get_title_score_gap()
+		height += 42.0 if tiny else (48.0 if compact else 54.0)
+	return height
+
+
+func _get_title_ge_button_bottom_y(view_size: Vector2) -> float:
+	var link: LinkButton = get_node_or_null("CenterContainer/VBoxContainer/LinkButton") as LinkButton
+	if is_instance_valid(link):
+		var link_rect: Rect2 = link.get_global_rect()
+		if link_rect.size.y > 1.0:
+			return link_rect.position.y + link_rect.size.y
+	var menu_box: Control = get_node_or_null("CenterContainer/VBoxContainer") as Control
+	if is_instance_valid(menu_box):
+		var menu_rect: Rect2 = menu_box.get_global_rect()
+		if menu_rect.size.y > 1.0:
+			return menu_rect.position.y + menu_rect.size.y
+	return view_size.y * 0.52
+
+
+func _get_title_basket_global_rest_position(view_size: Vector2, compact: bool, tiny: bool) -> Vector2:
+	var ge_bottom_y: float = _get_title_ge_button_bottom_y(view_size)
+	var desired_y: float = ge_bottom_y + _get_title_basket_after_ge_gap(compact, tiny)
+	var score_stack_height: float = _get_title_score_stack_height(compact, tiny)
+	var lower_stack_top: float = _get_title_version_top_y(view_size, compact, tiny) - (8.0 if tiny else 10.0)
+	var max_y: float = lower_stack_top - _get_title_basket_score_gap(compact, tiny)
+	if score_stack_height > 0.0:
+		max_y -= score_stack_height
+	var min_y: float = ge_bottom_y + 12.0
+	if max_y < min_y:
+		return Vector2(view_size.x * 0.5, min_y)
+	return Vector2(view_size.x * 0.5, clampf(desired_y, min_y, max_y))
+
+
 func _get_title_basket_local_rest_position(compact: bool) -> Vector2:
 	var center_container: Control = $CenterContainer
-	var center_x = center_container.size.x * 0.5 if is_instance_valid(center_container) else 283.5
-	return Vector2(center_x, 520.0 if compact else 534.5)
+	var view_size: Vector2 = get_viewport_rect().size
+	var tiny: bool = minf(view_size.x, view_size.y) <= TITLE_TINY_SHORT_EDGE
+	var global_rest: Vector2 = _get_title_basket_global_rest_position(view_size, compact, tiny)
+	if is_instance_valid(center_container):
+		return global_rest - center_container.global_position
+	return global_rest
 
 
 func _get_title_basket_score_anchor(view_size: Vector2, compact: bool) -> Vector2:
-	var center_container: Control = $CenterContainer
-	if is_instance_valid(center_container):
-		var local_rest = _get_title_basket_local_rest_position(compact)
-		return center_container.global_position + local_rest
-	return Vector2(view_size.x * 0.5, view_size.y * 0.72)
+	var tiny: bool = minf(view_size.x, view_size.y) <= TITLE_TINY_SHORT_EDGE
+	return _get_title_basket_global_rest_position(view_size, compact, tiny)
 
 
 func _get_title_basket_center(view_size: Vector2) -> Vector2:
@@ -588,10 +729,11 @@ func _begin_title_bird_flyby() -> void:
 	_title_bird_sprite.position = _title_bird_start_pos
 	_title_bird_sprite.visible = true
 	_title_bird_sprite.play(&"default")
-	var bird_player := _ensure_title_predator_bird_sound_player()
-	if is_instance_valid(bird_player):
-		bird_player.volume_db = TITLE_PREDATOR_BIRD_SILENT_VOLUME_DB
-		bird_player.play()
+	if _can_run_title_flyby_audio():
+		var bird_player := _ensure_title_predator_bird_sound_player()
+		if is_instance_valid(bird_player):
+			bird_player.volume_db = TITLE_PREDATOR_BIRD_SILENT_VOLUME_DB
+			bird_player.play()
 	if is_instance_valid(_title_bird_basket_sprite):
 		_title_bird_basket_sprite.visible = true
 	if is_instance_valid(_title_tuktuk_node):
@@ -630,10 +772,11 @@ func _begin_title_tuktuk_flyby() -> void:
 	if is_instance_valid(_title_tuktuk_node):
 		_title_tuktuk_node.position = _title_tuktuk_start_pos
 		_title_tuktuk_node.visible = true
-	var tuktuk_player := _ensure_title_tuktuk_engine_sound_player()
-	if is_instance_valid(tuktuk_player):
-		tuktuk_player.volume_db = TITLE_TUKTUK_ENGINE_SILENT_VOLUME_DB
-		tuktuk_player.play()
+	if _can_run_title_flyby_audio():
+		var tuktuk_player := _ensure_title_tuktuk_engine_sound_player()
+		if is_instance_valid(tuktuk_player):
+			tuktuk_player.volume_db = TITLE_TUKTUK_ENGINE_SILENT_VOLUME_DB
+			tuktuk_player.play()
 	if is_instance_valid(_title_tuktuk_basket_sprite):
 		_title_tuktuk_basket_sprite.visible = false
 	var basket = _get_title_basket_sprite()
@@ -748,6 +891,13 @@ func _release_title_audio() -> void:
 	_title_basket_land_sound_player = null
 
 
+func _shutdown_title_runtime() -> void:
+	_title_flyby_running = false
+	set_process(false)
+	_reset_title_flyby_visuals()
+	_release_title_audio()
+
+
 func _start_title_flyby_cycle() -> void:
 	if _title_flyby_running:
 		return
@@ -848,6 +998,15 @@ func _apply_responsive_layout() -> void:
 	var short_edge = minf(view_size.x, view_size.y)
 	var compact = Global.is_mobile_platform or short_edge <= TITLE_COMPACT_SHORT_EDGE
 	var tiny = short_edge <= TITLE_TINY_SHORT_EDGE
+	var center_container := $CenterContainer as CenterContainer
+	if is_instance_valid(center_container):
+		var center_y_offset := -92.0
+		if compact:
+			center_y_offset = -74.0
+		if tiny:
+			center_y_offset = -56.0
+		center_container.offset_top = -229.5 + center_y_offset
+		center_container.offset_bottom = 229.5 + center_y_offset
 	var title_font_size := 56
 	if compact:
 		title_font_size = 42
@@ -868,14 +1027,26 @@ func _apply_responsive_layout() -> void:
 	var cta_width = clampf(view_size.x - 72.0, 220.0, 340.0)
 	var cta_height = 62.0 if compact else 70.0
 	var cta_font_size = 34 if compact else 42
+	var quit_width = clampf(cta_width * 0.62, 190.0, 280.0)
+	var quit_height = _get_title_quit_height(compact, tiny)
+	var quit_font_size = 22 if compact else 24
 	if tiny:
 		cta_height = 56.0
 		cta_font_size = 29
+		quit_font_size = 20
 	for button in [$CenterContainer/VBoxContainer/Tutorial, $CenterContainer/VBoxContainer/ChallengeButton]:
 		if not is_instance_valid(button):
 			continue
 		button.custom_minimum_size = Vector2(cta_width, cta_height)
 		button.add_theme_font_size_override("font_size", cta_font_size)
+	if is_instance_valid(_title_quit_button):
+		_title_quit_button.custom_minimum_size = Vector2(quit_width, quit_height)
+		_title_quit_button.size = Vector2(quit_width, quit_height)
+		_title_quit_button.position = Vector2(
+			round((view_size.x - quit_width) * 0.5),
+			round(view_size.y - quit_height - _get_title_quit_bottom_margin(compact, tiny))
+		)
+		_title_quit_button.add_theme_font_size_override("font_size", quit_font_size)
 	var link: LinkButton = $CenterContainer/VBoxContainer/LinkButton
 	if is_instance_valid(link):
 		var ge_panel = link.get_node_or_null("GEPanel") as Panel
@@ -976,13 +1147,14 @@ func _apply_responsive_layout() -> void:
 	if is_instance_valid(version_label):
 		version_label.add_theme_font_size_override("font_size", 13 if compact else 16)
 		version_label.custom_minimum_size = Vector2(112.0, 24.0)
-		var label_size = version_label.size
+		var label_size: Vector2 = _get_title_version_label_size()
 		if label_size.x <= 1.0 or label_size.y <= 1.0:
 			label_size = version_label.custom_minimum_size
-		var bottom_margin = 8.0 if tiny else (10.0 if compact else 14.0)
+		version_label.size = label_size
+		var version_y = _get_title_version_top_y(view_size, compact, tiny)
 		version_label.position = Vector2(
 			round((view_size.x - label_size.x) * 0.5),
-			round(view_size.y - label_size.y - bottom_margin)
+			round(version_y)
 		)
 
 
@@ -1011,6 +1183,7 @@ func _reset_run_state() -> void:
 
 
 func _ready():
+	Global.reset_gameplay_speed()
 	DisplayServer.window_set_title("Social Soil")
 	Global.record_last_score()
 	Global.score = 0
@@ -1023,7 +1196,8 @@ func _ready():
 	_connect_viewport_resize_signal()
 	_apply_responsive_layout()
 	_request_title_layout_refresh(4)
-	call_deferred("_start_title_flyby_cycle")
+	if _can_run_title_flyby_audio():
+		call_deferred("_start_title_flyby_cycle")
 	Global.social_mode = false
 
 
@@ -1037,9 +1211,7 @@ func _process(delta: float) -> void:
 
 
 func _exit_tree() -> void:
-	_title_flyby_running = false
-	_reset_title_flyby_visuals()
-	_release_title_audio()
+	_shutdown_title_runtime()
 	var basket = _get_title_basket_sprite()
 	if is_instance_valid(basket):
 		basket.visible = true
@@ -1098,6 +1270,16 @@ func _on_challenge_button_pressed() -> void:
 
 func _on_cofi_button_pressed() -> void:
 	_on_challenge_button_pressed()
+
+
+func _on_quit_game_pressed() -> void:
+	if _title_quit_requested:
+		return
+	_title_quit_requested = true
+	Global.record_last_score()
+	_shutdown_title_runtime()
+	await get_tree().process_frame
+	get_tree().quit()
 
 
 func _on_check_button_toggled(toggled_on: bool) -> void:

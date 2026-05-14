@@ -44,7 +44,7 @@ func logistics():
 	for trade in trade_queue:
 		var queued_asset = str(trade.get("trade_asset", ""))
 		var queued_amount = int(trade.get("trade_amount", 0))
-		if bool(trade.get("bank_reserve_protected", false)) and not _bank_trade_has_return_surplus(queued_asset, queued_amount):
+		if Global.to_bool(trade.get("bank_reserve_protected", false)) and not _bank_trade_has_return_surplus(queued_asset, queued_amount):
 			new_trade_queue.append(trade)
 			continue
 		if(assets[trade.trade_asset]>= trade.trade_amount):
@@ -272,7 +272,7 @@ func _on_area_entered(trade: Area2D) -> void:
 							"trade_type": "send",
 							"return_res": null,
 							"return_amt": null,
-							"liquidity_cycle_trade": bool(trade.get("liquidity_cycle_trade")),
+							"liquidity_cycle_trade": Global.to_bool(trade.get("liquidity_cycle_trade")),
 							"liquidity_cycle_origin_id": liquidity_origin_id,
 							"bank_reserve_protected": bank_reserve_protected
 						}

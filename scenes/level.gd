@@ -93,6 +93,7 @@ const PREDATOR_BIRD_FADE_OUT_SECONDS := 0.28
 const PREDATOR_BIRD_FOCUS_RADIUS_WORLD := 72.0
 const PREDATOR_BIRD_APPROACH_FADE_DB_PER_SEC := 10.0
 const PREDATOR_BIRD_DEPART_FADE_DB_PER_SEC := 44.0
+const DYNAMIC_PREDATOR_PRESSURE_CHECK_SEC := 0.25
 const DYNAMIC_PREDATOR_STAGGER_SECONDS := 2.2
 const DYNAMIC_TUKTUK_INTERVAL_MAX_SEC := 24.0
 const DYNAMIC_TUKTUK_INTERVAL_MIN_SEC := 8.0
@@ -208,6 +209,7 @@ var _ambient_tree_audio_target_db := AMBIENT_TREE_AUDIO_SILENT_DB
 var _dynamic_bird_spawn_accum := 0.0
 var _dynamic_tuktuk_spawn_accum := 0.0
 var _dynamic_predator_stagger_timer := 0.0
+var _dynamic_predator_pressure_accum := 0.0
 var _dynamic_predator_blocked_type := ""
 var _bank_hotkey_enabled := true
 var _challenge_farmer_n_autofill_enabled := false
@@ -262,6 +264,20 @@ func _play_squelch_at(world_pos: Vector2) -> void:
 		return
 	_squelch_sound_player.global_position = world_pos
 	_squelch_sound_player.play()
+
+
+func play_inventory_harvest_sound(item_type: String, world_pos: Vector2 = Vector2.ZERO) -> void:
+	match str(item_type):
+		"bean", "squash", "maize":
+			if is_instance_valid(_twinkle_sound_player):
+				_twinkle_sound_player.global_position = world_pos
+				_twinkle_sound_player.play()
+		"tree":
+			if is_instance_valid(_bush_sound_player):
+				_bush_sound_player.global_position = world_pos
+				_bush_sound_player.play()
+		"myco", "basket":
+			_play_squelch_at(world_pos)
 
 
 func _get_world_foundation() -> Node:
@@ -322,7 +338,7 @@ func _compute_tree_ambient_target_db() -> float:
 	for agent in $Agents.get_children():
 		if not is_instance_valid(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if str(agent.get("type")) != "tree":
 			continue
@@ -359,13 +375,13 @@ func _is_story_or_tutorial_mode() -> bool:
 
 func _is_challenge_dual_village_runtime() -> bool:
 	if Global.has_method("is_challenge_dual_village_mode"):
-		return bool(Global.is_challenge_dual_village_mode())
+		return Global.to_bool(Global.is_challenge_dual_village_mode())
 	return str(Global.mode) == "challenge"
 
 
 func _is_parallel_village_runtime() -> bool:
 	if Global.has_method("is_parallel_village_runtime"):
-		return bool(Global.is_parallel_village_runtime())
+		return Global.to_bool(Global.is_parallel_village_runtime())
 	return _is_story_mode() or _is_challenge_dual_village_runtime()
 
 
@@ -437,7 +453,7 @@ func _compute_tuktuk_engine_target_db() -> float:
 		if typeof(pos) != TYPE_VECTOR2:
 			continue
 		var tuktuk_pos: Vector2 = pos
-		var escaping: bool = bool(state.get("escaping", false))
+		var escaping: bool = Global.to_bool(state.get("escaping", false))
 		var state_audible_radius: float = audible_radius
 		if escaping:
 			state_audible_radius = maxf(audible_radius * 0.62, TUKTUK_ENGINE_FOCUS_RADIUS_WORLD + 1.0)
@@ -579,7 +595,7 @@ func _compute_predator_bird_target_db() -> float:
 		if typeof(pos) != TYPE_VECTOR2:
 			continue
 		var bird_pos: Vector2 = pos
-		var escaping: bool = bool(state.get("escaping", false))
+		var escaping: bool = Global.to_bool(state.get("escaping", false))
 		var state_audible_radius: float = audible_radius
 		if escaping:
 			state_audible_radius = maxf(audible_radius * 0.62, PREDATOR_BIRD_FOCUS_RADIUS_WORLD + 1.0)
@@ -669,14 +685,14 @@ func _get_villager_child_texture() -> Texture2D:
 func _is_harvestable_crop_target(candidate: Node) -> bool:
 	if not is_instance_valid(candidate):
 		return false
-	if bool(candidate.get("dead")):
+	if Global.to_bool(candidate.get("dead")):
 		return false
 	var crop_type = str(candidate.get("type"))
 	if not _is_crop_type(crop_type):
 		return false
 	if not candidate.has_method("can_drag_for_inventory_harvest"):
 		return false
-	return bool(candidate.call("can_drag_for_inventory_harvest"))
+	return Global.to_bool(candidate.call("can_drag_for_inventory_harvest"))
 
 
 func _get_camera_visible_world_rect() -> Rect2:
@@ -703,14 +719,14 @@ func _story_get_visible_phase2_harvest_target() -> Node:
 	for candidate in $Agents.get_children():
 		if not is_instance_valid(candidate):
 			continue
-		if bool(candidate.get("dead")):
+		if Global.to_bool(candidate.get("dead")):
 			continue
 		var harvest_type = str(candidate.get("type"))
 		if not _story_is_phase2_required_inventory_harvest_type(harvest_type):
 			continue
 		if not candidate.has_method("can_drag_for_inventory_harvest"):
 			continue
-		if not bool(candidate.call("can_drag_for_inventory_harvest")):
+		if not Global.to_bool(candidate.call("can_drag_for_inventory_harvest")):
 			continue
 		if visible_rect.has_point(candidate.global_position):
 			return candidate
@@ -734,7 +750,7 @@ func _story_highlight_phase2_harvest_target(target: Node) -> bool:
 func _is_story_villager(agent: Variant) -> bool:
 	if not is_instance_valid(agent):
 		return false
-	if not bool(agent.get_meta("story_villager", false)):
+	if not Global.to_bool(agent.get_meta("story_villager", false)):
 		return false
 	return true
 
@@ -742,7 +758,7 @@ func _is_story_villager(agent: Variant) -> bool:
 func _is_story_village_actor(agent: Variant) -> bool:
 	if not is_instance_valid(agent):
 		return false
-	return bool(agent.get_meta("story_village_actor", false))
+	return Global.to_bool(agent.get_meta("story_village_actor", false))
 
 
 func _can_share_story_trade_network_nodes(node_a: Variant, node_b: Variant) -> bool:
@@ -758,7 +774,7 @@ func _can_share_story_trade_network_nodes(node_a: Variant, node_b: Variant) -> b
 func _is_ecology_myco_anchor(agent: Variant) -> bool:
 	if not is_instance_valid(agent):
 		return false
-	if bool(agent.get("dead")):
+	if Global.to_bool(agent.get("dead")):
 		return false
 	if str(agent.get("type")) != "myco":
 		return false
@@ -850,13 +866,13 @@ func _is_ecology_soil_spawn_allowed(world: Node, coord: Vector2i, spawn_name: St
 		return true
 	if not world.has_method("can_place_ecology_on_tile"):
 		return true
-	if not bool(world.call("can_place_ecology_on_tile", coord)):
+	if not Global.to_bool(world.call("can_place_ecology_on_tile", coord)):
 		return false
 	if spawn_name == "tree":
 		var upper_coord = coord + Vector2i(0, -1)
 		if not world.in_bounds(upper_coord):
 			return false
-		if not bool(world.call("can_place_ecology_on_tile", upper_coord)):
+		if not Global.to_bool(world.call("can_place_ecology_on_tile", upper_coord)):
 			return false
 	return true
 
@@ -1109,11 +1125,11 @@ func _story_find_phase5_intro_vendor() -> Node:
 	for agent in $Agents.get_children():
 		if not _is_story_villager(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if str(agent.get("type")) != "vendor":
 			continue
-		if bool(agent.get_meta(STORY_PHASE5_INTRO_VENDOR_META, false)):
+		if Global.to_bool(agent.get_meta(STORY_PHASE5_INTRO_VENDOR_META, false)):
 			return agent
 	return null
 
@@ -1157,16 +1173,16 @@ func _story_wait_for_phase5_intro_tuktuk_capture(predator: Node) -> bool:
 			return false
 		if not is_instance_valid(predator) or predator.is_queued_for_deletion():
 			return false
-		if bool(predator.get("caught")):
+		if Global.to_bool(predator.get("caught")):
 			_story_phase5_intro_tuktuk_captured = true
 			return true
 		await get_tree().create_timer(STORY_PHASE5_INTRO_TUKTUK_POLL_SEC, false, false, true).timeout
 		if not _is_story_mode() or _story_phase_id != 5:
 			return false
 		elapsed += STORY_PHASE5_INTRO_TUKTUK_POLL_SEC
-	if is_instance_valid(predator) and not predator.is_queued_for_deletion() and not bool(predator.get("caught")):
+	if is_instance_valid(predator) and not predator.is_queued_for_deletion() and not Global.to_bool(predator.get("caught")):
 		predator.queue_free()
-	return bool(is_instance_valid(predator) and bool(predator.get("caught")))
+	return Global.to_bool(is_instance_valid(predator) and Global.to_bool(predator.get("caught")))
 
 
 func _story_run_phase5_intro_sequence(prompt_text: String) -> void:
@@ -1284,7 +1300,7 @@ func _story_restore_camera_smoothing_after_delay(delay_sec: float) -> void:
 
 func _story_center_camera_on_phase5_nontrading_villagers(immediate: bool = false) -> void:
 	var result = get_story_phase5_nontrading_lower_villagers_center_world()
-	if not bool(result.get("ok", false)):
+	if not Global.to_bool(result.get("ok", false)):
 		return
 	var world = _get_world_foundation()
 	if not is_instance_valid(world) or not world.has_method("set_camera_world_center"):
@@ -1324,7 +1340,7 @@ func _is_challenge_farmer_refill_drop_type(item_type: String) -> bool:
 
 func _story_has_all_required_types(tracked: Dictionary, required: Dictionary) -> bool:
 	for required_type in required.keys():
-		if not bool(tracked.get(required_type, false)):
+		if not Global.to_bool(tracked.get(required_type, false)):
 			return false
 	return true
 
@@ -1332,7 +1348,7 @@ func _story_has_all_required_types(tracked: Dictionary, required: Dictionary) ->
 func _story_collect_phase1_pending_placement_types() -> Dictionary:
 	var pending: Dictionary = {}
 	for required_type in STORY_PHASE1_REQUIRED_PLACED_TYPES.keys():
-		if bool(_story_phase1_placed_types.get(required_type, false)):
+		if Global.to_bool(_story_phase1_placed_types.get(required_type, false)):
 			continue
 		pending[str(required_type)] = true
 	return pending
@@ -1341,7 +1357,7 @@ func _story_collect_phase1_pending_placement_types() -> Dictionary:
 func _story_collect_phase2_pending_harvest_types() -> Dictionary:
 	var pending: Dictionary = {}
 	for required_type in STORY_PHASE2_REQUIRED_INVENTORY_HARVEST_TYPES.keys():
-		if bool(_story_phase2_inventory_harvested_types.get(required_type, false)):
+		if Global.to_bool(_story_phase2_inventory_harvested_types.get(required_type, false)):
 			continue
 		pending[str(required_type)] = true
 	return pending
@@ -1445,16 +1461,16 @@ func _update_story_phase2_harvest_guidance_ring_visual(agent: Node, ring: Line2D
 func _should_show_story_phase2_harvest_guidance(agent: Node, pending_types: Dictionary) -> bool:
 	if not is_instance_valid(agent):
 		return false
-	if bool(agent.get("dead")):
+	if Global.to_bool(agent.get("dead")):
 		return false
 	var crop_type = str(agent.get("type"))
 	if crop_type == "":
 		return false
-	if not bool(pending_types.get(crop_type, false)):
+	if not Global.to_bool(pending_types.get(crop_type, false)):
 		return false
 	if not agent.has_method("can_drag_for_inventory_harvest"):
 		return false
-	return bool(agent.can_drag_for_inventory_harvest())
+	return Global.to_bool(agent.can_drag_for_inventory_harvest())
 
 
 func _refresh_story_phase2_harvest_guidance_visuals(delta: float) -> void:
@@ -1492,7 +1508,7 @@ func _story_collect_villager_ids() -> Dictionary:
 	for agent in $Agents.get_children():
 		if not _is_story_villager(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if not _is_story_village_person_type(str(agent.get("type"))):
 			continue
@@ -1505,7 +1521,7 @@ func _story_collect_phase4_initial_farmer_ids() -> Dictionary:
 	for agent in $Agents.get_children():
 		if not _is_story_villager(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if str(agent.get("type")) != "farmer":
 			continue
@@ -1519,7 +1535,7 @@ func _story_find_live_agent_by_instance_id(agent_id: int) -> Node:
 			continue
 		if int(agent.get_instance_id()) != agent_id:
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			return null
 		return agent
 	return null
@@ -1669,7 +1685,7 @@ func _story_phase4_cleanup_harvest_reservations() -> void:
 		if not crop.has_method("can_drag_for_inventory_harvest"):
 			stale_keys.append(crop_id_variant)
 			continue
-		if not bool(crop.call("can_drag_for_inventory_harvest")):
+		if not Global.to_bool(crop.call("can_drag_for_inventory_harvest")):
 			stale_keys.append(crop_id_variant)
 	for crop_id_variant in stale_keys:
 		_story_phase4_reserved_crop_to_farmer_ids.erase(crop_id_variant)
@@ -1682,7 +1698,7 @@ func _story_phase4_has_all_required_farmers_completed_harvest() -> bool:
 	if _story_phase4_required_farmer_ids.is_empty():
 		return false
 	for farmer_id_variant in _story_phase4_required_farmer_ids.keys():
-		if not bool(_story_phase4_completed_farmer_ids.get(farmer_id_variant, false)):
+		if not Global.to_bool(_story_phase4_completed_farmer_ids.get(farmer_id_variant, false)):
 			return false
 	return true
 
@@ -1708,7 +1724,7 @@ func _story_phase4_mark_farmer_completed(target_farmer: Node) -> void:
 	if not _is_story_villager(target_farmer) or str(target_farmer.get("type")) != "farmer":
 		return
 	var farmer_id = int(target_farmer.get_instance_id())
-	if not bool(_story_phase4_required_farmer_ids.get(farmer_id, false)):
+	if not Global.to_bool(_story_phase4_required_farmer_ids.get(farmer_id, false)):
 		return
 	_story_phase4_completed_farmer_ids[farmer_id] = true
 	_story_phase4_release_reservations_for_farmer_id(farmer_id)
@@ -1805,7 +1821,7 @@ func _is_story_village_person_type(agent_type: String) -> bool:
 func _is_tuktuk_protected_story_villager(agent: Variant) -> bool:
 	if not is_instance_valid(agent):
 		return false
-	return bool(agent.get_meta("story_protected_from_tuktuk", false))
+	return Global.to_bool(agent.get_meta("story_protected_from_tuktuk", false))
 
 
 func _can_place_basket_near_person(world_pos: Vector2) -> bool:
@@ -1816,7 +1832,7 @@ func _can_place_basket_near_person(world_pos: Vector2) -> bool:
 	for agent in $Agents.get_children():
 		if not is_instance_valid(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if not _is_story_village_actor(agent):
 			continue
@@ -1934,7 +1950,7 @@ func _story_force_phase5_basket_links(basket: Node) -> void:
 	for agent in $Agents.get_children():
 		if not _is_story_villager(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if not _is_story_village_person_type(str(agent.get("type"))):
 			continue
@@ -1977,7 +1993,7 @@ func get_story_phase5_nontrading_lower_villagers_center_world() -> Dictionary:
 	for agent in $Agents.get_children():
 		if not _is_story_villager(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if _is_tuktuk_protected_story_villager(agent):
 			continue
@@ -2033,10 +2049,10 @@ func _is_tuktuk_villager_inactive_long_enough(agent: Variant) -> bool:
 func _story_get_phase5_villager_id(agent: Variant) -> int:
 	if not _is_story_villager(agent):
 		return 0
-	if bool(agent.get("dead")):
+	if Global.to_bool(agent.get("dead")):
 		return 0
 	var key = int(agent.get_instance_id())
-	if not bool(_story_phase5_target_villager_ids.get(key, false)):
+	if not Global.to_bool(_story_phase5_target_villager_ids.get(key, false)):
 		return 0
 	return key
 
@@ -2217,9 +2233,9 @@ func _can_manually_drop_on_farmer(target_farmer: Node) -> bool:
 		return false
 	if not _is_challenge_dual_village_runtime():
 		return false
-	if bool(target_farmer.get("dead")):
+	if Global.to_bool(target_farmer.get("dead")):
 		return false
-	if target_farmer.has_method("is_trade_locked_by_user_move") and bool(target_farmer.call("is_trade_locked_by_user_move")):
+	if target_farmer.has_method("is_trade_locked_by_user_move") and Global.to_bool(target_farmer.call("is_trade_locked_by_user_move")):
 		return false
 	return true
 
@@ -2233,7 +2249,7 @@ func _story_villager_reserves_tile(coord: Vector2i, ignore_agent: Variant = null
 			continue
 		if is_instance_valid(ignore_agent) and agent == ignore_agent:
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		var occupied_tiles = LevelHelpersRef.get_agent_occupied_tiles(self, agent)
 		if occupied_tiles.has(coord):
@@ -2279,7 +2295,7 @@ func _refill_challenge_farmers_n() -> int:
 	for agent in $Agents.get_children():
 		if not is_instance_valid(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if not _is_story_villager(agent):
 			continue
@@ -2359,7 +2375,8 @@ func _get_story_farmer_inbound_wait_timeout_msec() -> int:
 	var timeout_seconds = float(Global.story_farmer_inbound_wait_timeout_sec)
 	if timeout_seconds <= 0.0:
 		return 0
-	return maxi(int(round(timeout_seconds * 1000.0)), 0)
+	var speed_multiplier = maxf(Global.get_gameplay_speed_multiplier(), 0.001)
+	return maxi(int(round(timeout_seconds * 1000.0 / speed_multiplier)), 0)
 
 
 func _get_story_farmer_oldest_pending_inbound_created_msec(farmer: Node, fallback_now_msec: int = 0) -> int:
@@ -2419,14 +2436,14 @@ func story_farmer_try_assign_harvest_target(farmer: Node) -> Node:
 			continue
 		if candidate == farmer:
 			continue
-		if bool(candidate.get("dead")):
+		if Global.to_bool(candidate.get("dead")):
 			continue
 		var crop_type = str(candidate.get("type"))
 		if not _story_is_phase4_farmer_auto_harvest_crop_type(crop_type):
 			continue
 		if not candidate.has_method("can_drag_for_inventory_harvest"):
 			continue
-		if not bool(candidate.call("can_drag_for_inventory_harvest")):
+		if not Global.to_bool(candidate.call("can_drag_for_inventory_harvest")):
 			continue
 		var crop_id = int(candidate.get_instance_id())
 		var reserved_farmer_id = int(_story_phase4_reserved_crop_to_farmer_ids.get(crop_id, 0))
@@ -2500,7 +2517,7 @@ func try_story_harvest_drop(agent: Node, world_pos: Vector2) -> bool:
 		return false
 	if not agent.has_method("try_harvest_to_farmer"):
 		return false
-	var harvested = bool(agent.try_harvest_to_farmer(target_farmer))
+	var harvested = Global.to_bool(agent.try_harvest_to_farmer(target_farmer))
 	if harvested:
 		_refill_story_farmer_n_resource(target_farmer)
 	return harvested
@@ -2555,9 +2572,9 @@ func can_place_inventory_item_at_world_pos(item_name: String, world_pos: Vector2
 		return false
 	if ecology_spawn and not _is_ecology_soil_spawn_allowed(world, coord, spawn_name):
 		return false
-	if world.has_method("is_world_pos_revealed") and not bool(world.is_world_pos_revealed(target_pos)):
+	if world.has_method("is_world_pos_revealed") and not Global.to_bool(world.is_world_pos_revealed(target_pos)):
 		return false
-	if _is_parent_bounded_spawn_type(spawn_name):
+	if _is_parent_bounded_spawn_type(spawn_name) and not _is_crop_type(spawn_name):
 		var parent_anchor = _find_nearest_living_myco_anchor(target_pos)
 		if not _is_valid_parent_anchor(parent_anchor):
 			return false
@@ -2582,11 +2599,11 @@ func can_place_inventory_item_at_world_pos(item_name: String, world_pos: Vector2
 			return false
 	else:
 		var exact_spawn = _resolve_exact_tile_spawn_pos(target_pos)
-		if not bool(exact_spawn.get("ok", false)):
+		if not Global.to_bool(exact_spawn.get("ok", false)):
 			return false
 	if spawn_name == "myco":
 		var myco_gate = _validate_myco_spawn(target_pos)
-		if not bool(myco_gate.get("ok", false)):
+		if not Global.to_bool(myco_gate.get("ok", false)):
 			return false
 	return true
 
@@ -2594,7 +2611,7 @@ func can_place_inventory_item_at_world_pos(item_name: String, world_pos: Vector2
 func is_valid_predator_target(predator: Node, candidate: Node) -> bool:
 	if not is_instance_valid(predator) or not is_instance_valid(candidate):
 		return false
-	if bool(candidate.get("dead")):
+	if Global.to_bool(candidate.get("dead")):
 		return false
 	var c_type = str(candidate.get("type"))
 	var world = _get_world_foundation()
@@ -2708,11 +2725,11 @@ func _find_replaceable_agent_at_world_pos(pos: Vector2, ignore_agent: Variant = 
 			continue
 		if is_instance_valid(ignore_agent) and agent == ignore_agent:
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if str(agent.get("type")) == "cloud":
 			continue
-		if not bool(agent.get("killable")):
+		if not Global.to_bool(agent.get("killable")):
 			continue
 		var occupied_tiles = LevelHelpersRef.get_agent_occupied_tiles(self, agent)
 		if occupied_tiles.has(coord):
@@ -2954,7 +2971,7 @@ func _validate_myco_spawn(spawn_pos: Vector2, ignore_agent: Variant = null) -> D
 	if LevelHelpersRef.is_tile_occupied(self, $Agents, coord, ignore_agent, true):
 		return result
 	if world.has_method("can_place_myco_on_tile"):
-		if not bool(world.call("can_place_myco_on_tile", coord)):
+		if not Global.to_bool(world.call("can_place_myco_on_tile", coord)):
 			return result
 	else:
 		var tile = world.get_tile(coord)
@@ -3195,9 +3212,15 @@ func _process(_delta: float) -> void:
 	_update_tuktuk_engine_volume(_delta)
 	_update_predator_bird_volume(_delta)
 	_update_challenge_farmer_n_autofill(_delta)
-	if not Global.is_mobile_platform:
+	var world_node: Node = _get_world_foundation()
+	var camera_user_panning := is_instance_valid(world_node) and world_node.has_method("is_camera_user_panning") and Global.to_bool(world_node.call("is_camera_user_panning"))
+	if not Global.is_mobile_platform and not camera_user_panning:
 		LevelHelpersRef.update_agent_hover_focus(self, $Agents)
-	_update_dynamic_predator_pressure(_delta)
+	_dynamic_predator_pressure_accum += maxf(_delta, 0.0)
+	if _dynamic_predator_pressure_accum >= DYNAMIC_PREDATOR_PRESSURE_CHECK_SEC:
+		var predator_pressure_delta := _dynamic_predator_pressure_accum
+		_dynamic_predator_pressure_accum = 0.0
+		_update_dynamic_predator_pressure(predator_pressure_delta)
 	_update_challenge_loss_state(_delta)
 	_refresh_story_phase2_harvest_guidance_visuals(_delta)
 	if _is_story_mode():
@@ -3348,7 +3371,7 @@ func _story_spawn_village_cast() -> void:
 		var spawned_extra = _spawn_story_villager_at_tile(world, person_cfg["tile"], person_cfg["role"], true)
 		if spawned_extra != null:
 			spawned_extra.set_meta("story_protected_from_tuktuk", false)
-			if bool(person_cfg.get("phase5_intro_pickup", false)):
+			if Global.to_bool(person_cfg.get("phase5_intro_pickup", false)):
 				spawned_extra.set_meta(STORY_PHASE5_INTRO_VENDOR_META, true)
 			placed += 1
 			spawned_village_actors.append(spawned_extra)
@@ -3431,7 +3454,7 @@ func _spawn_trade(path_dict) -> void:
 						continue
 					if not packet.has_method("accumulate_trade_amount"):
 						continue
-					var aggregated = bool(packet.call("accumulate_trade_amount", trade_amount))
+					var aggregated = Global.to_bool(packet.call("accumulate_trade_amount", trade_amount))
 					if aggregated:
 						return
 	var trade = null
@@ -3497,7 +3520,7 @@ func _count_live_ecology_plants_for_predators() -> int:
 	for agent in $Agents.get_children():
 		if not is_instance_valid(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		var agent_type = str(agent.get("type"))
 		if agent_type == "bean" or agent_type == "squash" or agent_type == "maize" or agent_type == "tree":
@@ -3518,7 +3541,7 @@ func _count_live_challenge_garden_life() -> int:
 	for agent in $Agents.get_children():
 		if not is_instance_valid(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		var agent_type = str(agent.get("type"))
 		if agent_type == "bean" or agent_type == "squash" or agent_type == "maize" or agent_type == "tree":
@@ -3542,9 +3565,9 @@ func _has_valid_inventory_myco_spawn_tile() -> bool:
 		for x in range(columns):
 			var coord = Vector2i(x, y)
 			var target_pos = world.tile_to_world_center(coord)
-			if world.has_method("is_world_pos_revealed") and not bool(world.is_world_pos_revealed(target_pos)):
+			if world.has_method("is_world_pos_revealed") and not Global.to_bool(world.is_world_pos_revealed(target_pos)):
 				continue
-			if bool(_validate_myco_spawn(target_pos).get("ok", false)):
+			if Global.to_bool(_validate_myco_spawn(target_pos).get("ok", false)):
 				return true
 	return false
 
@@ -3558,7 +3581,7 @@ func _count_live_challenge_villagers() -> int:
 	for agent in $Agents.get_children():
 		if not _is_story_villager(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if not _is_story_village_person_type(str(agent.get("type"))):
 			continue
@@ -3624,7 +3647,7 @@ func _count_vulnerable_villagers_for_tuktuk() -> int:
 	for agent in $Agents.get_children():
 		if not _is_story_villager(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if not _is_story_village_person_type(str(agent.get("type"))):
 			continue
@@ -3811,13 +3834,13 @@ func _on_new_agent(agent_dict) -> void:
 	var spawn_name = str(agent_dict["name"])
 	var spawn_pos = agent_dict["pos"]
 	var ignore_agent = agent_dict.get("ignore_agent", null)
-	var require_exact_tile = bool(agent_dict.get("require_exact_tile", false))
-	var allow_replace = bool(agent_dict.get("allow_replace", false))
-	var from_inventory = bool(agent_dict.get("from_inventory", false))
-	var allow_unanchored_spawn = bool(agent_dict.get("allow_unanchored_spawn", false))
+	var require_exact_tile = Global.to_bool(agent_dict.get("require_exact_tile", false))
+	var allow_replace = Global.to_bool(agent_dict.get("allow_replace", false))
+	var from_inventory = Global.to_bool(agent_dict.get("from_inventory", false))
+	var allow_unanchored_spawn = Global.to_bool(agent_dict.get("allow_unanchored_spawn", false))
 	var myco_gate_result: Dictionary = {}
 	var spawn_already_snapped := false
-	var villager_child_spawn = bool(agent_dict.get("villager_child_spawn", false))
+	var villager_child_spawn = Global.to_bool(agent_dict.get("villager_child_spawn", false))
 	var villager_parent = agent_dict.get("villager_parent", null)
 	var story_village_item = _is_story_village_item_type(spawn_name)
 	if story_village_item:
@@ -3829,7 +3852,7 @@ func _on_new_agent(agent_dict) -> void:
 				villager_parent.notify_villager_child_spawn_failed()
 			return
 		var child_spawn = _resolve_villager_child_spawn_pos(villager_parent, spawn_pos)
-		if not bool(child_spawn["ok"]):
+		if not Global.to_bool(child_spawn["ok"]):
 			if is_instance_valid(villager_parent) and villager_parent.has_method("notify_villager_child_spawn_failed"):
 				villager_parent.notify_villager_child_spawn_failed()
 			return
@@ -3857,7 +3880,9 @@ func _on_new_agent(agent_dict) -> void:
 	if ecology_spawn and not from_inventory and not story_village_item and not explicit_parent_bound and not allow_unanchored_spawn:
 		# Gameplay ecology births/regrowth must be anchored; reject unbounded signals.
 		return
-	var is_parent_bounded = (_is_parent_bounded_spawn_type(spawn_name) and (from_inventory or explicit_parent_bound)) or (spawn_name == "tree" and explicit_parent_bound)
+	var inventory_parent_bounded: bool = from_inventory and _is_parent_bounded_spawn_type(spawn_name) and not _is_crop_type(spawn_name)
+	var explicit_parent_bounded: bool = explicit_parent_bound and (_is_parent_bounded_spawn_type(spawn_name) or spawn_name == "tree")
+	var is_parent_bounded: bool = inventory_parent_bounded or explicit_parent_bounded
 	var parent_anchor = agent_dict.get("parent_anchor", null)
 	var max_parent_tiles = int(agent_dict.get("max_parent_tiles", DEFAULT_PARENT_BOUND_RADIUS_TILES))
 	if is_parent_bounded:
@@ -3915,7 +3940,7 @@ func _on_new_agent(agent_dict) -> void:
 						_refund_inventory_item(spawn_name, 1)
 					return
 		var parent_spawn = _resolve_parent_bounded_spawn_pos(spawn_pos, parent_anchor, max_parent_tiles, ignore_agent, require_exact_tile)
-		if not bool(parent_spawn["ok"]):
+		if not Global.to_bool(parent_spawn["ok"]):
 			if from_inventory:
 				_refund_inventory_item(spawn_name, 1)
 			return
@@ -3924,7 +3949,7 @@ func _on_new_agent(agent_dict) -> void:
 		spawn_already_snapped = true
 	elif require_exact_tile:
 		var exact_spawn = _resolve_exact_tile_spawn_pos(spawn_pos, ignore_agent)
-		if not bool(exact_spawn["ok"]):
+		if not Global.to_bool(exact_spawn["ok"]):
 			if from_inventory:
 				_refund_inventory_item(spawn_name, 1)
 			return
@@ -3933,9 +3958,10 @@ func _on_new_agent(agent_dict) -> void:
 
 	var world_for_reveal = _get_world_foundation()
 	if is_instance_valid(world_for_reveal) and world_for_reveal.has_method("is_world_pos_revealed"):
-		if from_inventory and not bool(world_for_reveal.is_world_pos_revealed(spawn_pos)):
+		if from_inventory and not Global.to_bool(world_for_reveal.is_world_pos_revealed(spawn_pos)):
 			_refund_inventory_item(spawn_name, 1)
 			return
+
 	if ecology_spawn and _supports_world_tiles(world_for_reveal):
 		var ecology_coord = _clamp_tile_coord(world_for_reveal, Vector2i(world_for_reveal.world_to_tile(spawn_pos)))
 		if _is_ecology_blocked_by_village_cobble(ecology_coord):
@@ -3952,6 +3978,19 @@ func _on_new_agent(agent_dict) -> void:
 				if from_inventory:
 					_refund_inventory_item(spawn_name, 1)
 				return
+
+	if from_inventory and _is_crop_type(spawn_name):
+		var inventory_crop_anchor: Node = _find_nearest_living_myco_anchor(spawn_pos, ignore_agent)
+		if _is_valid_parent_anchor(inventory_crop_anchor, ignore_agent):
+			var anchor_in_range: bool = true
+			if _supports_world_tiles(world_for_reveal):
+				var crop_coord = _clamp_tile_coord(world_for_reveal, Vector2i(world_for_reveal.world_to_tile(spawn_pos)))
+				var anchor_coord = _clamp_tile_coord(world_for_reveal, Vector2i(world_for_reveal.world_to_tile(inventory_crop_anchor.global_position)))
+				anchor_in_range = _tile_chebyshev_distance(crop_coord, anchor_coord) <= DEFAULT_PARENT_BOUND_RADIUS_TILES
+			if anchor_in_range:
+				agent_dict["spawn_anchor"] = inventory_crop_anchor
+				agent_dict["parent_anchor"] = inventory_crop_anchor
+
 	if spawn_name == "basket" and not _can_place_basket_near_person(spawn_pos):
 		if from_inventory:
 			_refund_inventory_item("basket", 1)
@@ -3961,7 +4000,7 @@ func _on_new_agent(agent_dict) -> void:
 		spawn_pos = _resolve_tile_spawn_pos(spawn_pos)
 		spawn_already_snapped = true
 		myco_gate_result = _validate_myco_spawn(spawn_pos, ignore_agent)
-		if not bool(myco_gate_result["ok"]):
+		if not Global.to_bool(myco_gate_result["ok"]):
 			if from_inventory:
 				_refund_inventory_item("myco", 1)
 			return
@@ -3982,7 +4021,7 @@ func _on_new_agent(agent_dict) -> void:
 	elif spawn_name == "myco":
 		if myco_gate_result.is_empty():
 			myco_gate_result = _validate_myco_spawn(spawn_pos, ignore_agent)
-		if not bool(myco_gate_result["ok"]):
+		if not Global.to_bool(myco_gate_result["ok"]):
 			if from_inventory:
 				_refund_inventory_item("myco", 1)
 			return
@@ -4016,9 +4055,10 @@ func _on_new_agent(agent_dict) -> void:
 					new_agent.sprite.texture = villager_child_texture
 			if is_instance_valid(villager_parent) and villager_parent.has_method("notify_villager_child_spawned"):
 				villager_parent.notify_villager_child_spawned(new_agent)
-		if not from_inventory and ecology_spawn and agent_dict.has("parent_anchor"):
+		if _is_crop_type(spawn_name) and (from_inventory or agent_dict.has("parent_anchor")):
 			new_agent.set_meta("lifecycle_spawn_child", true)
-			new_agent.set_meta("lifecycle_spawn_anchor", agent_dict["parent_anchor"])
+			if agent_dict.has("parent_anchor"):
+				new_agent.set_meta("lifecycle_spawn_anchor", agent_dict["parent_anchor"])
 		if agent_dict.has("spawn_anchor") and _can_share_story_trade_network_nodes(new_agent, agent_dict["spawn_anchor"]):
 			LevelHelpersRef.ensure_spawn_buddy_link(new_agent, agent_dict["spawn_anchor"])
 		LevelHelpersRef.sync_agent_occupancy(self, new_agent)
@@ -4301,130 +4341,112 @@ func make_story_basket(pos: Vector2, asset_key: String = "") -> Node:
 
 
 func _on_tutorial_timer_timeout() -> void:
-	if(Global.mode == "tutorial"):
-		#print("mode: ", Global.mode, "stage: ", Global.stage)
-		if( Global.stage == 1):
-			
-			var c_buds = 0
-			for child in $Agents.get_children():
-				if(child.type!="myco"):
-					c_buds += len(child.trade_buddies)
-				#print(" child bud: ", child.name, " ", child.trade_buddies)
-			#print("len buds: ", c_buds)
-			if(c_buds >=4):
-				Global.stage += 1
-				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
-				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
-				
-		elif(Global.stage == 2):
-			
-			var c_buds = 0
-			var num_myco = 0
-			for child in $Agents.get_children():
-				if(child.type=="myco"):
-					num_myco += 1
-			if(num_myco >=2):
-				Global.stage += 1
-				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
-				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
-		elif(Global.stage == 3):
-			
-			var c_buds = 0
-			var num_myco = 0
-			for child in $Agents.get_children():
-				if(child.type=="myco"):
-					num_myco += 1
-					c_buds += len(child.trade_buddies)
-					#print(" child bud: ", child.name, " ", child.trade_buddies)
-			if(num_myco >= 3 and c_buds >=2):
-				Global.stage += 1
-				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
-				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
-		elif(Global.stage == 4):
-			
-			var c_maize = 0
-			for child in $Agents.get_children():
-				if(child.type=="maize" and child.dead==false):
-					c_maize += 1
-			
-			_spawn_predators(c_maize * 3, true)
-				
-			Global.stage = 4.1
-			
-		elif(Global.stage == 4.1):
-			var c_maize = 0
-			for child in $Agents.get_children():
-				if(child.type=="maize" and child.dead==false):
-					c_maize += 1
-			
-			if(c_maize >=3):
-				Global.stage = 5
-				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
-				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
-		
-		elif(Global.stage == 5):
-			
-			var c_maize = 0
-			for child in $Agents.get_children():
-				if(child.type=="maize" and child.dead==false):
-					c_maize += 1
-			
-			_spawn_predators(c_maize - 1, true)
-				
-			Global.stage = 5.1
-			
-		elif(Global.stage == 5.1):
-			var c_maize = 0
-			for child in $Agents.get_children():
-				if(child.type=="maize" and child.dead==false):
-					c_maize += 1
-			
-			
-			
-			if(c_maize >=2 and Global.values['K']>1):
-				Global.stage = 6
-				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
-				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
-				
-		elif(Global.stage == 6):
-			
-			
-			var c_maize = 0
-			for child in $Agents.get_children():
-				if(child.type=="maize" and child.dead==false):
-					c_maize += 1
-			
-			_spawn_predators(c_maize - 1)
-			Global.stage_inc+=1
-			if(Global.stage_inc>=Global.max_stage_inc):
-				Global.stage = 6.1
-				Global.stage_inc = 0
-			
-		elif(Global.stage == 6.1):
-			var c_maize = 0
-			for child in $Agents.get_children():
-				if(child.type=="maize" and child.dead==false):
-					c_maize += 1
-			
-			
-			
-			if(c_maize >=2 and Global.values['K']>1):
-				Global.stage = 7
-				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
-				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
-		
-		elif(Global.stage == 7):
-			
-			var c_maize = 0
-			for child in $Agents.get_children():
-				if(child.type=="maize" and child.dead==false):
-					c_maize += 1
-					
-			if(c_maize >=2 and Global.values['K']<=1.1):
-				Global.stage = 8
-				$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
-				_set_tutorial_panel_color(Global.stage_colors[Global.stage])
-				$"UI/RestartContainer".visible=true
+	if Global.mode != "tutorial":
+		return
+
+	if Global.stage == 1:
+		var c_buds = 0
+		for child in $Agents.get_children():
+			if str(child.get("type")) != "myco":
+				var child_trade_buddies: Variant = child.get("trade_buddies")
+				if typeof(child_trade_buddies) == TYPE_ARRAY:
+					c_buds += len(child_trade_buddies)
+		if c_buds >= 4:
+			Global.stage += 1
+			$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
+			_set_tutorial_panel_color(Global.stage_colors[Global.stage])
+
+	elif Global.stage == 2:
+		var num_myco = 0
+		for child in $Agents.get_children():
+			if str(child.get("type")) == "myco":
+				num_myco += 1
+		if num_myco >= 2:
+			Global.stage += 1
+			$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
+			_set_tutorial_panel_color(Global.stage_colors[Global.stage])
+
+	elif Global.stage == 3:
+		var c_buds = 0
+		var num_myco = 0
+		for child in $Agents.get_children():
+			if str(child.get("type")) == "myco":
+				num_myco += 1
+				var child_trade_buddies: Variant = child.get("trade_buddies")
+				if typeof(child_trade_buddies) == TYPE_ARRAY:
+					c_buds += len(child_trade_buddies)
+		if num_myco >= 3 and c_buds >= 2:
+			Global.stage += 1
+			$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
+			_set_tutorial_panel_color(Global.stage_colors[Global.stage])
+
+	elif Global.stage == 4:
+		var c_maize = 0
+		for child in $Agents.get_children():
+			if str(child.get("type")) == "maize" and not Global.to_bool(child.get("dead")):
+				c_maize += 1
+		_spawn_predators(c_maize * 3, true)
+		Global.stage = 4.1
+
+	elif Global.stage == 4.1:
+		var c_maize = 0
+		for child in $Agents.get_children():
+			if str(child.get("type")) == "maize" and not Global.to_bool(child.get("dead")):
+				c_maize += 1
+		if c_maize >= 3:
+			Global.stage = 5
+			$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
+			_set_tutorial_panel_color(Global.stage_colors[Global.stage])
+
+	elif Global.stage == 5:
+		var c_maize = 0
+		for child in $Agents.get_children():
+			if str(child.get("type")) == "maize" and not Global.to_bool(child.get("dead")):
+				c_maize += 1
+		_spawn_predators(c_maize - 1, true)
+		Global.stage = 5.1
+
+	elif Global.stage == 5.1:
+		var c_maize = 0
+		for child in $Agents.get_children():
+			if str(child.get("type")) == "maize" and not Global.to_bool(child.get("dead")):
+				c_maize += 1
+		if c_maize >= 2 and Global.values['K'] > 1:
+			Global.stage = 6
+			$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
+			_set_tutorial_panel_color(Global.stage_colors[Global.stage])
+
+	elif Global.stage == 6:
+		var c_maize = 0
+		for child in $Agents.get_children():
+			if str(child.get("type")) == "maize" and not Global.to_bool(child.get("dead")):
+				c_maize += 1
+		_spawn_predators(c_maize - 1)
+		Global.stage_inc += 1
+		if Global.stage_inc >= Global.max_stage_inc:
+			Global.stage = 6.1
+			Global.stage_inc = 0
+
+	elif Global.stage == 6.1:
+		var c_maize = 0
+		for child in $Agents.get_children():
+			if str(child.get("type")) == "maize" and not Global.to_bool(child.get("dead")):
+				c_maize += 1
+		if c_maize >= 2 and Global.values['K'] > 1:
+			Global.stage = 7
+			$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
+			_set_tutorial_panel_color(Global.stage_colors[Global.stage])
+
+	elif Global.stage == 7:
+		var c_maize = 0
+		for child in $Agents.get_children():
+			if str(child.get("type")) == "maize" and not Global.to_bool(child.get("dead")):
+				c_maize += 1
+		if c_maize >= 2 and Global.values['K'] <= 1.1:
+			Global.stage = 8
+			$"UI/TutorialMarginContainer1/Label".text = Global.stage_text[Global.stage]
+			_set_tutorial_panel_color(Global.stage_colors[Global.stage])
+			$"UI/RestartContainer".visible = true
 
 
 func _exit_tree() -> void:

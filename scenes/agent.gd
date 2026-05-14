@@ -37,6 +37,7 @@ const BEAN_POST_HARVEST_TO_DEAD_TICKS := 2
 const BEAN_POD_BABY_TICK_INTERVAL := 4
 const BEAN_STAGE_CONSUMPTIONS_PER_ADVANCE := 3
 const BEAN_STAGE_ADVANCE_WAIT_TICKS := 1
+const LIFECYCLE_STARVATION_GRACE_TICKS := 3
 const BEAN_HARVEST_YIELD := 3
 const LIFECYCLE_PLANT_BABIES_MIN := 1
 const LIFECYCLE_PLANT_BABIES_MAX := 3
@@ -59,6 +60,11 @@ const TREE_HARVEST_ACORN_LOCAL_POS := Vector2(0.0, -64.0)
 const TREE_HARVEST_ACORN_HOTSPOT_RADIUS := 24.0
 const STORY_PHASE5_FORCED_BASKET_LINK_META := "story_force_phase5_basket_link"
 const RESOURCE_BAR_UI_CLEARANCE := 14.0
+const HARVEST_INVENTORY_FLY_IN_SECONDS := 0.28
+const PLANT_RESOURCE_MARKER_ALPHA := 0.46
+const PLANT_RESOURCE_MARKER_FADE_SECONDS := 0.18
+const PLANT_RESOURCE_MARKER_SEGMENTS := 20
+const PLANT_RESOURCE_MARKER_RADIUS_RATIO := 0.38
 
 signal trade(pos)
 signal clicked
@@ -111,11 +117,12 @@ var evaporate_ready = false
 var sprite = null
 var sprite_texture = null
 var bar_canvas = null
+var plant_resource_marker: Polygon2D = null
 var prod_res = [null]
 var type = null
 
 var START_N = 0 #Nitrogen
-var START_P = 0 # Potassium 
+var START_P = 0 # Potassium
 var START_K = 0 #Phosphorus
 var START_R = 0 #Rain
 var trades = [] #list of outstanding trades
@@ -134,29 +141,29 @@ var current_babies = 0
 #var assets = {}
 
 
-var assets = { #list of assets - 
+var assets = { #list of assets -
 	#for each asset there is a balance, and stready state amount needed for growth
 	"N": START_N,
-	"P": START_P,				
+	"P": START_P,
 	"K": START_K,
 	"R": START_R
 	}
 var needs = { #list of needed assets with need level
 	"N": 10,
-	"P": 10,				
+	"P": 10,
 	"K": 10,
 	"R": 10
 	}
 var current_needs = { #list of needed assets with need level
 	"N": 0,
-	"P": 0,				
+	"P": 0,
 	"K": 0,
 	"R": 0
 	}
-	
+
 var current_excess = { #list of needed assets with need level
 	"N": 0,
-	"P": 0,				
+	"P": 0,
 	"K": 0,
 	"R": 0
 	}
@@ -319,6 +326,110 @@ func _hide_resource_bars() -> void:
 	_hover_visual_focus = false
 	if is_instance_valid(bar_canvas):
 		bar_canvas.visible = false
+
+
+func _is_plant_resource_marker_subject() -> bool:
+	if Global.to_bool(Global.social_mode):
+		return false
+	var agent_type: String = str(type)
+	return agent_type == "bean" or agent_type == "squash" or agent_type == "maize" or agent_type == "tree"
+
+
+func _get_plant_resource_marker_asset_key() -> String:
+	match str(type):
+		"bean":
+			return "N"
+		"squash":
+			return "P"
+		"maize":
+			return "K"
+		"tree":
+			return "R"
+	return ""
+
+
+func _get_plant_resource_marker_color() -> Color:
+	var asset_key: String = _get_plant_resource_marker_asset_key()
+	var fallback: Color = Color.WHITE
+	match asset_key:
+		"N":
+			fallback = Color.SPRING_GREEN
+		"P":
+			fallback = Color.ORANGE
+		"K":
+			fallback = Color(1.0, 0.45, 0.78, 1.0)
+		"R":
+			fallback = Color.DEEP_SKY_BLUE
+	var color_variant: Variant = Global.asset_colors.get(asset_key, fallback)
+	var marker_color: Color = fallback
+	if color_variant is Color:
+		marker_color = color_variant
+	marker_color.a = PLANT_RESOURCE_MARKER_ALPHA
+	return marker_color
+
+
+func _get_plant_resource_marker_radius() -> float:
+	var tile_size_value: float = 64.0
+	var world: Node = _get_world_foundation_node()
+	if is_instance_valid(world):
+		var raw_tile_size: Variant = world.get("tile_size")
+		if typeof(raw_tile_size) == TYPE_INT or typeof(raw_tile_size) == TYPE_FLOAT:
+			tile_size_value = maxf(float(raw_tile_size), 1.0)
+	return clampf(tile_size_value * PLANT_RESOURCE_MARKER_RADIUS_RATIO, 18.0, 30.0)
+
+
+func _make_plant_resource_marker_polygon(radius: float) -> PackedVector2Array:
+	var points: PackedVector2Array = PackedVector2Array()
+	for index in range(PLANT_RESOURCE_MARKER_SEGMENTS):
+		var angle: float = TAU * float(index) / float(PLANT_RESOURCE_MARKER_SEGMENTS)
+		points.append(Vector2(cos(angle), sin(angle)) * radius)
+	return points
+
+
+func _ensure_plant_resource_marker() -> void:
+	if not _is_plant_resource_marker_subject():
+		_fade_out_plant_resource_marker()
+		return
+	if is_instance_valid(plant_resource_marker):
+		plant_resource_marker.visible = not Global.to_bool(dead) and caught_by == null
+		plant_resource_marker.color = _get_plant_resource_marker_color()
+		plant_resource_marker.polygon = _make_plant_resource_marker_polygon(_get_plant_resource_marker_radius())
+		return
+	var marker: Polygon2D = Polygon2D.new()
+	marker.name = "PlantResourceMarker"
+	marker.polygon = _make_plant_resource_marker_polygon(_get_plant_resource_marker_radius())
+	marker.color = _get_plant_resource_marker_color()
+	marker.position = Vector2.ZERO
+	marker.z_index = -1
+	marker.z_as_relative = true
+	add_child(marker)
+	plant_resource_marker = marker
+
+
+func _fade_out_plant_resource_marker() -> void:
+	if not is_instance_valid(plant_resource_marker):
+		plant_resource_marker = null
+		return
+	var marker: Polygon2D = plant_resource_marker
+	plant_resource_marker = null
+	if marker.get_parent() == self:
+		var marker_global_position: Vector2 = marker.global_position
+		remove_child(marker)
+		var marker_parent: Node = _get_level_root()
+		if not is_instance_valid(marker_parent):
+			marker.queue_free()
+			return
+		marker_parent.add_child(marker)
+		marker.global_position = marker_global_position
+		marker.z_index = 0
+		marker.z_as_relative = false
+	var tween: Tween = get_tree().create_tween()
+	tween.tween_property(marker, "modulate:a", 0.0, PLANT_RESOURCE_MARKER_FADE_SECONDS)
+	tween.finished.connect(Callable(marker, "queue_free"))
+
+
+func notify_tuktuk_capture_started() -> void:
+	_fade_out_plant_resource_marker()
 
 
 func _is_dead_resource_bar_visual() -> bool:
@@ -619,7 +730,7 @@ func _can_pointer_activate_harvest() -> bool:
 		return false
 	var level_root = _get_level_root()
 	if is_instance_valid(level_root) and level_root.has_method("can_agent_harvest_to_inventory"):
-		return bool(level_root.can_agent_harvest_to_inventory(self))
+		return Global.to_bool(level_root.can_agent_harvest_to_inventory(self))
 	return true
 
 
@@ -628,7 +739,7 @@ func _pointer_reposition_override_enabled() -> bool:
 
 
 func _global_reposition_override_enabled() -> bool:
-	return bool(Global.allow_agent_reposition)
+	return Global.to_bool(Global.allow_agent_reposition)
 
 
 func _activate_resource_bars_for_interaction() -> void:
@@ -640,6 +751,10 @@ func _activate_resource_bars_for_interaction() -> void:
 	else:
 		set_hover_focus(true)
 	_refresh_all_agent_bar_visibility()
+
+
+func activate_resource_bars_for_inspection() -> void:
+	_activate_resource_bars_for_interaction()
 
 
 func _try_pointer_activate_harvest(screen_pos: Vector2) -> bool:
@@ -727,7 +842,7 @@ func _on_pointer_release(screen_pos: Vector2) -> void:
 			var dropped_to_story_target := false
 			var level_root = _get_level_root()
 			if is_instance_valid(level_root) and level_root.has_method("try_story_harvest_drop"):
-				dropped_to_story_target = bool(level_root.try_story_harvest_drop(self, _get_drag_pointer_world_pos()))
+				dropped_to_story_target = Global.to_bool(level_root.try_story_harvest_drop(self, _get_drag_pointer_world_pos()))
 			_end_harvest_drag_proxy()
 			if not dropped_to_story_target:
 				_begin_snap_to_nearest_tile(position)
@@ -748,7 +863,7 @@ func _is_inventory_placement_active() -> bool:
 	if not is_instance_valid(ui_node):
 		return false
 	if ui_node.has_method("is_inventory_placement_active"):
-		return bool(ui_node.call("is_inventory_placement_active"))
+		return Global.to_bool(ui_node.call("is_inventory_placement_active"))
 	var selected_item = str(ui_node.get("_selected_inventory_item"))
 	return selected_item != ""
 
@@ -833,13 +948,13 @@ func _can_place_on_tile(coord: Vector2i, sprite_scale_override: Variant = null) 
 func _can_lifecycle_spawn_on_soil(world: Node, coord: Vector2i) -> bool:
 	if not is_instance_valid(world) or not world.has_method("can_place_ecology_on_tile"):
 		return true
-	if not bool(world.call("can_place_ecology_on_tile", coord)):
+	if not Global.to_bool(world.call("can_place_ecology_on_tile", coord)):
 		return false
 	if str(type) == "tree":
 		var upper_coord = coord + Vector2i(0, -1)
 		if world.has_method("in_bounds") and not world.in_bounds(upper_coord):
 			return false
-		if not bool(world.call("can_place_ecology_on_tile", upper_coord)):
+		if not Global.to_bool(world.call("can_place_ecology_on_tile", upper_coord)):
 			return false
 	return true
 
@@ -1001,6 +1116,12 @@ func _get_harvest_inventory_target_proxy_pos() -> Vector2:
 	return Global.screen_to_world(self, screen_pos)
 
 
+func _play_inventory_harvest_sound(harvest_key: String) -> void:
+	var level_root = _get_level_root()
+	if is_instance_valid(level_root) and level_root.has_method("play_inventory_harvest_sound"):
+		level_root.call("play_inventory_harvest_sound", harvest_key, global_position)
+
+
 func _start_harvest_inventory_fly_in() -> bool:
 	if _harvest_inventory_animating:
 		return true
@@ -1014,7 +1135,7 @@ func _start_harvest_inventory_fly_in() -> bool:
 	_clear_drag_tile_hint()
 	var target_pos = _get_harvest_inventory_target_proxy_pos()
 	var tween = get_tree().create_tween()
-	tween.tween_property(_harvest_drag_sprite, "global_position", target_pos, 0.14)
+	tween.tween_property(_harvest_drag_sprite, "global_position", target_pos, HARVEST_INVENTORY_FLY_IN_SECONDS)
 	tween.finished.connect(_on_harvest_inventory_fly_in_finished)
 	return true
 
@@ -1122,12 +1243,12 @@ func _is_hover_bar_subject() -> bool:
 
 func _is_story_mode_runtime() -> bool:
 	if Global.has_method("is_parallel_village_runtime"):
-		return bool(Global.is_parallel_village_runtime())
+		return Global.to_bool(Global.is_parallel_village_runtime())
 	return str(Global.mode) == "story"
 
 
 func _is_story_village_actor_node(node: Variant) -> bool:
-	return is_instance_valid(node) and bool(node.get_meta("story_village_actor", false))
+	return is_instance_valid(node) and Global.to_bool(node.get_meta("story_village_actor", false))
 
 
 func _is_story_village_person_node(node: Variant) -> bool:
@@ -1157,7 +1278,7 @@ func _is_story_village_basket_node(node: Variant) -> bool:
 func _can_share_story_trade_network(candidate: Variant) -> bool:
 	if not is_instance_valid(candidate):
 		return false
-	if bool(candidate.get("dead")):
+	if Global.to_bool(candidate.get("dead")):
 		return false
 	if str(candidate.get("type")) == "cloud":
 		return false
@@ -1175,7 +1296,7 @@ func _can_user_reposition() -> bool:
 		return true
 	if not _is_reposition_subject():
 		return true
-	return bool(Global.allow_agent_reposition)
+	return Global.to_bool(Global.allow_agent_reposition)
 
 
 func can_drag_for_inventory_harvest() -> bool:
@@ -1218,12 +1339,12 @@ func _get_starvation_alpha_step() -> float:
 
 
 func _get_lifecycle_spawn_anchor() -> Variant:
-	if not bool(get_meta("lifecycle_spawn_child", false)):
+	if not Global.to_bool(get_meta("lifecycle_spawn_child", false)):
 		return null
 	var anchor = get_meta("lifecycle_spawn_anchor", null)
 	if not is_instance_valid(anchor):
 		return null
-	if bool(anchor.get("dead")):
+	if Global.to_bool(anchor.get("dead")):
 		return null
 	if str(anchor.get("type")) != "myco":
 		return null
@@ -1273,11 +1394,11 @@ func _restore_story_forced_village_basket_buddies() -> void:
 			continue
 		if candidate == self:
 			continue
-		if bool(candidate.get("dead")):
+		if Global.to_bool(candidate.get("dead")):
 			continue
 		if str(candidate.get("type")) != "myco":
 			continue
-		if not bool(candidate.get_meta(STORY_PHASE5_FORCED_BASKET_LINK_META, false)):
+		if not Global.to_bool(candidate.get_meta(STORY_PHASE5_FORCED_BASKET_LINK_META, false)):
 			continue
 		if not _can_share_story_trade_network(candidate):
 			continue
@@ -1297,7 +1418,7 @@ func _restore_in_reach_village_hub_buddies() -> void:
 			continue
 		if candidate == self:
 			continue
-		if bool(candidate.get("dead")):
+		if Global.to_bool(candidate.get("dead")):
 			continue
 		if not (_is_story_village_bank_node(candidate) or _is_story_village_basket_node(candidate)):
 			continue
@@ -1325,7 +1446,7 @@ func _restore_all_in_reach_ecology_myco_buddies() -> void:
 			continue
 		if candidate == self:
 			continue
-		if bool(candidate.get("dead")):
+		if Global.to_bool(candidate.get("dead")):
 			continue
 		if str(candidate.get("type")) != "myco":
 			continue
@@ -1349,7 +1470,7 @@ func _restore_all_in_reach_ecology_myco_buddies() -> void:
 func _is_lifecycle_orphan_spawn_child() -> bool:
 	if not _is_bean_lifecycle_enabled():
 		return false
-	if not bool(get_meta("lifecycle_spawn_child", false)):
+	if not Global.to_bool(get_meta("lifecycle_spawn_child", false)):
 		return false
 	var anchor = _get_lifecycle_spawn_anchor()
 	if not is_instance_valid(anchor):
@@ -1388,7 +1509,7 @@ func _find_nearby_living_myco_anchor(reference_pos: Vector2, max_tiles: int = LI
 			continue
 		if candidate == self:
 			continue
-		if bool(candidate.get("dead")):
+		if Global.to_bool(candidate.get("dead")):
 			continue
 		if str(candidate.get("type")) != "myco":
 			continue
@@ -1505,7 +1626,7 @@ func _refresh_tree_harvest_acorn_visual() -> void:
 		if is_instance_valid(tree_harvest_sprite):
 			tree_harvest_sprite.visible = false
 		return
-	var should_show = bean_stage == BeanGrowthStage.POD_READY and bean_harvest_ready and not _harvest_visual_detached and not bool(dead)
+	var should_show = bean_stage == BeanGrowthStage.POD_READY and bean_harvest_ready and not _harvest_visual_detached and not Global.to_bool(dead)
 	if should_show:
 		_ensure_tree_harvest_sprite()
 	if is_instance_valid(tree_harvest_sprite):
@@ -1636,6 +1757,7 @@ func _set_bean_stage(new_stage: int, force: bool = false) -> void:
 		bean_residue_emitted = false
 	draggable = bean_stage != BeanGrowthStage.DEAD
 	if bean_stage == BeanGrowthStage.DEAD:
+		_fade_out_plant_resource_marker()
 		_hide_resource_bars()
 		if not bean_death_preserve_stage_visual:
 			bean_death_visual_stage = BeanGrowthStage.DEAD
@@ -1673,6 +1795,8 @@ func _set_bean_stage(new_stage: int, force: bool = false) -> void:
 			tween.tween_property(sprite, "scale", base_scale, 0.09)
 		else:
 			sprite.scale = stage_scale
+	if bean_stage != BeanGrowthStage.DEAD:
+		_ensure_plant_resource_marker()
 
 	if bean_stage == BeanGrowthStage.POD_READY and not bean_pod_sparkle_played:
 		_spawn_growth_sparkle()
@@ -1989,7 +2113,7 @@ func cancel_farmer_harvest_delivery() -> void:
 	if not _farmer_harvest_delivery_reserved:
 		return
 	_farmer_harvest_delivery_reserved = false
-	if bean_stage == BeanGrowthStage.POD_READY and not bool(dead):
+	if bean_stage == BeanGrowthStage.POD_READY and not Global.to_bool(dead):
 		bean_harvest_ready = true
 		_cancel_harvest_visual_detach()
 
@@ -2004,6 +2128,7 @@ func _try_harvest_to_inventory() -> bool:
 	var ui_node = get_node_or_null("../../UI")
 	if is_instance_valid(ui_node) and ui_node.has_method("refresh_inventory_counts"):
 		ui_node.refresh_inventory_counts()
+	_play_inventory_harvest_sound(harvest_key)
 	_apply_crop_harvest_commit_state()
 	emit_signal("harvest_committed", harvest_key, "inventory")
 	return true
@@ -2046,7 +2171,7 @@ func try_hover_harvest_to_inventory_at_screen_pos(screen_pos: Vector2) -> bool:
 		return false
 	var level_root = _get_level_root()
 	if is_instance_valid(level_root) and level_root.has_method("can_agent_harvest_to_inventory"):
-		if not bool(level_root.can_agent_harvest_to_inventory(self)):
+		if not Global.to_bool(level_root.can_agent_harvest_to_inventory(self)):
 			return false
 	if not can_hover_harvest_at_screen_pos(screen_pos):
 		return false
@@ -2096,7 +2221,7 @@ func set_variables(a_dict) -> void:
 	}
 	trade_buddies = []
 	trades = []
-		
+
 	var asset_dict = {
 		"long_name": "Nitrogen",
 		"symbol": "N",
@@ -2108,25 +2233,25 @@ func set_variables(a_dict) -> void:
 		"bar": $CanvasLayer/Nbar,
 		"bar_offset": (position + $CanvasLayer/Nbar.position)
 	}
-	
+
 	#var dict_assets = []
-	
+
 	#var asset_N = Asset.new()
 	#asset_N.setup(asset_dict)
-	
+
 	#dict_assets.append(asset_N)
-	
+
 	#for new_asset in dict_assets:
 	#	assets[new_asset.symbol] = new_asset
-	
+
 	#print("assets: ", dict_assets)
-	
+
 	#Global.active_agent = self
-	
-	
+
+
 	name = a_dict.get("name")
 	type = a_dict.get("type")
-	
+
 	prod_res = a_dict.get("prod_res")
 	if (prod_res[0] != null):
 		if a_dict.get("start_res") == null:
@@ -2136,14 +2261,14 @@ func set_variables(a_dict) -> void:
 		else:
 			for res in prod_res:
 				assets[res] = a_dict.get("start_res")
-			
+
 		#assets[prod_res].amt = a_dict.get("start_res")
 	position = a_dict.get("position")
 	last_position = position
 	sprite_texture = a_dict.get("texture")
 	sprite = $Sprite2D
 	$Sprite2D.texture = sprite_texture
-	
+
 	var applied_scale = min_scale
 	if str(type) == "tree":
 		applied_scale = minf(applied_scale, _get_tree_single_tile_spawn_scale())
@@ -2154,7 +2279,8 @@ func set_variables(a_dict) -> void:
 	bean_base_scale = sprite.scale
 	if _is_bean_lifecycle_enabled():
 		_reset_bean_lifecycle()
-	
+	_ensure_plant_resource_marker()
+
 	$GrowthTimer.wait_time = Global.growth_time
 	$EvaporateTimer.wait_time = Global.evap_time
 	$DecayTimer.wait_time = Global.decay_time
@@ -2164,18 +2290,18 @@ func set_variables(a_dict) -> void:
 	if is_instance_valid(sprite):
 		_last_occupancy_scale = sprite.scale
 	_sync_occupancy_cache()
-		
+
 
 
 func sort_decending(a, b):
 	if a[1] > b[1]:
 		return true
 	return false
-		
+
 
 func draw_selected_box():
 	LevelHelpersRef.draw_agent_selection_box(_get_level_root(), self)
-	
+
 
 
 
@@ -2185,38 +2311,38 @@ func logistics():
 	var high_amt_excess = 0
 	var needed_res = null
 	var high_amt_needed = 0
-	
+
 	var debug_mode = false
-	
+
 	if logistics_ready:
 		if( is_instance_valid(Global.active_agent)):
 			if self.name == Global.active_agent.name:
 				debug_mode = false#true
-	
+
 		if debug_mode:
-			print("New Round in: ", name ,", ", assets, " needs: ", needs)	
+			print("New Round in: ", name ,", ", assets, " needs: ", needs)
 		#determine if there are extra resources (offers)
 		#find excess stock
 		for res in assets:
 			current_excess[res] = -999
-			current_needs[res] = -999			
-			 
-			var c_excess = assets[res] - needs[res] 
-			
+			current_needs[res] = -999
+
+			var c_excess = assets[res] - needs[res]
+
 			if assets[res] > needs[res]:
 				#if c_excess > high_amt_excess:
 				high_amt_excess = c_excess
 				excess_res = res
 				current_excess[res] = high_amt_excess
-				
+
 			if assets[res] < needs[res]:
 				#print("res: ", res, " c_excess: ", c_excess, " high_amt_needed: ", high_amt_needed)
 				#if -1 * c_excess > high_amt_needed:
 				high_amt_needed = -1 * c_excess
 				needed_res = res
 				current_needs[res] = high_amt_needed
-			
-		
+
+
 		var needed_keys: Array = current_needs.keys()
 		var excess_keys: Array = current_excess.keys()
 		# Sort keys in descending order of values.
@@ -2228,75 +2354,85 @@ func logistics():
 			print("excess sorted: ", excess_keys)
 			print("needs: ", current_needs  )
 			print("needs sorted: ", needed_keys)
-			
-		
+
+
 		if excess_res != null and needed_res != null:
 			#var children =  $"../../Agents".get_children()
 			trade_buddies.shuffle()
-			
+
 			if debug_mode:
 				print(" shuffle" )
 			var need_itter = 0
-			
+
 			for child in trade_buddies: #children:
-				if(is_instance_valid(child)):
-					if logistics_ready and child.type == 'myco':
-						if debug_mode:
-							print(" child found" )
-						for need in needed_keys:
-							need_itter +=1
-							var excess_iter = 0
-							for excess in excess_keys:
-								if(excess == need):
-									continue
-								excess_iter +=1
-								if(logistics_ready and current_needs[need] > 0 and current_excess[excess] >0 ):
-									if debug_mode:
-										print(need_itter, ". current need: ", need, " supply: ", assets[need] )
-										print(excess_iter, ". current excess: ", excess, " supply: ",assets[excess] )
-									
-									if child.assets.get(excess) != null and child.assets.get(need) != null:
-										if debug_mode:
-											print( " ... myco assets: " , child.assets)
-										var path_dict = {
-											"from_agent": self,
-											"to_agent": child,
-											"trade_path": [self,child],
-											"trade_asset": excess,
-											"trade_amount": 1, #amt_needed,
-											"trade_type": "swap",
-											"return_res": need,
-											"return_amt": 1,#amt_needed
-										}
-										if debug_mode:
-											print(" .... sending a trade along, ")
-										#print(" .... sending a trade along, ", path_dict)
-										if(assets[excess] <=0) :
-											print("WHAAAAAATTTTT:", assets )
-											print("excess:" , current_excess)
-										if _emit_trade_with_budget(path_dict):
-											assets[excess] -= 1#amt_needed
-											bars[excess].value = assets[excess]
-											logistics_ready = false
-											break
-										#trade.emit(path_dict)
-										#send what is in excess. 
-									
-				
-									#Attempt to push out what you have in abundance
-							
+				if not is_instance_valid(child):
+					continue
+				if not logistics_ready:
+					break
+				if str(child.get("type")) != 'myco':
+					continue
+				var child_assets_variant: Variant = child.get("assets")
+				if typeof(child_assets_variant) != TYPE_DICTIONARY:
+					continue
+				var child_assets: Dictionary = child_assets_variant
+				if debug_mode:
+					print(" child found" )
+				for need in needed_keys:
+					need_itter +=1
+					var excess_iter = 0
+					for excess in excess_keys:
+						if(excess == need):
+							continue
+						excess_iter +=1
+						if(logistics_ready and current_needs[need] > 0 and current_excess[excess] >0 ):
+							if debug_mode:
+								print(need_itter, ". current need: ", need, " supply: ", assets[need] )
+								print(excess_iter, ". current excess: ", excess, " supply: ",assets[excess] )
+
+							if child_assets.get(excess) != null and child_assets.get(need) != null:
+								if debug_mode:
+									print( " ... myco assets: " , child_assets)
+								var path_dict = {
+									"from_agent": self,
+									"to_agent": child,
+									"trade_path": [self,child],
+									"trade_asset": excess,
+									"trade_amount": 1, #amt_needed,
+									"trade_type": "swap",
+									"return_res": need,
+									"return_amt": 1,#amt_needed
+								}
+								if debug_mode:
+									print(" .... sending a trade along, ")
+								#print(" .... sending a trade along, ", path_dict)
+								if debug_mode and assets[excess] <=0:
+									print("WHAAAAAATTTTT:", assets )
+									print("excess:" , current_excess)
+								if _emit_trade_with_budget(path_dict):
+									assets[excess] -= 1#amt_needed
+									bars[excess].value = assets[excess]
+									logistics_ready = false
+									break
+								#trade.emit(path_dict)
+								#send what is in excess.
+					if not logistics_ready:
+						break
+
+
+						#Attempt to push out what you have in abundance
+
 		#determine what is needed (needs)
-		
-		#if they can s wap a resource for a needed resource do it 
+
+		#if they can s wap a resource for a needed resource do it
 		#     Send the resource to the myco (when it arrives the needed resource will come back)
 
 		#Consume resources
 		#These are combinations NPK together
-		
+
 		#Increase health
-		
+
 		#Decay unused resources
-	
+
 	if false:
 	#if decay_ready:
 		#print("decay", assets)
@@ -2308,16 +2444,17 @@ func logistics():
 			if assets[res] >= 1 and res == "R":
 				evaporate()
 				#print(" decay: ", assets)
-	
+
 	if evaporate_ready:
 		#print("decay", assets)
 		evaporate_ready = false
 		#evaporate()
-	
+
 func kill_it():
 	#new_alpha = low_alpha
 	#self.queue_free()
 	self.dead = true
+	_fade_out_plant_resource_marker()
 	_hide_resource_bars()
 	_clear_drag_tile_hint()
 	_tile_snap_in_progress = false
@@ -2334,8 +2471,8 @@ func kill_it():
 	if is_instance_valid(level_root):
 		LevelHelpersRef.clear_focus_outline_if_owner(level_root, self)
 	_clear_active_selection_if_self()
-	
-	
+
+
 	_queue_dirty_update(true, true, false)
 	for child in trade_buddies:
 		if is_instance_valid(child):
@@ -2344,20 +2481,26 @@ func kill_it():
 			else:
 				child.draw_lines = true
 				child.new_buddies = true
-		
+
 	var children =  $"../../Agents".get_children()
 	var living = false
 	for child in children:#children:
-		
-		if(child.type != "cloud" and child.type != "myco"):
-			if(child.dead == false):
+		if not is_instance_valid(child):
+			continue
+
+		var child_type := str(child.get("type"))
+		if(child_type != "cloud" and child_type != "myco"):
+			if not Global.to_bool(child.get("dead")):
 				living = true
-		
+
 	if( living == false and Global.mode != "tutorial"):
 		get_tree().change_scene_to_file("res://scenes/game_over.tscn")
 
 
 func _exit_tree() -> void:
+	if is_instance_valid(plant_resource_marker):
+		plant_resource_marker.queue_free()
+		plant_resource_marker = null
 	_hide_resource_bars()
 	_clear_drag_tile_hint()
 	_end_harvest_drag_proxy()
@@ -2367,10 +2510,10 @@ func _exit_tree() -> void:
 func _is_trade_dispatch_endpoint_locked(agent: Variant) -> bool:
 	if not is_instance_valid(agent):
 		return false
-	if bool(agent.get("dead")):
+	if Global.to_bool(agent.get("dead")):
 		return false
 	if agent.has_method("is_trade_locked_by_user_move"):
-		return bool(agent.call("is_trade_locked_by_user_move"))
+		return Global.to_bool(agent.call("is_trade_locked_by_user_move"))
 	return false
 
 
@@ -2395,26 +2538,26 @@ func _emit_trade_with_budget(path_dict: Dictionary) -> bool:
 func evaporate():
 
 	if assets["R"] > 0: #evaporate
-		var children =  $"../../Agents".get_children()
-		children.shuffle()
-		for child in children:
-			#print(children)
-			if child.type == 'cloud':
-				var path_dict = {
-					"from_agent": self,
-					"to_agent": child,
-					"trade_path": [self,child],
-					"trade_asset": "R",
-					"trade_amount": 1, #amt_needed,
-					"trade_type": "send",
-					"return_res": null,
-					"return_amt": 0,#amt_needed
-				}
-				if _emit_trade_with_budget(path_dict):
-					assets["R"] -= 1#amt_needed
-					bars["R"].value = assets["R"]
-					break
-					
+			var children =  $"../../Agents".get_children()
+			children.shuffle()
+			for child in children:
+				#print(children)
+				if str(child.get("type")) == 'cloud':
+					var path_dict = {
+						"from_agent": self,
+						"to_agent": child,
+						"trade_path": [self,child],
+						"trade_asset": "R",
+						"trade_amount": 1, #amt_needed,
+						"trade_type": "send",
+						"return_res": null,
+						"return_amt": 0,#amt_needed
+					}
+					if _emit_trade_with_budget(path_dict):
+						assets["R"] -= 1#amt_needed
+						bars["R"].value = assets["R"]
+						break
+
 
 
 func _input(event):
@@ -2451,7 +2594,7 @@ func _input(event):
 			_on_pointer_press(event.position)
 		else:
 			_on_pointer_release(event.position)
-					
+
 
 func _physics_process(delta):
 	#_draw()
@@ -2468,20 +2611,20 @@ func _physics_process(delta):
 		_clear_drag_tile_hint()
 		return
 	if is_dragging:
-		
+
 		var hit = false
 		var pointer_world_pos = _get_drag_pointer_world_pos()
 		var pointer_screen_pos = _get_drag_pointer_screen_pos()
-		
+
 		if $"../../UI/MarginContainer".get_global_rect().has_point(pointer_screen_pos):
 			hit = true
-		
+
 		if hit==true:
 			if supports_inventory_harvest():
 				var allow_inventory_harvest := true
 				var level_root = _get_level_root()
 				if is_instance_valid(level_root) and level_root.has_method("can_agent_harvest_to_inventory"):
-					allow_inventory_harvest = bool(level_root.can_agent_harvest_to_inventory(self))
+					allow_inventory_harvest = Global.to_bool(level_root.can_agent_harvest_to_inventory(self))
 				if allow_inventory_harvest:
 					if _start_harvest_inventory_fly_in():
 						return
@@ -2504,14 +2647,14 @@ func _physics_process(delta):
 				kill_it()
 			_clear_drag_tile_hint()
 			return
-		
+
 		if _harvest_drag_only:
 			_update_harvest_drag_proxy_position()
 		else:
 			var t = min(1.0, delay * delta)
 			var dragged_target = position.lerp(pointer_world_pos, t)
 			position = _clamp_position_to_world(dragged_target)
-	
+
 	if(caught_by != null):
 		if(caught_by is Tuktuk):
 			position = caught_by.position+Vector2(-6,0)
@@ -2572,7 +2715,7 @@ func _process(delta: float) -> void:
 	var bean_dead_phase = _is_bean_lifecycle_enabled() and bean_stage == BeanGrowthStage.DEAD
 	if(dead == false and not bean_dead_phase and is_instance_valid(self) and not is_trade_locked_by_user_move() and story_predator_disrupt_timer <= 0.0):
 		logistics()
-	
+
 	if not is_dragging and not _keyboard_moving:
 		_advance_tile_snap(delta)
 
@@ -2595,7 +2738,7 @@ func _process(delta: float) -> void:
 			if _bar_update_accum >= _get_adaptive_bar_update_interval():
 				_bar_update_accum = 0.0
 				_update_bar_positions()
-				
+
 	if(position != last_position):
 		var old_pos = last_position
 		last_position = position
@@ -2636,7 +2779,7 @@ func new_draw_line():
 
 func _on_area_entered(ztrade: Area2D) -> void:
 	if ztrade.end_agent == self:
-		assets[ztrade.asset]+=ztrade.amount	
+		assets[ztrade.asset]+=ztrade.amount
 		if assets[ztrade.asset]> needs[ztrade.asset] *2:
 			assets[ztrade.asset] = needs[ztrade.asset] *2
 		else:
@@ -2655,7 +2798,7 @@ func _on_action_timer_timeout() -> void:
 func _on_growth_timer_timeout() -> void:
 	#$GrowthTimer.set_wait_time(random.randf_range(1, 5))
 	#production_ready = true
-	#if production_ready:		
+	#if production_ready:
 	#	production_ready = false
 	if(prod_res[0] != null):
 		for res in prod_res:
@@ -2663,7 +2806,7 @@ func _on_growth_timer_timeout() -> void:
 			if assets[res]> needs[res] *2:
 				assets[res] = needs[res] *2
 			bars[res].value = assets[res]
-			
+
 	#if there is 1 res in each asset - consume them all and grow in size
 	#if any are missing shrink
 	var all_in = true
@@ -2695,38 +2838,40 @@ func _on_growth_timer_timeout() -> void:
 			consumed_all_nutrients = true
 		elif bean_stage != BeanGrowthStage.DEAD:
 			bean_starvation_ticks += 1
-			var old_modulate_down = modulate
-			var new_alpha_down = modulate.a - starvation_alpha_step
-			var tree_challenge_starved: bool = _is_tree_lifecycle_type() and str(Global.mode) == "challenge" and bean_starvation_ticks >= TREE_CHALLENGE_STARVATION_DEAD_TICKS
-			var orphan_challenge_starved: bool = orphan_spawn_child and str(Global.mode) == "challenge" and bean_starvation_ticks >= LIFECYCLE_ORPHAN_CHALLENGE_DEAD_TICKS
-			if new_alpha_down < low_alpha or tree_challenge_starved or orphan_challenge_starved:
-				new_alpha_down = low_alpha
-				if Global.is_killing and killable:
-					_enter_lifecycle_starvation_death()
-					return
-			self.modulate = Color(old_modulate_down, new_alpha_down)
+			if bean_starvation_ticks > LIFECYCLE_STARVATION_GRACE_TICKS:
+				var old_modulate_down = modulate
+				var new_alpha_down = modulate.a - starvation_alpha_step
+				var effective_starvation_ticks = bean_starvation_ticks - LIFECYCLE_STARVATION_GRACE_TICKS
+				var tree_challenge_starved: bool = _is_tree_lifecycle_type() and str(Global.mode) == "challenge" and effective_starvation_ticks >= TREE_CHALLENGE_STARVATION_DEAD_TICKS
+				var orphan_challenge_starved: bool = orphan_spawn_child and str(Global.mode) == "challenge" and effective_starvation_ticks >= LIFECYCLE_ORPHAN_CHALLENGE_DEAD_TICKS
+				if new_alpha_down < low_alpha or tree_challenge_starved or orphan_challenge_starved:
+					new_alpha_down = low_alpha
+					if Global.is_killing and killable:
+						_enter_lifecycle_starvation_death()
+						return
+				self.modulate = Color(old_modulate_down, new_alpha_down)
 
 		_advance_bean_lifecycle(consumed_all_nutrients)
 		return
 
 	var newScale = $Sprite2D.scale
 	#print(name, " assets: ", assets)
-	if all_in == true:	
+	if all_in == true:
 		if $Sprite2D.scale.x < max_scale and $Sprite2D.scale.y < max_scale:
 			var candidate_scale = $Sprite2D.scale * (1 + scale_step_up)
 			if _can_expand_to_scale(candidate_scale):
 				newScale = candidate_scale
-		
+
 		var old_modulate = modulate
 		var new_alpha = modulate.a+alpha_step_up
 		if new_alpha > high_alpha:
 			new_alpha = high_alpha
 		var new_color = Color(old_modulate,new_alpha)
 		self.modulate= new_color
-		
+
 		Global.add_score(400)
 		emit_signal("update_score")
-		
+
 		#print(name, " ", $Sprite2D.scale)
 		for res in assets:
 			#if(res != "R"):
@@ -2734,21 +2879,21 @@ func _on_growth_timer_timeout() -> void:
 			bars[res].value = assets[res]
 			#else:
 			#	evaporate()
-		
+
 	else:
 		#if $Sprite2D.scale.x > 0.5 and $Sprite2D.scale.y > 0.5:
-			
+
 			#newScale = $Sprite2D.scale * 0.95
 			#print($Sprite2D.scale)
-			
+
 		var old_modulate = modulate
 		var new_alpha = modulate.a - starvation_alpha_step
 		if new_alpha < low_alpha:
 			new_alpha = low_alpha
-			
+
 			if(Global.is_killing == true and self.killable == true):
 				kill_it()
-			
+
 		var new_color = Color(old_modulate,new_alpha)
 		self.modulate= new_color
 
@@ -2758,35 +2903,35 @@ func _on_growth_timer_timeout() -> void:
 		if str(type) == "tree":
 			_last_occupancy_scale = newScale
 			_sync_occupancy_cache()
-		#tween.set_parallel(true)	
-		
+		#tween.set_parallel(true)
+
 	if newScale.x >= max_scale and newScale.y >= max_scale and modulate.a >= 1:
 		_spawn_growth_sparkle()
-	
+
 		if Global.baby_mode:
 			if(Global.is_max_babies == true):
 				if(current_babies < num_babies):
 					have_babies()
 			else:
 				have_babies()
-	
+
 func have_babies(force_spawn: bool = false)  -> void:
-	if bool(get_meta("story_disable_birth", false)):
+	if Global.to_bool(get_meta("story_disable_birth", false)):
 		return
 	if _is_bean_lifecycle_enabled() and bean_stage != BeanGrowthStage.POD_READY:
 		return
 	var parent_anchor = _find_nearby_living_myco_anchor(global_position, LIFECYCLE_PARENT_BOUND_TILES)
 	if _is_bean_lifecycle_enabled() and not is_instance_valid(parent_anchor):
 		return
-	
+
 	var max_rounds = 10
 	var current_round = 0
 	var baby_made = false
-	
-	
+
+
 	#produce a baby
 	#find a random place nearby
-	
+
 	var new_x = global_position.x
 	var new_y = global_position.y
 	var world = _get_world_foundation_node()
@@ -2803,12 +2948,12 @@ func have_babies(force_spawn: bool = false)  -> void:
 			parent_anchor_coord = _clamp_tile_coord(world, Vector2i(world.world_to_tile(_clamp_position_to_world_rect(anchor_pos))))
 			has_parent_anchor_coord = true
 	var rng = random
-	
+
 	while(baby_made == false and current_round < max_rounds):
 		if(Global.is_max_babies):
 			if(current_babies >= num_babies):
 				return
-				
+
 		new_x = global_position.x
 		new_y = global_position.y
 		current_round+=1
@@ -2831,25 +2976,31 @@ func have_babies(force_spawn: bool = false)  -> void:
 			var random_y = rng.randi_range(-pixel_radius, pixel_radius)
 			new_x = new_x + random_x
 			new_y = new_y + random_y
-		
+
 		var new_pos = Vector2(new_x, new_y )
 		var hit = false
 		var new_pos_screen = Global.world_to_screen(self, new_pos)
-		
+
 		if $"../../UI/MarginContainer".get_global_rect().has_point(new_pos_screen):
 			hit = true
 			#print("hit something-info")
-		
+
 		for agent in $"../../Agents".get_children():
-			var recto = agent.sprite.get_rect()
-			var posr = recto.position+agent.global_position
-			var rects = Rect2(posr,recto.size*agent.scale*2) 
-			
+			if not (agent is Node2D):
+				continue
+			var agent_sprite: Variant = agent.get("sprite")
+			if not is_instance_valid(agent_sprite) or not agent_sprite.has_method("get_rect"):
+				continue
+			var agent_node: Node2D = agent
+			var recto = agent_sprite.get_rect()
+			var posr = recto.position+agent_node.global_position
+			var rects = Rect2(posr,recto.size*agent_node.scale*2)
+
 			if rects.has_point(new_pos):
 				hit = true
-		
-		
-		
+
+
+
 		if( hit == false):
 			var world_rect = Global.get_world_rect(self)
 			if (world_rect.has_point(new_pos)):
@@ -2868,14 +3019,14 @@ func have_babies(force_spawn: bool = false)  -> void:
 					baby_made = true
 					current_babies +=1
 				else:
-					current_maturity +=1 
+					current_maturity +=1
 					if(current_maturity >= peak_maturity):
 						emit_signal("new_agent", new_agent_dict)
 						baby_made = true
 						current_babies +=1
 						current_maturity = 0
-				
-				#make_squash(event.position)		
+
+				#make_squash(event.position)
 
 
 
@@ -2892,7 +3043,7 @@ func _on_evaporate_timer_timeout() -> void:
 func _on_body_entered(body: Node2D) -> void:
 	var predator_quarry_type = str(body.get("quarry_type"))
 	if self.type == predator_quarry_type:#"maize"):
-		if body is Tuktuk and bool(get_meta("story_villager", false)):
+		if body is Tuktuk and Global.to_bool(get_meta("story_villager", false)):
 			story_predator_disrupt_timer = maxf(story_predator_disrupt_timer, STORY_PREDATOR_DISRUPT_SECONDS)
 			for res in assets.keys():
 				assets[res] = maxi(int(assets[res]) - 1, 0)
@@ -2904,11 +3055,11 @@ func _on_body_entered(body: Node2D) -> void:
 			body.set("going", Vector2(1, randi_range(-1, 1)))
 			return
 		if body is Bird:
-			if bool(body.get("caught")):
+			if Global.to_bool(body.get("caught")):
 				return
 			if not has_method("try_harvest_to_predator"):
 				return
-			if not bool(call("try_harvest_to_predator", body)):
+			if not Global.to_bool(call("try_harvest_to_predator", body)):
 				return
 			var harvested_type = str(type)
 			if body.has_method("on_predator_harvest_success"):
@@ -2918,22 +3069,23 @@ func _on_body_entered(body: Node2D) -> void:
 				body.set("speed", maxf(float(body.get("speed")) - 100.0, 80.0))
 				body.set("going", Vector2(1, randf_range(-0.25, 0.25)).normalized())
 			return
-			
+
 		#print("bird endered: ", body)
-		if(not bool(body.get("caught")) and caught_by == null):
+		if(not Global.to_bool(body.get("caught")) and caught_by == null):
 			body.set("caught", true)
 			caught_by = body
 			logistics_ready = false
 			if(body is Bird):
 				sprite.rotate(PI/4)
 			self.dead = true
+			_fade_out_plant_resource_marker()
 			_clear_active_selection_if_self()
-			
+
 			var living = false
-			
+
 			body.set("speed", float(body.get("speed")) - 100.0)
-			
-			
+
+
 			body.set("going", Vector2(1,randi_range(-1,1)))
 			LevelHelpersRef.unregister_agent_occupancy(_get_level_root(), self)
 			var level_root = _get_level_root()

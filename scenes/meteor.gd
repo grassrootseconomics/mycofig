@@ -37,5 +37,8 @@ func _on_body_entered(body: Node2D) -> void:
 func _on_area_entered(trade: Area2D) -> void:
 	if trade.get("money"):
 		money += trade.money	
-	trade.queue_free()
+	if trade.has_method("finish_trade"):
+		trade.call_deferred("finish_trade")
+	else:
+		trade.call_deferred("queue_free")
 	queue_free()

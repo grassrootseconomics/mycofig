@@ -313,9 +313,10 @@ anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = -122.0
-offset_top = -72.0
+offset_top = -116.0
 offset_right = -14.0
 offset_bottom = -20.0
+custom_minimum_size = Vector2(102, 94)
 grow_horizontal = 0
 grow_vertical = 0
 theme_override_constants/margin_left = 6
@@ -323,13 +324,19 @@ theme_override_constants/margin_top = 6
 theme_override_constants/margin_right = 6
 theme_override_constants/margin_bottom = 6
 
-[node name="HBoxContainer" type="HBoxContainer" parent="MarginCMarginContainer2ontainer"]
+[node name="HBoxContainer" type="VBoxContainer" parent="MarginCMarginContainer2ontainer"]
 layout_mode = 2
+theme_override_constants/separation = 4
 
 [node name="PauseButton" type="Button" parent="MarginCMarginContainer2ontainer/HBoxContainer"]
 layout_mode = 2
 custom_minimum_size = Vector2(84, 38)
 text = "Pause"
+
+[node name="SpeedButton" type="Button" parent="MarginCMarginContainer2ontainer/HBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(84, 38)
+text = "Speed: 1x"
 
 [node name="QuitContainer" type="MarginContainer" parent="."]
 anchors_preset = 9
@@ -382,3 +389,4 @@ script = ExtResource("7_65oah")
 [connection signal="pressed" from="QuitContainer/VBoxContainer/ZoomButton" to="." method="_on_zoom_button_pressed"]
 [connection signal="pressed" from="QuitContainer/VBoxContainer/QuitButton" to="." method="_on_quit_button_pressed"]
 [connection signal="pressed" from="MarginCMarginContainer2ontainer/HBoxContainer/PauseButton" to="." method="_on_pause_button_pressed"]
+[connection signal="pressed" from="MarginCMarginContainer2ontainer/HBoxContainer/SpeedButton" to="." method="_on_speed_button_pressed"]

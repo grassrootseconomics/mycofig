@@ -174,14 +174,14 @@ func _kill_random_agent(exclude_myco: bool = false) -> bool:
 	for agent in agents_root.get_children():
 		if not is_instance_valid(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		var agent_type = str(agent.get("type"))
 		if agent_type == "cloud":
 			continue
 		if exclude_myco and agent_type == "myco":
 			continue
-		if not bool(agent.get("killable")):
+		if not Global.to_bool(agent.get("killable")):
 			continue
 		candidates.append(agent)
 	if candidates.is_empty():
@@ -226,7 +226,7 @@ func _get_live_agent_count() -> int:
 	for agent in agents_root.get_children():
 		if not is_instance_valid(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if str(agent.get("type")) == "cloud":
 			continue

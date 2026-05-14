@@ -1,10 +1,15 @@
 extends Node
 
+signal gameplay_speed_changed(multiplier: float, label: String)
+
 var score := 0
 var high_score := 0
 var last_score := 0
 var last_rank_key := 0
 const HIGH_SCORE_SAVE_PATH := "user://high_score.cfg"
+const GAMEPLAY_SPEED_NORMAL := 0
+const GAMEPLAY_SPEED_FAST := 1
+const GAMEPLAY_SPEED_SLOW := 2
 
 var move_rate = 1 #4 #6
 var movement_speed = 50 #100 #200
@@ -12,7 +17,8 @@ var social_buddy_radius = 128
 var num_connectors = 4
 var active_agent = null
 var is_mobile_platform = false
-var world_zoom_enabled = false
+var world_zoom_enabled = true
+var gameplay_speed_index := GAMEPLAY_SPEED_NORMAL
 
 var is_dragging = false
 var bars_on = false
@@ -48,6 +54,28 @@ const PERF_OCCUPANCY_TIER2_QUERY_COUNT := 50000
 var minimap_adaptive_redraw_enabled = true
 var ui_layout_cadence_enabled = true
 var trade_dispatch_limit_enabled = true
+
+
+func to_bool(value: Variant) -> bool:
+	match typeof(value):
+		TYPE_BOOL:
+			return value == true
+		TYPE_NIL:
+			return false
+		TYPE_INT:
+			return int(value) != 0
+		TYPE_FLOAT:
+			return not is_zero_approx(float(value))
+		TYPE_STRING:
+			return str(value) != ""
+		TYPE_ARRAY:
+			return not (value as Array).is_empty()
+		TYPE_DICTIONARY:
+			return not (value as Dictionary).is_empty()
+		TYPE_OBJECT:
+			return is_instance_valid(value)
+	return value != null
+
 var trade_sender_rate_per_sec := 6.0
 var trade_sender_burst := 2.0
 var trade_link_rate_per_sec := 4.0
@@ -351,6 +379,7 @@ func _ready() -> void:
 		# Tile-ring village reach stays at 2 rings on mobile too.
 		social_buddy_radius = 128
 	reset_trade_dispatch_budgets()
+	apply_gameplay_speed()
 
 
 func load_high_score() -> void:
@@ -418,6 +447,43 @@ func format_score_value(score_value: int) -> String:
 		if digit_count % 3 == 0 and index > 0:
 			formatted = "," + formatted
 	return formatted
+
+
+func get_gameplay_speed_multiplier() -> float:
+	match gameplay_speed_index:
+		GAMEPLAY_SPEED_FAST:
+			return 2.0
+		GAMEPLAY_SPEED_SLOW:
+			return 0.5
+		_:
+			return 1.0
+
+
+func get_gameplay_speed_label() -> String:
+	match gameplay_speed_index:
+		GAMEPLAY_SPEED_FAST:
+			return "Speed: 2x"
+		GAMEPLAY_SPEED_SLOW:
+			return "Speed: 0.5x"
+		_:
+			return "Speed: 1x"
+
+
+func apply_gameplay_speed(emit_change: bool = false) -> void:
+	var multiplier := get_gameplay_speed_multiplier()
+	Engine.time_scale = multiplier
+	if emit_change:
+		emit_signal("gameplay_speed_changed", multiplier, get_gameplay_speed_label())
+
+
+func cycle_gameplay_speed() -> void:
+	gameplay_speed_index = (gameplay_speed_index + 1) % 3
+	apply_gameplay_speed(true)
+
+
+func reset_gameplay_speed() -> void:
+	gameplay_speed_index = GAMEPLAY_SPEED_NORMAL
+	apply_gameplay_speed(true)
 
 
 func set_world_context(rect: Rect2, mode_id: String = "", scenario_id: String = "") -> void:
@@ -489,7 +555,7 @@ func is_story_mode_runtime() -> bool:
 
 
 func is_challenge_dual_village_mode() -> bool:
-	return str(mode) == "challenge" and bool(challenge_dual_village_enabled)
+	return str(mode) == "challenge" and to_bool(challenge_dual_village_enabled)
 
 
 func is_parallel_village_runtime() -> bool:
@@ -666,7 +732,7 @@ func _is_village_dispatch_actor(agent: Variant) -> bool:
 	if agent_type == "farmer" or agent_type == "vendor" or agent_type == "cook" or agent_type == "bank":
 		return true
 	if agent_type == "myco":
-		if bool(agent.get_meta("story_village_actor", false)):
+		if to_bool(agent.get_meta("story_village_actor", false)):
 			var story_kind = str(agent.get_meta("story_kind", ""))
 			if story_kind.begins_with("basket"):
 				return true
@@ -715,6 +781,9 @@ func allow_trade_dispatch(from_agent: Variant, to_agent: Variant) -> bool:
 	var sender_burst = float(profile.get("sender_burst", trade_sender_burst))
 	var link_rate = float(profile.get("link_rate", trade_link_rate_per_sec))
 	var link_burst = float(profile.get("link_burst", trade_link_burst))
+	var speed_multiplier := get_gameplay_speed_multiplier()
+	sender_rate *= speed_multiplier
+	link_rate *= speed_multiplier
 	var now_ms = Time.get_ticks_msec()
 	if not _consume_trade_bucket(_trade_sender_buckets, sender_key, sender_rate, sender_burst, now_ms):
 		return false

@@ -241,7 +241,10 @@ func _on_area_entered(ztrade: Area2D) -> void:
 		if assets[ztrade.asset]> needs[ztrade.asset] *2:
 			assets[ztrade.asset] = needs[ztrade.asset] *2
 		bars[ztrade.asset].value = assets[ztrade.asset]
-		ztrade.queue_free()
+		if ztrade.has_method("finish_trade"):
+			ztrade.call_deferred("finish_trade")
+		else:
+			ztrade.call_deferred("queue_free")
 
 func _physics_process(delta):
 	if is_dragging:

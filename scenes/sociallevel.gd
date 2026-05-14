@@ -98,6 +98,22 @@ func _play_squelch_at(world_pos: Vector2) -> void:
 	player.play()
 
 
+func play_inventory_harvest_sound(item_type: String, world_pos: Vector2 = Vector2.ZERO) -> void:
+	match str(item_type):
+		"bean", "squash", "maize":
+			var twinkle_player: AudioStreamPlayer2D = get_node_or_null("TwinkleSound") as AudioStreamPlayer2D
+			if is_instance_valid(twinkle_player):
+				twinkle_player.global_position = world_pos
+				twinkle_player.play()
+		"tree":
+			var bush_player: AudioStreamPlayer2D = get_node_or_null("BushSound") as AudioStreamPlayer2D
+			if is_instance_valid(bush_player):
+				bush_player.global_position = world_pos
+				bush_player.play()
+		"myco", "basket":
+			_play_squelch_at(world_pos)
+
+
 func _ensure_tuktuk_engine_sound_player() -> AudioStreamPlayer:
 	if is_instance_valid(_tuktuk_engine_sound_player):
 		return _tuktuk_engine_sound_player
@@ -173,7 +189,7 @@ func _compute_tuktuk_engine_target_db() -> float:
 		if typeof(pos) != TYPE_VECTOR2:
 			continue
 		var tuktuk_pos: Vector2 = pos
-		var escaping: bool = bool(state.get("escaping", false))
+		var escaping: bool = Global.to_bool(state.get("escaping", false))
 		var state_audible_radius: float = audible_radius
 		if escaping:
 			state_audible_radius = maxf(audible_radius * 0.62, TUKTUK_ENGINE_FOCUS_RADIUS_WORLD + 1.0)
@@ -315,7 +331,7 @@ func _compute_predator_bird_target_db() -> float:
 		if typeof(pos) != TYPE_VECTOR2:
 			continue
 		var bird_pos: Vector2 = pos
-		var escaping: bool = bool(state.get("escaping", false))
+		var escaping: bool = Global.to_bool(state.get("escaping", false))
 		var state_audible_radius: float = audible_radius
 		if escaping:
 			state_audible_radius = maxf(audible_radius * 0.62, PREDATOR_BIRD_FOCUS_RADIUS_WORLD + 1.0)
@@ -451,7 +467,7 @@ func _can_place_basket_near_person(world_pos: Vector2) -> bool:
 	for agent in $Agents.get_children():
 		if not is_instance_valid(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if not _is_village_person_type(str(agent.get("type"))):
 			continue
@@ -474,16 +490,16 @@ func can_place_inventory_item_at_world_pos(item_name: String, world_pos: Vector2
 	if not world.in_bounds(coord):
 		return false
 	var target_pos = world.tile_to_world_center(coord)
-	if world.has_method("is_world_pos_revealed") and not bool(world.is_world_pos_revealed(target_pos)):
+	if world.has_method("is_world_pos_revealed") and not Global.to_bool(world.is_world_pos_revealed(target_pos)):
 		return false
 	var exact_spawn = _resolve_exact_tile_spawn_pos(target_pos)
-	if not bool(exact_spawn.get("ok", false)):
+	if not Global.to_bool(exact_spawn.get("ok", false)):
 		return false
 	if spawn_name == "basket" or spawn_name == "myco":
 		if not _can_place_basket_near_person(target_pos):
 			return false
 	if spawn_name == "myco" and world.has_method("can_place_myco_on_tile"):
-		if not bool(world.call("can_place_myco_on_tile", coord)):
+		if not Global.to_bool(world.call("can_place_myco_on_tile", coord)):
 			return false
 	return true
 
@@ -502,11 +518,11 @@ func _find_replaceable_agent_at_world_pos(pos: Vector2, ignore_agent: Variant = 
 			continue
 		if is_instance_valid(ignore_agent) and agent == ignore_agent:
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if str(agent.get("type")) == "cloud":
 			continue
-		if not bool(agent.get("killable")):
+		if not Global.to_bool(agent.get("killable")):
 			continue
 		var occupied_tiles = LevelHelpersRef.get_agent_occupied_tiles(self, agent)
 		if occupied_tiles.has(coord):
@@ -677,7 +693,9 @@ func _input(event):
 func _process(_delta: float) -> void:
 	_update_tuktuk_engine_volume(_delta)
 	_update_predator_bird_volume(_delta)
-	if not Global.is_mobile_platform:
+	var world_node: Node = _get_world_foundation()
+	var camera_user_panning := is_instance_valid(world_node) and world_node.has_method("is_camera_user_panning") and Global.to_bool(world_node.call("is_camera_user_panning"))
+	if not Global.is_mobile_platform and not camera_user_panning:
 		LevelHelpersRef.update_agent_hover_focus(self, $Agents)
 	_dirty_refresh_accum += _delta
 	if _dirty_refresh_accum >= Global.get_dirty_refresh_interval():
@@ -749,7 +767,7 @@ func _spawn_trade(path_dict) -> void:
 						continue
 					if not packet.has_method("accumulate_trade_amount"):
 						continue
-					var aggregated = bool(packet.call("accumulate_trade_amount", trade_amount))
+					var aggregated = Global.to_bool(packet.call("accumulate_trade_amount", trade_amount))
 					if aggregated:
 						return
 	var trade = null
@@ -825,9 +843,9 @@ func _on_new_agent(agent_dict) -> void:
 	var spawn_name = str(agent_dict["name"])
 	var spawn_pos = agent_dict["pos"]
 	var ignore_agent = agent_dict.get("ignore_agent", null)
-	var require_exact_tile = bool(agent_dict.get("require_exact_tile", false))
-	var from_inventory = bool(agent_dict.get("from_inventory", false))
-	if bool(agent_dict.get("allow_replace", false)):
+	var require_exact_tile = Global.to_bool(agent_dict.get("require_exact_tile", false))
+	var from_inventory = Global.to_bool(agent_dict.get("from_inventory", false))
+	if Global.to_bool(agent_dict.get("allow_replace", false)):
 		var replace_target = _find_replaceable_agent_at_world_pos(spawn_pos, ignore_agent)
 		if is_instance_valid(replace_target):
 			ignore_agent = replace_target
@@ -839,7 +857,7 @@ func _on_new_agent(agent_dict) -> void:
 			require_exact_tile = true
 	if require_exact_tile:
 		var exact_spawn = _resolve_exact_tile_spawn_pos(spawn_pos, ignore_agent)
-		if not bool(exact_spawn["ok"]):
+		if not Global.to_bool(exact_spawn["ok"]):
 			if from_inventory:
 				_refund_inventory_item(spawn_name, 1)
 			return

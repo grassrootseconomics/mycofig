@@ -54,7 +54,7 @@ var myco_tile_span := 64.0
 
 
 func _challenge_myco_death_enabled() -> bool:
-	return str(Global.mode) == "challenge" and bool(Global.is_killing)
+	return str(Global.mode) == "challenge" and Global.to_bool(Global.is_killing)
 
 
 func _has_complete_nutrient_set() -> bool:
@@ -158,7 +158,7 @@ func _is_ecology_network_candidate(agent: Variant) -> bool:
 		return false
 	if agent == self:
 		return false
-	if bool(agent.get("dead")):
+	if Global.to_bool(agent.get("dead")):
 		return false
 	if not _can_share_story_trade_network(agent):
 		return false
@@ -197,7 +197,7 @@ func _refresh_existing_network_after_stage_change() -> void:
 	for agent in agents_root.get_children():
 		if not is_instance_valid(agent):
 			continue
-		if bool(agent.get("dead")):
+		if Global.to_bool(agent.get("dead")):
 			continue
 		if str(agent.get("type")) == "cloud":
 			continue
@@ -239,7 +239,7 @@ func _has_supporting_neighbors() -> bool:
 			continue
 		if child == self:
 			continue
-		if bool(child.get("dead")):
+		if Global.to_bool(child.get("dead")):
 			continue
 		var child_type = str(child.get("type"))
 		if child_type == "cloud":
@@ -430,6 +430,7 @@ func try_harvest_to_inventory() -> bool:
 	var ui_node = get_node_or_null("../../UI")
 	if is_instance_valid(ui_node) and ui_node.has_method("refresh_inventory_counts"):
 		ui_node.refresh_inventory_counts()
+	_play_inventory_harvest_sound("myco")
 	if is_dragging:
 		is_dragging = false
 		Global.is_dragging = false
@@ -669,7 +670,7 @@ func _on_area_entered(trade: Area2D) -> void:
 						"trade_type": "send",
 						"return_res": null,
 						"return_amt": null,
-						"liquidity_cycle_trade": bool(trade.get("liquidity_cycle_trade")),
+						"liquidity_cycle_trade": Global.to_bool(trade.get("liquidity_cycle_trade")),
 						"liquidity_cycle_origin_id": liquidity_origin_id
 					}
 					if (assets[trade.return_asset] >= return_amount):

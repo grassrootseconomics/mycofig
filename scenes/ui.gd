@@ -245,6 +245,7 @@ var _pause_container_ref: MarginContainer = null
 var _quit_container_ref: MarginContainer = null
 var _pause_button_ref: Button = null
 var _quit_button_ref: Button = null
+var _zoom_button_ref: Button = null
 var _ui_layout_elapsed := 0.0
 var _ui_layout_dirty := true
 var _last_inventory_rect := Rect2(Vector2.ZERO, Vector2.ZERO)
@@ -330,6 +331,9 @@ func _cache_layout_nodes() -> void:
 	_quit_container_ref = find_child("QuitContainer", true, false) as MarginContainer
 	_pause_button_ref = find_child("PauseButton", true, false) as Button
 	_quit_button_ref = find_child("QuitButton", true, false) as Button
+	_zoom_button_ref = find_child("ZoomButton", true, false) as Button
+	_connect_world_zoom_signal()
+	_sync_zoom_button_label()
 	_ensure_story_facts_button()
 	_ensure_story_facts_panel()
 
@@ -383,6 +387,33 @@ func _get_quit_button() -> Button:
 		return _quit_button_ref
 	_quit_button_ref = find_child("QuitButton", true, false) as Button
 	return _quit_button_ref
+
+
+func _get_zoom_button() -> Button:
+	if is_instance_valid(_zoom_button_ref):
+		return _zoom_button_ref
+	_zoom_button_ref = find_child("ZoomButton", true, false) as Button
+	return _zoom_button_ref
+
+
+func _connect_world_zoom_signal() -> void:
+	var world = _get_world_foundation()
+	if not is_instance_valid(world) or not world.has_signal("world_zoom_changed"):
+		return
+	var callback := Callable(self, "_on_world_zoom_changed")
+	if not world.is_connected("world_zoom_changed", callback):
+		world.connect("world_zoom_changed", callback)
+
+
+func _sync_zoom_button_label() -> void:
+	var zoom_button: Button = _get_zoom_button()
+	if not is_instance_valid(zoom_button):
+		return
+	var zoom_enabled := Global.world_zoom_enabled
+	var world = _get_world_foundation()
+	if is_instance_valid(world) and world.has_method("is_world_zoom_enabled"):
+		zoom_enabled = bool(world.call("is_world_zoom_enabled"))
+	zoom_button.text = "Zoom Out" if zoom_enabled else "Zoom In"
 
 
 func _embed_pause_quit_controls_next_to_minimap() -> void:
@@ -2078,8 +2109,9 @@ func _apply_responsive_layout() -> void:
 		_story_facts_button.add_theme_font_size_override("font_size", 18 if compact else 16)
 	var pause_button: Button = _get_pause_button()
 	var quit_button: Button = _get_quit_button()
+	var zoom_button: Button = _get_zoom_button()
 	var pause_size = SIDE_BUTTON_SIZE_TINY if tiny else (SIDE_BUTTON_SIZE_COMPACT if compact else SIDE_BUTTON_SIZE_DEFAULT)
-	for button in [pause_button, quit_button]:
+	for button in [pause_button, quit_button, zoom_button]:
 		if not is_instance_valid(button):
 			continue
 		button.custom_minimum_size = pause_size
@@ -3698,6 +3730,19 @@ func _on_minimap_camera_requested(world_pos: Vector2) -> void:
 	var world = _get_world_foundation()
 	if is_instance_valid(world) and world.has_method("set_camera_world_center"):
 		world.set_camera_world_center(world_pos)
+
+
+func _on_world_zoom_changed(_enabled: bool, _zoom: Vector2) -> void:
+	_sync_zoom_button_label()
+
+
+func _on_zoom_button_pressed() -> void:
+	var world = _get_world_foundation()
+	if is_instance_valid(world) and world.has_method("toggle_world_zoom"):
+		world.call("toggle_world_zoom")
+	else:
+		Global.world_zoom_enabled = not Global.world_zoom_enabled
+	_sync_zoom_button_label()
 
 
 func _on_choose_myco_mouse_entered() -> void:

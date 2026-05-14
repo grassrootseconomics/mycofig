@@ -12,6 +12,7 @@ var social_buddy_radius = 128
 var num_connectors = 4
 var active_agent = null
 var is_mobile_platform = false
+var world_zoom_enabled = false
 
 var is_dragging = false
 var bars_on = false
@@ -452,7 +453,11 @@ func screen_to_world(node: Node, screen_pos: Vector2) -> Vector2:
 	var camera = node.get_viewport().get_camera_2d()
 	if is_instance_valid(camera):
 		var view_size = node.get_viewport().get_visible_rect().size
-		return camera.get_screen_center_position() - view_size * 0.5 + screen_pos
+		var zoom = Vector2(maxf(absf(camera.zoom.x), 0.001), maxf(absf(camera.zoom.y), 0.001))
+		return camera.get_screen_center_position() + Vector2(
+			(screen_pos.x - view_size.x * 0.5) / zoom.x,
+			(screen_pos.y - view_size.y * 0.5) / zoom.y
+		)
 	return screen_pos
 
 
@@ -462,7 +467,9 @@ func world_to_screen(node: Node, world_pos: Vector2) -> Vector2:
 	var camera = node.get_viewport().get_camera_2d()
 	if is_instance_valid(camera):
 		var view_size = node.get_viewport().get_visible_rect().size
-		return world_pos - (camera.get_screen_center_position() - view_size * 0.5)
+		var zoom = Vector2(maxf(absf(camera.zoom.x), 0.001), maxf(absf(camera.zoom.y), 0.001))
+		var relative = world_pos - camera.get_screen_center_position()
+		return Vector2(relative.x * zoom.x, relative.y * zoom.y) + view_size * 0.5
 	return world_pos
 
 

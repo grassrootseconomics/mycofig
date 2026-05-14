@@ -24,6 +24,7 @@ var _redraw_elapsed := 0.0
 var _redraw_requested := true
 var _last_camera_center := Vector2.INF
 var _last_camera_size := Vector2.ZERO
+var _last_camera_zoom := Vector2.ZERO
 var _last_panel_size := Vector2.ZERO
 var _last_world_rect := Rect2(Vector2.ZERO, Vector2.ZERO)
 
@@ -124,6 +125,9 @@ func _camera_or_world_changed() -> bool:
 				var center = camera.get_screen_center_position()
 				if _last_camera_center == Vector2.INF or _last_camera_center.distance_squared_to(center) > 0.01:
 					_last_camera_center = center
+					changed = true
+				if _last_camera_zoom != camera.zoom:
+					_last_camera_zoom = camera.zoom
 					changed = true
 	return changed
 
@@ -228,7 +232,9 @@ func _draw_camera_rect() -> void:
 	if not is_instance_valid(camera):
 		return
 	var view_size = viewport.get_visible_rect().size
-	var cam_world = Rect2(camera.get_screen_center_position() - view_size * 0.5, view_size)
+	var zoom = Vector2(maxf(absf(camera.zoom.x), 0.001), maxf(absf(camera.zoom.y), 0.001))
+	var world_size = Vector2(view_size.x / zoom.x, view_size.y / zoom.y)
+	var cam_world = Rect2(camera.get_screen_center_position() - world_size * 0.5, world_size)
 	var p0 = _world_to_map(cam_world.position)
 	var p1 = _world_to_map(cam_world.position + cam_world.size)
 	if p0 == Vector2.INF or p1 == Vector2.INF:

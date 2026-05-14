@@ -208,6 +208,7 @@ var _farmer_harvest_delivery_reserved := false
 var _bar_update_accum := 0.0
 var _last_occupancy_scale := Vector2(-99999.0, -99999.0)
 var _last_bar_camera_center := Vector2(INF, INF)
+var _last_bar_camera_zoom := Vector2.ZERO
 var _hover_visual_focus := false
 var _harvest_visual_detached := false
 var _harvest_inventory_animating := false
@@ -258,16 +259,23 @@ func _update_bar_positions() -> void:
 	if bars.is_empty():
 		return
 	var anchor = position
+	var bar_zoom := Vector2.ONE
 	if is_instance_valid(bar_canvas) and bar_canvas is CanvasLayer:
 		var viewport = get_viewport()
 		if viewport != null:
 			var camera = viewport.get_camera_2d()
 			if camera != null:
 				_last_bar_camera_center = camera.get_screen_center_position()
+				_last_bar_camera_zoom = camera.zoom
+				bar_zoom = Vector2(maxf(absf(camera.zoom.x), 0.001), maxf(absf(camera.zoom.y), 0.001))
 				anchor = Global.world_to_screen(self, position)
 	for bar in bars:
 		if is_instance_valid(bars[bar]):
-			bars[bar].position = anchor + bars_offset[bar]
+			var offset = bars_offset.get(bar, Vector2.ZERO)
+			if typeof(offset) != TYPE_VECTOR2:
+				offset = Vector2.ZERO
+			bars[bar].scale = bar_zoom
+			bars[bar].position = anchor + Vector2(offset.x * bar_zoom.x, offset.y * bar_zoom.y)
 
 
 func setup_resource_bars(asset_keys: Array = [], force_hidden: bool = false) -> void:
@@ -362,7 +370,11 @@ func _resource_bars_overlap_core_ui() -> bool:
 	if avoid_rects.is_empty():
 		return false
 	var anchor = position
+	var bar_zoom := Vector2.ONE
 	if is_instance_valid(bar_canvas) and bar_canvas is CanvasLayer:
+		var camera = get_viewport().get_camera_2d()
+		if is_instance_valid(camera):
+			bar_zoom = Vector2(maxf(absf(camera.zoom.x), 0.001), maxf(absf(camera.zoom.y), 0.001))
 		anchor = Global.world_to_screen(self, position)
 	for bar_key in bars:
 		var bar = bars[bar_key]
@@ -371,7 +383,11 @@ func _resource_bars_overlap_core_ui() -> bool:
 		var bar_size: Vector2 = bar.size
 		if bar_size == Vector2.ZERO:
 			bar_size = Vector2(6.0, 30.0)
-		var bar_rect = Rect2(anchor + bars_offset[bar_key], bar_size)
+		bar_size = Vector2(bar_size.x * bar_zoom.x, bar_size.y * bar_zoom.y)
+		var offset = bars_offset.get(bar_key, Vector2.ZERO)
+		if typeof(offset) != TYPE_VECTOR2:
+			offset = Vector2.ZERO
+		var bar_rect = Rect2(anchor + Vector2(offset.x * bar_zoom.x, offset.y * bar_zoom.y), bar_size)
 		for avoid_rect in avoid_rects:
 			if avoid_rect.intersects(bar_rect):
 				return true
@@ -425,8 +441,10 @@ func _did_camera_move_since_last_bar_update() -> bool:
 	if camera == null:
 		return true
 	var center = camera.get_screen_center_position()
-	var moved = center.distance_squared_to(_last_bar_camera_center) > 0.01
+	var zoom = camera.zoom
+	var moved = center.distance_squared_to(_last_bar_camera_center) > 0.01 or zoom != _last_bar_camera_zoom
 	_last_bar_camera_center = center
+	_last_bar_camera_zoom = zoom
 	return moved
 
 

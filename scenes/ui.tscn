@@ -337,10 +337,10 @@ anchor_top = 1.0
 anchor_right = 0.0
 anchor_bottom = 1.0
 offset_left = 72.0
-offset_top = -72.0
+offset_top = -116.0
 offset_right = 186.0
 offset_bottom = -20.0
-custom_minimum_size = Vector2(102, 50)
+custom_minimum_size = Vector2(102, 94)
 grow_horizontal = 0
 grow_vertical = 0
 theme_override_constants/margin_left = 6
@@ -348,7 +348,16 @@ theme_override_constants/margin_top = 6
 theme_override_constants/margin_right = 6
 theme_override_constants/margin_bottom = 6
 
-[node name="QuitButton" type="Button" parent="QuitContainer"]
+[node name="VBoxContainer" type="VBoxContainer" parent="QuitContainer"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="ZoomButton" type="Button" parent="QuitContainer/VBoxContainer"]
+layout_mode = 2
+custom_minimum_size = Vector2(84, 38)
+text = "Zoom In"
+
+[node name="QuitButton" type="Button" parent="QuitContainer/VBoxContainer"]
 layout_mode = 2
 custom_minimum_size = Vector2(84, 38)
 text = "Quit"
@@ -370,5 +379,6 @@ script = ExtResource("7_65oah")
 [connection signal="drag_ended" from="MarginContainer/VBoxContainer/HBoxContainer/ValVBoxContainer/HSlider" to="." method="_on_h_slider_drag_ended"]
 [connection signal="timeout" from="ScoreTimer" to="." method="_on_score_timer_timeout"]
 [connection signal="pressed" from="RestartContainer/Button" to="." method="_on_restart_button_pressed"]
-[connection signal="pressed" from="QuitContainer/QuitButton" to="." method="_on_quit_button_pressed"]
+[connection signal="pressed" from="QuitContainer/VBoxContainer/ZoomButton" to="." method="_on_zoom_button_pressed"]
+[connection signal="pressed" from="QuitContainer/VBoxContainer/QuitButton" to="." method="_on_quit_button_pressed"]
 [connection signal="pressed" from="MarginCMarginContainer2ontainer/HBoxContainer/PauseButton" to="." method="_on_pause_button_pressed"]

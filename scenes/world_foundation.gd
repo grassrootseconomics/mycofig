@@ -4,6 +4,7 @@ class_name WorldFoundation
 signal world_initialized(world_rect: Rect2)
 signal tile_stage_changed(coord: Vector2i, stage: int)
 signal baseline_reset
+signal world_zoom_changed(enabled: bool, zoom: Vector2)
 
 const LevelHelpersRef = preload("res://scenes/level_helpers.gd")
 
@@ -50,6 +51,8 @@ const HOTKEY_WORLD_RESET_BASELINE := KEY_X
 const HOTKEY_WORLD_EDIT_TILES := KEY_C
 const HOTKEY_WORLD_TOGGLE_FOG := KEY_V
 const DEFAULT_CAMERA_SMOOTHING_SPEED := 8.0
+const WORLD_ZOOM_NORMAL := Vector2.ONE
+const WORLD_ZOOM_LARGE := Vector2(2.0, 2.0)
 
 @export var columns: int = 48
 @export var rows: int = 27
@@ -697,7 +700,7 @@ func _process(delta: float) -> void:
 	if not followed and _should_keyboard_pan():
 		var pan_dir = _get_camera_pan_vector()
 		if pan_dir != Vector2.ZERO:
-			camera.global_position += pan_dir.normalized() * camera_pan_speed * delta
+			camera.global_position += _screen_delta_to_world_delta(pan_dir.normalized() * camera_pan_speed * delta)
 			_clamp_camera()
 	if debug_overlay_enabled or debug_edit_enabled:
 		_update_debug_label()
@@ -1341,8 +1344,54 @@ func _setup_camera() -> void:
 	camera.enabled = true
 	camera.position_smoothing_enabled = true
 	camera.position_smoothing_speed = DEFAULT_CAMERA_SMOOTHING_SPEED
+	camera.zoom = _get_target_world_zoom()
 	camera.global_position = get_world_center()
 	_clamp_camera()
+
+
+func _get_target_world_zoom() -> Vector2:
+	return WORLD_ZOOM_LARGE if Global.world_zoom_enabled else WORLD_ZOOM_NORMAL
+
+
+func _get_safe_camera_zoom() -> Vector2:
+	if not is_instance_valid(camera):
+		return WORLD_ZOOM_NORMAL
+	return Vector2(maxf(absf(camera.zoom.x), 0.001), maxf(absf(camera.zoom.y), 0.001))
+
+
+func _screen_delta_to_world_delta(delta: Vector2) -> Vector2:
+	var zoom := _get_safe_camera_zoom()
+	return Vector2(delta.x / zoom.x, delta.y / zoom.y)
+
+
+func _get_visible_world_size() -> Vector2:
+	var view_size = get_viewport().get_visible_rect().size
+	var zoom := _get_safe_camera_zoom()
+	return Vector2(view_size.x / zoom.x, view_size.y / zoom.y)
+
+
+func set_world_zoom_enabled(enabled: bool, immediate: bool = true) -> void:
+	var previous_enabled: bool = Global.world_zoom_enabled
+	Global.world_zoom_enabled = enabled
+	if not is_instance_valid(camera):
+		return
+	var target_zoom := _get_target_world_zoom()
+	var previous_zoom := camera.zoom
+	camera.zoom = target_zoom
+	_clamp_camera()
+	if immediate:
+		camera.reset_smoothing()
+	if previous_enabled != enabled or previous_zoom != target_zoom:
+		emit_signal("world_zoom_changed", enabled, target_zoom)
+
+
+func toggle_world_zoom() -> bool:
+	set_world_zoom_enabled(not Global.world_zoom_enabled)
+	return Global.world_zoom_enabled
+
+
+func is_world_zoom_enabled() -> bool:
+	return Global.world_zoom_enabled
 
 
 func set_camera_smoothing_speed(speed: float) -> void:
@@ -1370,8 +1419,7 @@ func _on_viewport_size_changed() -> void:
 
 func _clamp_camera() -> void:
 	var rect = get_world_rect()
-	var view_size = get_viewport().get_visible_rect().size
-	var half = view_size * 0.5
+	var half = _get_visible_world_size() * 0.5
 	var min_x = rect.position.x + half.x
 	var max_x = rect.position.x + rect.size.x - half.x
 	var min_y = rect.position.y + half.y
@@ -1390,7 +1438,7 @@ func _clamp_camera() -> void:
 func _pan_camera_by_screen_delta(delta: Vector2) -> void:
 	if delta.length_squared() > 0.001:
 		_clear_selection_for_camera_move()
-	camera.global_position -= delta
+	camera.global_position -= _screen_delta_to_world_delta(delta)
 	_clamp_camera()
 
 
@@ -1429,7 +1477,7 @@ func _follow_active_agent(delta: float) -> bool:
 	if shift_screen.length_squared() < 0.25:
 		return false
 
-	var target_pos = camera.global_position + shift_screen
+	var target_pos = camera.global_position + _screen_delta_to_world_delta(shift_screen)
 	var t = min(1.0, follow_response_speed * delta)
 	camera.global_position = camera.global_position.lerp(target_pos, t)
 	_clamp_camera()

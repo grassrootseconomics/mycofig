@@ -1279,7 +1279,7 @@ func _on_quit_game_pressed() -> void:
 	Global.record_last_score()
 	_shutdown_title_runtime()
 	await get_tree().process_frame
-	get_tree().quit()
+	Global.request_quit_game(get_tree())
 
 
 func _on_check_button_toggled(toggled_on: bool) -> void:

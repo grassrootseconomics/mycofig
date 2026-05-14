@@ -660,7 +660,7 @@ func _on_button_pressed() -> void:
 
 func _on_quit_game_pressed() -> void:
 	Global.record_last_score()
-	get_tree().quit()
+	Global.request_quit_game(get_tree())
 
 
 func _is_android_share_available() -> bool:

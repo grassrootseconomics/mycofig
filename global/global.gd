@@ -76,6 +76,56 @@ func to_bool(value: Variant) -> bool:
 			return is_instance_valid(value)
 	return value != null
 
+
+func request_quit_game(tree: SceneTree) -> void:
+	if OS.has_feature("web") and Engine.has_singleton("JavaScriptBridge"):
+		_request_web_tab_close()
+		return
+	if tree != null:
+		tree.quit()
+
+
+func _request_web_tab_close() -> void:
+	var js_bridge: Object = Engine.get_singleton("JavaScriptBridge")
+	if js_bridge == null:
+		return
+	var code := """
+(function () {
+	function showCloseMessage() {
+		if (document.getElementById("social-soil-close-message")) {
+			return;
+		}
+		const overlay = document.createElement("div");
+		overlay.id = "social-soil-close-message";
+		overlay.textContent = "You can close this tab now.";
+		overlay.style.position = "fixed";
+		overlay.style.inset = "0";
+		overlay.style.display = "flex";
+		overlay.style.alignItems = "center";
+		overlay.style.justifyContent = "center";
+		overlay.style.padding = "24px";
+		overlay.style.background = "#132014";
+		overlay.style.color = "#fff4b8";
+		overlay.style.font = "700 28px system-ui, sans-serif";
+		overlay.style.textAlign = "center";
+		overlay.style.zIndex = "2147483647";
+		document.body.appendChild(overlay);
+	}
+	try {
+		window.open("", "_self");
+		window.close();
+	} catch (error) {
+	}
+	setTimeout(function () {
+		if (!window.closed) {
+			showCloseMessage();
+		}
+	}, 180);
+	return "requested";
+})();
+"""
+	js_bridge.eval(code, true)
+
 var trade_sender_rate_per_sec := 6.0
 var trade_sender_burst := 2.0
 var trade_link_rate_per_sec := 4.0

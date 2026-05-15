@@ -33,6 +33,17 @@ const TITLE_BASKET_LAND_VOLUME_DB := -16.0
 const TITLE_FLYBY_FOCUS_RADIUS := 90.0
 const TITLE_FLYBY_APPROACH_FADE_DB_PER_SEC := 10.0
 const TITLE_FLYBY_DEPART_FADE_DB_PER_SEC := 44.0
+const TITLE_SAFE_EDGE_MARGIN_DEFAULT := 12.0
+const TITLE_SAFE_EDGE_MARGIN_COMPACT := 10.0
+const TITLE_SAFE_EDGE_MARGIN_TINY := 8.0
+const TITLE_MOBILE_SAFE_TOP_FALLBACK_MIN := 52.0
+const TITLE_MOBILE_SAFE_TOP_FALLBACK_MAX := 88.0
+const TITLE_MOBILE_SAFE_SIDE_FALLBACK_PORTRAIT_MIN := 18.0
+const TITLE_MOBILE_SAFE_SIDE_FALLBACK_PORTRAIT_MAX := 42.0
+const TITLE_MOBILE_SAFE_SIDE_FALLBACK_LANDSCAPE_MIN := 48.0
+const TITLE_MOBILE_SAFE_SIDE_FALLBACK_LANDSCAPE_MAX := 76.0
+const TITLE_MOBILE_SAFE_BOTTOM_FALLBACK_MIN := 18.0
+const TITLE_MOBILE_SAFE_BOTTOM_FALLBACK_MAX := 40.0
 
 var _ge_logo_texture: Texture2D = null
 var _title_soil_background: TextureRect = null
@@ -214,7 +225,11 @@ func _setup_version_label() -> void:
 	var version_label: Label = $VersionLabel
 	if not is_instance_valid(version_label):
 		return
-	var version_text = str(ProjectSettings.get_setting("application/config/version", "1.1.12"))
+	var version_text = str(ProjectSettings.get_setting("application/config/version", "")).strip_edges()
+	if version_text.is_empty():
+		version_label.visible = false
+		return
+	version_label.visible = true
 	if not version_text.begins_with("v"):
 		version_text = "v" + version_text
 	version_label.text = version_text
@@ -335,12 +350,15 @@ func _update_title_score_widgets(view_size: Vector2, compact: bool, tiny: bool) 
 	var has_last_score = int(Global.last_score) > 0
 	var has_high_score = int(Global.high_score) > 0
 	var show_scores = has_last_score or has_high_score
-	var fallback_panel_width: float = clampf(view_size.x - 64.0, 220.0, 720.0)
+	var safe_rect := _get_title_padded_safe_view_rect(compact, tiny)
+	var safe_panel_max_width: float = maxf(1.0, minf(720.0, safe_rect.size.x))
+	var safe_panel_min_width: float = minf(220.0, safe_panel_max_width)
+	var fallback_panel_width: float = clampf(safe_rect.size.x - 32.0, safe_panel_min_width, safe_panel_max_width)
 	var menu_rect: Rect2 = _get_title_menu_column_rect(view_size, fallback_panel_width)
 	var score_center_x: float = menu_rect.get_center().x
-	var max_panel_width: float = maxf(220.0, view_size.x - 64.0)
-	var panel_width: float = clampf(menu_rect.size.x, 220.0, max_panel_width)
-	var label_width: float = maxf(200.0, panel_width - 20.0)
+	var max_panel_width: float = maxf(safe_panel_min_width, minf(safe_panel_max_width, safe_rect.size.x - 32.0))
+	var panel_width: float = clampf(menu_rect.size.x, safe_panel_min_width, max_panel_width)
+	var label_width: float = maxf(minf(200.0, panel_width), panel_width - 20.0)
 	var last_size: Vector2 = Vector2(label_width, 66.0 if tiny else (72.0 if compact else 78.0))
 	var high_size: Vector2 = Vector2(label_width, 42.0 if tiny else (48.0 if compact else 54.0))
 	var basket_center: Vector2 = _get_title_basket_score_anchor(view_size, compact)
@@ -360,12 +378,12 @@ func _update_title_score_widgets(view_size: Vector2, compact: bool, tiny: bool) 
 		_high_score_label.text = str("High Score: ", Global.format_score_value(Global.high_score))
 	if is_instance_valid(_last_score_label):
 		var last_y: float = score_y
-		_last_score_label.position = Vector2(round(score_center_x - last_size.x * 0.5), round(last_y))
+		_last_score_label.position = _clamp_title_control_position_to_rect(Vector2(round(score_center_x - last_size.x * 0.5), round(last_y)), last_size, safe_rect)
 		if has_last_score:
 			score_y = last_y + last_size.y + score_gap
 	if is_instance_valid(_high_score_label):
 		var high_y: float = score_y
-		_high_score_label.position = Vector2(round(score_center_x - high_size.x * 0.5), round(high_y))
+		_high_score_label.position = _clamp_title_control_position_to_rect(Vector2(round(score_center_x - high_size.x * 0.5), round(high_y)), high_size, safe_rect)
 	_layout_title_score_panel(_last_score_panel, _last_score_label, has_last_score)
 	_layout_title_score_panel(_high_score_panel, _high_score_label, has_high_score)
 	_title_score_sparkle_target = null
@@ -575,6 +593,77 @@ func _get_title_basket_sprite() -> Sprite2D:
 	return get_node_or_null("CenterContainer/Basket") as Sprite2D
 
 
+func _get_title_safe_edge_margin(compact: bool, tiny: bool) -> float:
+	if tiny:
+		return TITLE_SAFE_EDGE_MARGIN_TINY
+	if compact:
+		return TITLE_SAFE_EDGE_MARGIN_COMPACT
+	return TITLE_SAFE_EDGE_MARGIN_DEFAULT
+
+
+func _apply_title_mobile_safe_fallback(view_rect: Rect2, safe_rect: Rect2) -> Rect2:
+	if not Global.is_mobile_platform:
+		return safe_rect
+	var short_edge: float = minf(view_rect.size.x, view_rect.size.y)
+	var portrait: bool = view_rect.size.y >= view_rect.size.x
+	var min_top: float = clampf(short_edge * 0.09, TITLE_MOBILE_SAFE_TOP_FALLBACK_MIN, TITLE_MOBILE_SAFE_TOP_FALLBACK_MAX)
+	var side_min: float = TITLE_MOBILE_SAFE_SIDE_FALLBACK_PORTRAIT_MIN if portrait else TITLE_MOBILE_SAFE_SIDE_FALLBACK_LANDSCAPE_MIN
+	var side_max: float = TITLE_MOBILE_SAFE_SIDE_FALLBACK_PORTRAIT_MAX if portrait else TITLE_MOBILE_SAFE_SIDE_FALLBACK_LANDSCAPE_MAX
+	var side_fraction: float = 0.035 if portrait else 0.08
+	var min_side: float = clampf(short_edge * side_fraction, side_min, side_max)
+	var min_bottom: float = clampf(short_edge * 0.035, TITLE_MOBILE_SAFE_BOTTOM_FALLBACK_MIN, TITLE_MOBILE_SAFE_BOTTOM_FALLBACK_MAX)
+	var safe_left: float = maxf(safe_rect.position.x, view_rect.position.x + min_side)
+	var safe_top: float = maxf(safe_rect.position.y, view_rect.position.y + min_top)
+	var safe_right: float = minf(safe_rect.position.x + safe_rect.size.x, view_rect.position.x + view_rect.size.x - min_side)
+	var safe_bottom: float = minf(safe_rect.position.y + safe_rect.size.y, view_rect.position.y + view_rect.size.y - min_bottom)
+	if safe_right - safe_left <= 1.0 or safe_bottom - safe_top <= 1.0:
+		return safe_rect
+	return Rect2(Vector2(safe_left, safe_top), Vector2(safe_right - safe_left, safe_bottom - safe_top))
+
+
+func _get_title_safe_view_rect() -> Rect2:
+	var view_rect := get_viewport_rect()
+	if not Global.is_mobile_platform:
+		return view_rect
+	var window_size_i := DisplayServer.window_get_size()
+	var window_size := Vector2(window_size_i)
+	if window_size.x <= 0.0 or window_size.y <= 0.0:
+		return _apply_title_mobile_safe_fallback(view_rect, view_rect)
+	var safe_area_i := DisplayServer.get_display_safe_area()
+	var safe_area := Rect2(Vector2(safe_area_i.position), Vector2(safe_area_i.size))
+	if safe_area.size.x <= 0.0 or safe_area.size.y <= 0.0:
+		return _apply_title_mobile_safe_fallback(view_rect, view_rect)
+	var scale := Vector2(view_rect.size.x / window_size.x, view_rect.size.y / window_size.y)
+	var safe_pos := view_rect.position + safe_area.position * scale
+	var safe_size := safe_area.size * scale
+	var safe_left: float = clampf(safe_pos.x, view_rect.position.x, view_rect.position.x + view_rect.size.x)
+	var safe_top: float = clampf(safe_pos.y, view_rect.position.y, view_rect.position.y + view_rect.size.y)
+	var safe_right: float = clampf(safe_pos.x + safe_size.x, view_rect.position.x, view_rect.position.x + view_rect.size.x)
+	var safe_bottom: float = clampf(safe_pos.y + safe_size.y, view_rect.position.y, view_rect.position.y + view_rect.size.y)
+	if safe_right - safe_left <= 1.0 or safe_bottom - safe_top <= 1.0:
+		return _apply_title_mobile_safe_fallback(view_rect, view_rect)
+	var reported_safe_rect := Rect2(Vector2(safe_left, safe_top), Vector2(safe_right - safe_left, safe_bottom - safe_top))
+	return _apply_title_mobile_safe_fallback(view_rect, reported_safe_rect)
+
+
+func _get_title_padded_safe_view_rect(compact: bool, tiny: bool, extra_margin: float = 0.0) -> Rect2:
+	var safe_rect := _get_title_safe_view_rect()
+	var margin: float = maxf(_get_title_safe_edge_margin(compact, tiny) + extra_margin, 0.0)
+	var padded: Rect2 = safe_rect.grow(-margin)
+	if padded.size.x <= 1.0 or padded.size.y <= 1.0:
+		return safe_rect
+	return padded
+
+
+func _clamp_title_control_position_to_rect(pos: Vector2, size: Vector2, rect: Rect2) -> Vector2:
+	var max_x: float = maxf(rect.position.x, rect.position.x + rect.size.x - size.x)
+	var max_y: float = maxf(rect.position.y, rect.position.y + rect.size.y - size.y)
+	return Vector2(
+		clampf(pos.x, rect.position.x, max_x),
+		clampf(pos.y, rect.position.y, max_y)
+	)
+
+
 func _get_title_quit_bottom_margin(compact: bool, tiny: bool) -> float:
 	return 10.0 if tiny else (12.0 if compact else 16.0)
 
@@ -601,9 +690,10 @@ func _get_title_version_label_size() -> Vector2:
 	return label_size
 
 
-func _get_title_version_top_y(view_size: Vector2, compact: bool, tiny: bool) -> float:
+func _get_title_version_top_y(_view_size: Vector2, compact: bool, tiny: bool) -> float:
+	var safe_rect := _get_title_padded_safe_view_rect(compact, tiny)
 	var version_size: Vector2 = _get_title_version_label_size()
-	var quit_top_y: float = view_size.y - _get_title_quit_height(compact, tiny) - _get_title_quit_bottom_margin(compact, tiny)
+	var quit_top_y: float = safe_rect.position.y + safe_rect.size.y - _get_title_quit_height(compact, tiny) - _get_title_quit_bottom_margin(compact, tiny)
 	return quit_top_y - version_size.y - _get_title_version_gap(tiny)
 
 
@@ -651,6 +741,7 @@ func _get_title_ge_button_bottom_y(view_size: Vector2) -> float:
 
 
 func _get_title_basket_global_rest_position(view_size: Vector2, compact: bool, tiny: bool) -> Vector2:
+	var safe_rect := _get_title_padded_safe_view_rect(compact, tiny)
 	var ge_bottom_y: float = _get_title_ge_button_bottom_y(view_size)
 	var desired_y: float = ge_bottom_y + _get_title_basket_after_ge_gap(compact, tiny)
 	var score_stack_height: float = _get_title_score_stack_height(compact, tiny)
@@ -658,10 +749,10 @@ func _get_title_basket_global_rest_position(view_size: Vector2, compact: bool, t
 	var max_y: float = lower_stack_top - _get_title_basket_score_gap(compact, tiny)
 	if score_stack_height > 0.0:
 		max_y -= score_stack_height
-	var min_y: float = ge_bottom_y + 12.0
+	var min_y: float = maxf(ge_bottom_y + 12.0, safe_rect.position.y + 12.0)
 	if max_y < min_y:
-		return Vector2(view_size.x * 0.5, min_y)
-	return Vector2(view_size.x * 0.5, clampf(desired_y, min_y, max_y))
+		return Vector2(safe_rect.get_center().x, min_y)
+	return Vector2(safe_rect.get_center().x, clampf(desired_y, min_y, max_y))
 
 
 func _get_title_basket_local_rest_position(compact: bool) -> Vector2:
@@ -896,6 +987,7 @@ func _shutdown_title_runtime() -> void:
 	set_process(false)
 	_reset_title_flyby_visuals()
 	_release_title_audio()
+	_ge_logo_texture = null
 
 
 func _start_title_flyby_cycle() -> void:
@@ -998,6 +1090,7 @@ func _apply_responsive_layout() -> void:
 	var short_edge = minf(view_size.x, view_size.y)
 	var compact = Global.is_mobile_platform or short_edge <= TITLE_COMPACT_SHORT_EDGE
 	var tiny = short_edge <= TITLE_TINY_SHORT_EDGE
+	var safe_rect := _get_title_padded_safe_view_rect(compact, tiny)
 	var center_container := $CenterContainer as CenterContainer
 	if is_instance_valid(center_container):
 		var center_y_offset := -92.0
@@ -1005,8 +1098,11 @@ func _apply_responsive_layout() -> void:
 			center_y_offset = -74.0
 		if tiny:
 			center_y_offset = -56.0
-		center_container.offset_top = -229.5 + center_y_offset
-		center_container.offset_bottom = 229.5 + center_y_offset
+		var safe_center_offset: Vector2 = safe_rect.get_center() - view_size * 0.5
+		center_container.offset_left = -283.5 + safe_center_offset.x
+		center_container.offset_right = 283.5 + safe_center_offset.x
+		center_container.offset_top = -229.5 + center_y_offset + safe_center_offset.y
+		center_container.offset_bottom = 229.5 + center_y_offset + safe_center_offset.y
 	var title_font_size := 56
 	if compact:
 		title_font_size = 42
@@ -1016,18 +1112,20 @@ func _apply_responsive_layout() -> void:
 	if is_instance_valid(title):
 		title.visible = false
 		title.add_theme_font_size_override("font_size", title_font_size)
-		var fallback_top = 22.0 if compact else 68.0
+		var fallback_top = maxf(safe_rect.position.y, 22.0 if compact else 68.0)
 		var fallback_bottom = 156.0 if compact else 228.0
 		title.offset_top = fallback_top
-		title.offset_bottom = fallback_bottom
+		title.offset_bottom = maxf(fallback_bottom, fallback_top + 1.0)
 	var menu_box: VBoxContainer = $CenterContainer/VBoxContainer
 	if is_instance_valid(menu_box):
-		menu_box.custom_minimum_size = Vector2(minf(view_size.x - 48.0, 420.0), 0.0)
+		menu_box.custom_minimum_size = Vector2(clampf(safe_rect.size.x - 24.0, minf(180.0, safe_rect.size.x), minf(420.0, safe_rect.size.x)), 0.0)
 		menu_box.add_theme_constant_override("separation", 7 if compact else 9)
-	var cta_width = clampf(view_size.x - 72.0, 220.0, 340.0)
+	var cta_min_width: float = minf(220.0, safe_rect.size.x)
+	var cta_width = clampf(safe_rect.size.x - 48.0, cta_min_width, minf(340.0, maxf(cta_min_width, safe_rect.size.x)))
 	var cta_height = 62.0 if compact else 70.0
 	var cta_font_size = 34 if compact else 42
-	var quit_width = clampf(cta_width * 0.62, 190.0, 280.0)
+	var quit_min_width: float = minf(190.0, safe_rect.size.x)
+	var quit_width = clampf(cta_width * 0.62, quit_min_width, minf(280.0, maxf(quit_min_width, safe_rect.size.x)))
 	var quit_height = _get_title_quit_height(compact, tiny)
 	var quit_font_size = 22 if compact else 24
 	if tiny:
@@ -1042,9 +1140,13 @@ func _apply_responsive_layout() -> void:
 	if is_instance_valid(_title_quit_button):
 		_title_quit_button.custom_minimum_size = Vector2(quit_width, quit_height)
 		_title_quit_button.size = Vector2(quit_width, quit_height)
-		_title_quit_button.position = Vector2(
-			round((view_size.x - quit_width) * 0.5),
-			round(view_size.y - quit_height - _get_title_quit_bottom_margin(compact, tiny))
+		_title_quit_button.position = _clamp_title_control_position_to_rect(
+			Vector2(
+				round(safe_rect.position.x + (safe_rect.size.x - quit_width) * 0.5),
+				round(safe_rect.position.y + safe_rect.size.y - quit_height - _get_title_quit_bottom_margin(compact, tiny))
+			),
+			Vector2(quit_width, quit_height),
+			safe_rect
 		)
 		_title_quit_button.add_theme_font_size_override("font_size", quit_font_size)
 	var link: LinkButton = $CenterContainer/VBoxContainer/LinkButton
@@ -1057,7 +1159,8 @@ func _apply_responsive_layout() -> void:
 			logo_aspect = (ge_texture.get_width() * 1.0) / (ge_texture.get_height() * 1.0)
 		var pad_x := 10.0 if tiny else 12.0
 		var pad_y := 6.0 if tiny else 8.0
-		var logo_width = clampf((view_size.x - 72.0) * 0.5, 140.0, 230.0)
+		var logo_min_width: float = minf(140.0, safe_rect.size.x)
+		var logo_width = clampf((safe_rect.size.x - 48.0) * 0.5, logo_min_width, minf(230.0, maxf(logo_min_width, safe_rect.size.x)))
 		var logo_height = logo_width / logo_aspect
 		link.tooltip_text = "Grassroots Economics"
 		link.custom_minimum_size = Vector2(logo_width + pad_x * 2.0, logo_height + pad_y * 2.0)
@@ -1139,9 +1242,9 @@ func _apply_responsive_layout() -> void:
 			var parent_control = title.get_parent() as Control
 			var parent_global_y = parent_control.global_position.y if is_instance_valid(parent_control) else 0.0
 			var local_midpoint_y = midpoint_y - parent_global_y
-			title.offset_top = round(local_midpoint_y - title_height * 0.5 + vertical_bias)
+			title.offset_top = maxf(safe_rect.position.y, round(local_midpoint_y - title_height * 0.5 + vertical_bias))
 		else:
-			title.offset_top = fallback_top + vertical_bias
+			title.offset_top = maxf(safe_rect.position.y, fallback_top + vertical_bias)
 		title.offset_bottom = title.offset_top + title_height
 	var version_label: Label = $VersionLabel
 	if is_instance_valid(version_label):
@@ -1152,9 +1255,13 @@ func _apply_responsive_layout() -> void:
 			label_size = version_label.custom_minimum_size
 		version_label.size = label_size
 		var version_y = _get_title_version_top_y(view_size, compact, tiny)
-		version_label.position = Vector2(
-			round((view_size.x - label_size.x) * 0.5),
-			round(version_y)
+		version_label.position = _clamp_title_control_position_to_rect(
+			Vector2(
+				round(safe_rect.position.x + (safe_rect.size.x - label_size.x) * 0.5),
+				round(version_y)
+			),
+			label_size,
+			safe_rect
 		)
 
 

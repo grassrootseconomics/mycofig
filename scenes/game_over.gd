@@ -22,6 +22,17 @@ const COMPACT_SHORT_EDGE := 640.0
 const TINY_SHORT_EDGE := 500.0
 const MAX_CONTENT_WIDTH := 660.0
 const MIN_CONTENT_WIDTH := 300.0
+const SAFE_EDGE_MARGIN_DEFAULT := 12.0
+const SAFE_EDGE_MARGIN_COMPACT := 10.0
+const SAFE_EDGE_MARGIN_TINY := 8.0
+const MOBILE_SAFE_TOP_FALLBACK_MIN := 52.0
+const MOBILE_SAFE_TOP_FALLBACK_MAX := 88.0
+const MOBILE_SAFE_SIDE_FALLBACK_PORTRAIT_MIN := 18.0
+const MOBILE_SAFE_SIDE_FALLBACK_PORTRAIT_MAX := 42.0
+const MOBILE_SAFE_SIDE_FALLBACK_LANDSCAPE_MIN := 48.0
+const MOBILE_SAFE_SIDE_FALLBACK_LANDSCAPE_MAX := 76.0
+const MOBILE_SAFE_BOTTOM_FALLBACK_MIN := 18.0
+const MOBILE_SAFE_BOTTOM_FALLBACK_MAX := 40.0
 const PHASE_SKILL_TEXTS := {
 	1: "- You reached the starting garden.\n- No tutorial phase was completed yet.\n- The next milestone is planting each starter item from the basket.",
 	2: "- You completed the first planting milestone.\n- You placed the starter mix of crops, trees, and fungi.\n- You proved you can begin building a living soil network.",
@@ -78,6 +89,9 @@ var _web_share_card_ready := false
 var _desktop_save_dialog: FileDialog = null
 var _desktop_share_card_image: Image = null
 var _desktop_share_pending := false
+var _quit_requested := false
+var _shutting_down := false
+var _active_share_viewport: SubViewport = null
 
 
 func _ready() -> void:
@@ -471,6 +485,87 @@ func _on_viewport_size_changed() -> void:
 	_apply_responsive_layout()
 
 
+func _exit_tree() -> void:
+	_shutdown_game_over_runtime()
+
+
+func _shutdown_game_over_runtime() -> void:
+	_shutting_down = true
+	set_process(false)
+	if is_instance_valid(_bird_sprite):
+		_bird_sprite.stop()
+	if is_instance_valid(_desktop_save_dialog):
+		_desktop_save_dialog.hide()
+	_release_active_share_viewport()
+	_desktop_share_pending = false
+	_desktop_share_card_image = null
+	_web_share_card_base64 = ""
+
+
+func _release_active_share_viewport() -> void:
+	if not is_instance_valid(_active_share_viewport):
+		_active_share_viewport = null
+		return
+	_active_share_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	if _active_share_viewport.get_parent() == self:
+		remove_child(_active_share_viewport)
+	_active_share_viewport.free()
+	_active_share_viewport = null
+
+
+func _get_safe_edge_margin(compact: bool, tiny: bool) -> float:
+	if tiny:
+		return SAFE_EDGE_MARGIN_TINY
+	if compact:
+		return SAFE_EDGE_MARGIN_COMPACT
+	return SAFE_EDGE_MARGIN_DEFAULT
+
+
+func _apply_mobile_safe_fallback(view_rect: Rect2, safe_rect: Rect2) -> Rect2:
+	if not Global.is_mobile_platform:
+		return safe_rect
+	var short_edge: float = minf(view_rect.size.x, view_rect.size.y)
+	var portrait: bool = view_rect.size.y >= view_rect.size.x
+	var min_top: float = clampf(short_edge * 0.09, MOBILE_SAFE_TOP_FALLBACK_MIN, MOBILE_SAFE_TOP_FALLBACK_MAX)
+	var side_min: float = MOBILE_SAFE_SIDE_FALLBACK_PORTRAIT_MIN if portrait else MOBILE_SAFE_SIDE_FALLBACK_LANDSCAPE_MIN
+	var side_max: float = MOBILE_SAFE_SIDE_FALLBACK_PORTRAIT_MAX if portrait else MOBILE_SAFE_SIDE_FALLBACK_LANDSCAPE_MAX
+	var side_fraction: float = 0.035 if portrait else 0.08
+	var min_side: float = clampf(short_edge * side_fraction, side_min, side_max)
+	var min_bottom: float = clampf(short_edge * 0.035, MOBILE_SAFE_BOTTOM_FALLBACK_MIN, MOBILE_SAFE_BOTTOM_FALLBACK_MAX)
+	var safe_left: float = maxf(safe_rect.position.x, view_rect.position.x + min_side)
+	var safe_top: float = maxf(safe_rect.position.y, view_rect.position.y + min_top)
+	var safe_right: float = minf(safe_rect.position.x + safe_rect.size.x, view_rect.position.x + view_rect.size.x - min_side)
+	var safe_bottom: float = minf(safe_rect.position.y + safe_rect.size.y, view_rect.position.y + view_rect.size.y - min_bottom)
+	if safe_right - safe_left <= 1.0 or safe_bottom - safe_top <= 1.0:
+		return safe_rect
+	return Rect2(Vector2(safe_left, safe_top), Vector2(safe_right - safe_left, safe_bottom - safe_top))
+
+
+func _get_safe_view_rect() -> Rect2:
+	var view_rect := get_viewport_rect()
+	if not Global.is_mobile_platform:
+		return view_rect
+	var window_size_i := DisplayServer.window_get_size()
+	var window_size := Vector2(window_size_i)
+	if window_size.x <= 0.0 or window_size.y <= 0.0:
+		return _apply_mobile_safe_fallback(view_rect, view_rect)
+	var safe_area_i := DisplayServer.get_display_safe_area()
+	var safe_area := Rect2(Vector2(safe_area_i.position), Vector2(safe_area_i.size))
+	if safe_area.size.x <= 0.0 or safe_area.size.y <= 0.0:
+		return _apply_mobile_safe_fallback(view_rect, view_rect)
+	var scale := Vector2(view_rect.size.x / window_size.x, view_rect.size.y / window_size.y)
+	var safe_pos := view_rect.position + safe_area.position * scale
+	var safe_size := safe_area.size * scale
+	var safe_left: float = clampf(safe_pos.x, view_rect.position.x, view_rect.position.x + view_rect.size.x)
+	var safe_top: float = clampf(safe_pos.y, view_rect.position.y, view_rect.position.y + view_rect.size.y)
+	var safe_right: float = clampf(safe_pos.x + safe_size.x, view_rect.position.x, view_rect.position.x + view_rect.size.x)
+	var safe_bottom: float = clampf(safe_pos.y + safe_size.y, view_rect.position.y, view_rect.position.y + view_rect.size.y)
+	if safe_right - safe_left <= 1.0 or safe_bottom - safe_top <= 1.0:
+		return _apply_mobile_safe_fallback(view_rect, view_rect)
+	var reported_safe_rect := Rect2(Vector2(safe_left, safe_top), Vector2(safe_right - safe_left, safe_bottom - safe_top))
+	return _apply_mobile_safe_fallback(view_rect, reported_safe_rect)
+
+
 func _position_info_button(button_size: int) -> void:
 	if not is_instance_valid(_achievement_info_button):
 		return
@@ -496,16 +591,22 @@ func _apply_responsive_layout() -> void:
 	var short_edge: float = minf(view_size.x, view_size.y)
 	var compact: bool = short_edge <= COMPACT_SHORT_EDGE
 	var tiny: bool = short_edge <= TINY_SHORT_EDGE
+	var safe_rect := _get_safe_view_rect()
+	var safe_edge_margin: float = _get_safe_edge_margin(compact, tiny)
 	var side_margin: int = int(clampf(short_edge * 0.055, 18.0, 44.0))
 	var vertical_margin: int = int(clampf(view_size.y * 0.045, 22.0, 58.0))
 	if compact:
 		vertical_margin = int(clampf(view_size.y * 0.032, 16.0, 36.0))
-	_content_margin.add_theme_constant_override("margin_left", side_margin)
-	_content_margin.add_theme_constant_override("margin_right", side_margin)
-	_content_margin.add_theme_constant_override("margin_top", vertical_margin)
-	_content_margin.add_theme_constant_override("margin_bottom", vertical_margin)
+	var safe_right_inset: float = maxf(0.0, view_size.x - (safe_rect.position.x + safe_rect.size.x))
+	var safe_bottom_inset: float = maxf(0.0, view_size.y - (safe_rect.position.y + safe_rect.size.y))
+	_content_margin.add_theme_constant_override("margin_left", int(round(safe_rect.position.x + side_margin + safe_edge_margin)))
+	_content_margin.add_theme_constant_override("margin_right", int(round(safe_right_inset + side_margin + safe_edge_margin)))
+	_content_margin.add_theme_constant_override("margin_top", int(round(safe_rect.position.y + vertical_margin + safe_edge_margin)))
+	_content_margin.add_theme_constant_override("margin_bottom", int(round(safe_bottom_inset + vertical_margin + safe_edge_margin)))
 
-	var content_width: float = clampf(view_size.x - float(side_margin * 2), MIN_CONTENT_WIDTH, MAX_CONTENT_WIDTH)
+	var available_content_width: float = maxf(1.0, safe_rect.size.x - float(side_margin * 2) - safe_edge_margin * 2.0)
+	var min_content_width: float = minf(MIN_CONTENT_WIDTH, available_content_width)
+	var content_width: float = clampf(available_content_width, min_content_width, minf(MAX_CONTENT_WIDTH, maxf(min_content_width, available_content_width)))
 	var section_gap: int = 16
 	var heading_size: int = 27
 	var title_size: int = 42
@@ -615,7 +716,7 @@ func _apply_responsive_layout() -> void:
 
 	if is_instance_valid(_bird_sprite):
 		_bird_sprite.scale = Vector2.ONE * bird_scale
-		_bird_sprite.position = Vector2(view_size.x * 0.5, vertical_margin + 22.0)
+		_bird_sprite.position = Vector2(safe_rect.get_center().x, safe_rect.position.y + vertical_margin + 22.0)
 
 
 func _apply_adaptive_hero_font(content_width: float, max_size: int, min_size: int) -> void:
@@ -659,7 +760,12 @@ func _on_button_pressed() -> void:
 
 
 func _on_quit_game_pressed() -> void:
+	if _quit_requested:
+		return
+	_quit_requested = true
 	Global.record_last_score()
+	_shutdown_game_over_runtime()
+	await get_tree().process_frame
 	Global.request_quit_game(get_tree())
 
 
@@ -838,6 +944,8 @@ func _on_desktop_share_save_canceled() -> void:
 
 
 func _render_share_card_image() -> Image:
+	if _shutting_down:
+		return Image.new()
 	var share_viewport: SubViewport = SubViewport.new()
 	share_viewport.name = "ShareCardViewport"
 	share_viewport.size = SHARE_CARD_SIZE
@@ -845,16 +953,25 @@ func _render_share_card_image() -> Image:
 	share_viewport.transparent_bg = false
 	share_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	add_child(share_viewport)
+	_active_share_viewport = share_viewport
 
 	var share_card: Control = _make_share_card_control()
 	share_viewport.add_child(share_card)
 	await get_tree().process_frame
+	if _shutting_down or not is_instance_valid(share_viewport):
+		return Image.new()
 	await RenderingServer.frame_post_draw
+	if _shutting_down or not is_instance_valid(share_viewport):
+		return Image.new()
 
 	var image: Image = share_viewport.get_texture().get_image()
-	share_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
-	remove_child(share_viewport)
-	share_viewport.free()
+	if _active_share_viewport == share_viewport:
+		_release_active_share_viewport()
+	else:
+		share_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		if share_viewport.get_parent() == self:
+			remove_child(share_viewport)
+		share_viewport.free()
 	return image
 
 

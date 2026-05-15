@@ -51,8 +51,11 @@ const HOTKEY_WORLD_RESET_BASELINE := KEY_X
 const HOTKEY_WORLD_EDIT_TILES := KEY_C
 const HOTKEY_WORLD_TOGGLE_FOG := KEY_V
 const DEFAULT_CAMERA_SMOOTHING_SPEED := 8.0
-const WORLD_ZOOM_NORMAL := Vector2.ONE
+const WORLD_ZOOM_NORMAL := Vector2(0.5, 0.5)
 const WORLD_ZOOM_LARGE := Vector2(2.0, 2.0)
+const WORLD_ZOOM_ENABLED_EPSILON := 0.01
+const TOUCH_PINCH_MIN_DISTANCE := 24.0
+const TOUCH_PINCH_ZOOM_EPSILON := 0.004
 
 @export var columns: int = 48
 @export var rows: int = 27
@@ -68,6 +71,7 @@ const WORLD_ZOOM_LARGE := Vector2(2.0, 2.0)
 @export var drag_pan_button: MouseButton = MOUSE_BUTTON_RIGHT
 @export var allow_left_drag_pan: bool = true
 @export var enable_touch_pan: bool = true
+@export var enable_touch_pinch_zoom: bool = true
 @export var debug_overlay_enabled: bool = false
 @export var debug_edit_enabled: bool = false
 @export var story_fog_enabled: bool = true
@@ -84,6 +88,12 @@ var _desktop_drag_last := Vector2.ZERO
 var _desktop_drag_button: MouseButton = MOUSE_BUTTON_NONE
 var _touch_drag_id: int = -1
 var _touch_drag_last := Vector2.ZERO
+var _touch_points: Dictionary = {}
+var _pinch_zoom_active := false
+var _pinch_touch_a: int = -1
+var _pinch_touch_b: int = -1
+var _pinch_last_distance := 0.0
+var _pinch_last_center := Vector2.ZERO
 var _camera_pan_suppressed_until_msec := 0
 var _camera_smoothing_speed_base := DEFAULT_CAMERA_SMOOTHING_SPEED
 var _camera_pan_selection_cleared := false
@@ -695,16 +705,24 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not _is_pointer_over_ui(event.position):
 			_cycle_stage_at_world_pos(Global.screen_to_world(self, event.position))
 
+	if enable_touch_pinch_zoom:
+		if event is InputEventScreenTouch and _handle_pinch_touch_event(event):
+			get_viewport().set_input_as_handled()
+			return
+		if event is InputEventScreenDrag and _handle_pinch_drag_event(event):
+			get_viewport().set_input_as_handled()
+			return
+
 	if enable_touch_pan:
 		if event is InputEventScreenTouch:
-			if event.pressed and _touch_drag_id == -1 and not _is_pointer_over_ui(event.position):
+			if event.pressed and _touch_drag_id == -1 and not _pinch_zoom_active and not _is_pointer_over_ui(event.position):
 				_touch_drag_id = event.index
 				_touch_drag_last = event.position
 				_camera_pan_selection_cleared = false
 			elif not event.pressed and event.index == _touch_drag_id:
 				_touch_drag_id = -1
 				_camera_pan_selection_cleared = false
-		if event is InputEventScreenDrag and event.index == _touch_drag_id and not Global.is_dragging:
+		if event is InputEventScreenDrag and event.index == _touch_drag_id and not _pinch_zoom_active and not Global.is_dragging:
 			var delta = event.position - _touch_drag_last
 			_touch_drag_last = event.position
 			_pan_camera_by_screen_delta(delta)
@@ -738,7 +756,7 @@ func _process(delta: float) -> void:
 			clear_drag_tile_hint()
 			return
 	var camera_delta := _get_camera_unscaled_delta(delta)
-	if _desktop_dragging or _touch_drag_id != -1:
+	if _desktop_dragging or _touch_drag_id != -1 or _pinch_zoom_active:
 		if _keyboard_camera_pan_active:
 			_keyboard_camera_pan_active = false
 		if debug_overlay_enabled or debug_edit_enabled:
@@ -1437,6 +1455,11 @@ func _get_safe_camera_zoom() -> Vector2:
 	return Vector2(maxf(absf(camera.zoom.x), 0.001), maxf(absf(camera.zoom.y), 0.001))
 
 
+func _get_world_zoom_scalar() -> float:
+	var zoom := _get_safe_camera_zoom()
+	return (zoom.x + zoom.y) * 0.5
+
+
 func _screen_delta_to_world_delta(delta: Vector2) -> Vector2:
 	var zoom := _get_safe_camera_zoom()
 	return Vector2(delta.x / zoom.x, delta.y / zoom.y)
@@ -1480,6 +1503,29 @@ func _get_visible_world_size() -> Vector2:
 	var view_size = get_viewport().get_visible_rect().size
 	var zoom := _get_safe_camera_zoom()
 	return Vector2(view_size.x / zoom.x, view_size.y / zoom.y)
+
+
+func _set_world_zoom_scalar(zoom_scalar: float, focal_screen_pos: Vector2, preserve_focal: bool, immediate: bool = false) -> void:
+	if not is_instance_valid(camera):
+		return
+	var min_zoom: float = minf(WORLD_ZOOM_NORMAL.x, WORLD_ZOOM_LARGE.x)
+	var max_zoom: float = maxf(WORLD_ZOOM_NORMAL.x, WORLD_ZOOM_LARGE.x)
+	var target_scalar: float = clampf(zoom_scalar, min_zoom, max_zoom)
+	var previous_enabled: bool = Global.world_zoom_enabled
+	var previous_zoom := camera.zoom
+	var focal_world_before := Vector2.ZERO
+	if preserve_focal:
+		focal_world_before = Global.screen_to_world(self, focal_screen_pos)
+	camera.zoom = Vector2(target_scalar, target_scalar)
+	Global.world_zoom_enabled = target_scalar > min_zoom + WORLD_ZOOM_ENABLED_EPSILON
+	if preserve_focal:
+		var focal_world_after := Global.screen_to_world(self, focal_screen_pos)
+		camera.global_position += focal_world_before - focal_world_after
+	_clamp_camera()
+	if immediate:
+		camera.reset_smoothing()
+	if previous_enabled != Global.world_zoom_enabled or previous_zoom != camera.zoom:
+		emit_signal("world_zoom_changed", Global.world_zoom_enabled, camera.zoom)
 
 
 func set_world_zoom_enabled(enabled: bool, immediate: bool = true) -> void:
@@ -1627,7 +1673,7 @@ func _get_camera_pan_vector() -> Vector2:
 
 
 func is_camera_user_panning() -> bool:
-	return _desktop_dragging or _touch_drag_id != -1 or _keyboard_camera_pan_active or Time.get_ticks_msec() < _external_camera_pan_until_msec
+	return _desktop_dragging or _touch_drag_id != -1 or _pinch_zoom_active or _keyboard_camera_pan_active or Time.get_ticks_msec() < _external_camera_pan_until_msec
 
 
 func _ensure_camera_pan_actions() -> void:
@@ -1679,6 +1725,88 @@ func _stop_desktop_pan(button: MouseButton) -> void:
 		_camera_pan_selection_cleared = false
 
 
+func _begin_pinch_zoom() -> void:
+	if Global.is_dragging or _touch_points.size() < 2:
+		return
+	var touch_ids := _touch_points.keys()
+	_pinch_touch_a = int(touch_ids[0])
+	_pinch_touch_b = int(touch_ids[1])
+	var pos_a: Vector2 = _touch_points[_pinch_touch_a]
+	var pos_b: Vector2 = _touch_points[_pinch_touch_b]
+	_pinch_last_distance = maxf(pos_a.distance_to(pos_b), TOUCH_PINCH_MIN_DISTANCE)
+	_pinch_last_center = (pos_a + pos_b) * 0.5
+	_pinch_zoom_active = true
+	_touch_drag_id = -1
+	_camera_pan_selection_cleared = false
+
+
+func _end_pinch_zoom() -> void:
+	_pinch_zoom_active = false
+	_pinch_touch_a = -1
+	_pinch_touch_b = -1
+	_pinch_last_distance = 0.0
+	_pinch_last_center = Vector2.ZERO
+	_touch_drag_id = -1
+	_camera_pan_selection_cleared = false
+
+
+func _handle_pinch_touch_event(event: InputEventScreenTouch) -> bool:
+	if Global.is_dragging:
+		_touch_points.clear()
+		_end_pinch_zoom()
+		return false
+	if event.pressed:
+		if _is_pointer_over_ui(event.position):
+			return false
+		_touch_points[event.index] = event.position
+		if _touch_points.size() >= 2:
+			_begin_pinch_zoom()
+			return true
+		return false
+	var was_active_pinch_touch := _pinch_zoom_active and (event.index == _pinch_touch_a or event.index == _pinch_touch_b)
+	_touch_points.erase(event.index)
+	if was_active_pinch_touch or _pinch_zoom_active:
+		_end_pinch_zoom()
+		return true
+	return false
+
+
+func _handle_pinch_drag_event(event: InputEventScreenDrag) -> bool:
+	if not _touch_points.has(event.index):
+		return false
+	_touch_points[event.index] = event.position
+	if not _pinch_zoom_active:
+		return false
+	if Global.is_dragging:
+		_touch_points.clear()
+		_end_pinch_zoom()
+		return false
+	if event.index != _pinch_touch_a and event.index != _pinch_touch_b:
+		return true
+	if not _touch_points.has(_pinch_touch_a) or not _touch_points.has(_pinch_touch_b):
+		_end_pinch_zoom()
+		return true
+	var pos_a: Vector2 = _touch_points[_pinch_touch_a]
+	var pos_b: Vector2 = _touch_points[_pinch_touch_b]
+	var distance: float = pos_a.distance_to(pos_b)
+	if distance < TOUCH_PINCH_MIN_DISTANCE:
+		_pinch_last_distance = distance
+		_pinch_last_center = (pos_a + pos_b) * 0.5
+		return true
+	var center := (pos_a + pos_b) * 0.5
+	var center_delta := center - _pinch_last_center
+	if center_delta.length_squared() > 0.001:
+		_pan_camera_by_screen_delta(center_delta)
+	if _pinch_last_distance >= TOUCH_PINCH_MIN_DISTANCE:
+		var zoom_ratio: float = distance / _pinch_last_distance
+		if absf(zoom_ratio - 1.0) >= TOUCH_PINCH_ZOOM_EPSILON:
+			_clear_selection_once_for_camera_move()
+			_set_world_zoom_scalar(_get_world_zoom_scalar() * zoom_ratio, center, true)
+	_pinch_last_distance = distance
+	_pinch_last_center = center
+	return true
+
+
 func suppress_camera_pan_input(duration_sec: float = 0.30) -> void:
 	_camera_pan_suppressed_until_msec = maxi(_camera_pan_suppressed_until_msec, Time.get_ticks_msec() + int(duration_sec * 1000.0))
 	_cancel_camera_pan_drag_state()
@@ -1688,6 +1816,8 @@ func _cancel_camera_pan_drag_state() -> void:
 	_desktop_dragging = false
 	_desktop_drag_button = MOUSE_BUTTON_NONE
 	_touch_drag_id = -1
+	_touch_points.clear()
+	_end_pinch_zoom()
 	_keyboard_camera_pan_active = false
 	_camera_pan_selection_cleared = false
 

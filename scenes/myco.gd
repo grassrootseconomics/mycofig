@@ -148,9 +148,9 @@ func _mark_network_dirty() -> void:
 	if not is_instance_valid(agents_root):
 		return
 	if is_instance_valid(level_root):
-		LevelHelpersRef.mark_agents_dirty_for_movement(level_root, agents_root, self, global_position, global_position)
+		LevelHelpers.mark_agents_dirty_for_movement(level_root, agents_root, self, global_position, global_position)
 	else:
-		LevelHelpersRef.mark_all_buddies_dirty(agents_root)
+		LevelHelpers.mark_all_buddies_dirty(agents_root)
 
 
 func _is_ecology_network_candidate(agent: Variant) -> bool:
@@ -170,8 +170,8 @@ func _is_ecology_network_candidate(agent: Variant) -> bool:
 
 func _is_in_current_myco_reach(agent: Variant) -> bool:
 	var level_root = _get_level_root()
-	if LevelHelpersRef._supports_tile_world(level_root):
-		return LevelHelpersRef.are_agents_in_tile_reach(level_root, agent, self, true)
+	if LevelHelpers._supports_tile_world(level_root):
+		return LevelHelpers.are_agents_in_tile_reach(level_root, agent, self, true)
 	return is_instance_valid(agent) and global_position.distance_to(agent.global_position) <= buddy_radius
 
 
@@ -216,7 +216,7 @@ func _refresh_existing_network_after_stage_change() -> void:
 				agent.set("draw_lines", true)
 	var lines_root = get_node_or_null("../../Lines")
 	if Global.draw_lines and is_instance_valid(lines_root):
-		LevelHelpersRef.sync_myco_trade_lines(lines_root, agents_root, Global.social_mode, dirty_agents)
+		LevelHelpers.sync_myco_trade_lines(lines_root, agents_root, Global.social_mode, dirty_agents)
 
 
 func _set_rhizo_scale(new_scale: Vector2) -> void:
@@ -246,9 +246,9 @@ func _has_supporting_neighbors() -> bool:
 			continue
 		if not _can_share_story_trade_network(child):
 			continue
-		if LevelHelpersRef.are_agents_in_tile_reach(level_root, self, child, false):
+		if LevelHelpers.are_agents_in_tile_reach(level_root, self, child, false):
 			return true
-		if not LevelHelpersRef._supports_tile_world(level_root) and global_position.distance_to(child.global_position) <= buddy_radius:
+		if not LevelHelpers._supports_tile_world(level_root) and global_position.distance_to(child.global_position) <= buddy_radius:
 			return true
 	return false
 
@@ -543,7 +543,7 @@ func set_variables(a_dict) -> void:
 # Search for things to trade with in tile reach
 func generate_buddies() -> void:
 	var agents_root = get_node_or_null("../../Agents")
-	trade_buddies = LevelHelpersRef.query_trade_hubs_near_agent(_get_level_root(), agents_root, self, num_buddies, false)
+	trade_buddies = LevelHelpers.query_trade_hubs_near_agent(_get_level_root(), agents_root, self, num_buddies, false)
 	if not is_instance_valid(agents_root):
 		return
 	for candidate in agents_root.get_children():
@@ -637,56 +637,64 @@ func logistics():
 
 
 func draw_selected_box():
-	LevelHelpersRef.draw_agent_selection_box(_get_level_root(), self)
+	LevelHelpers.draw_agent_selection_box(_get_level_root(), self)
 
 
 func _on_area_entered(trade: Area2D) -> void:
 	if trade.end_agent == self:
-		if assets.get(trade.asset) != null:
-			if (assets[trade.asset] < (needs[trade.asset] * 2)):
-				assets[trade.asset] += trade.amount
-				bars[trade.asset].value = assets[trade.asset]
-			
-			if trade.type == "swap":
-				var return_amount = trade.return_amt * Global.values[trade.asset] / Global.values[trade.return_asset]
-				if return_amount < 0.5:
+		if assets.get(trade.asset) == null:
+			print("Error myco without asset:", trade.asset, assets)
+			if trade.has_method("finish_trade"):
+				trade.call_deferred("finish_trade")
+			else:
+				trade.call_deferred("queue_free")
+			return
+		if (assets[trade.asset] < (needs[trade.asset] * 2)):
+			assets[trade.asset] += trade.amount
+			bars[trade.asset].value = assets[trade.asset]
+		
+		if trade.type == "swap":
+			var return_amount := 0
+			var return_value = float(Global.values.get(trade.return_asset, 1))
+			if assets.get(trade.return_asset) != null and return_value > 0.0:
+				var raw_return_amount = float(trade.return_amt) * float(Global.values.get(trade.asset, 1)) / return_value
+				if raw_return_amount < 0.5:
 					return_amount = 0
 				else:
-					if return_amount < 1:
+					if raw_return_amount < 1.0:
 						return_amount = 1
 					else:
-						return_amount = int(return_amount)
-				if return_amount > 0:
-					var liquidity_origin_value = trade.get("liquidity_cycle_origin_id")
-					var liquidity_origin_id := 0
-					if liquidity_origin_value != null:
-						liquidity_origin_id = int(liquidity_origin_value)
-					var path_dict = {
-						"from_agent": self,
-						"to_agent": trade.start_agent,
-						"trade_path": [self, trade.start_agent],
-						"trade_asset": trade.return_asset,
-						"trade_amount": return_amount,
-						"trade_type": "send",
-						"return_res": null,
-						"return_amt": null,
-						"liquidity_cycle_trade": Global.to_bool(trade.get("liquidity_cycle_trade")),
-						"liquidity_cycle_origin_id": liquidity_origin_id
-					}
-					if (assets[trade.return_asset] >= return_amount):
-						if _emit_trade_with_budget(path_dict):
-							assets[trade.return_asset] -= return_amount
-							bars[trade.return_asset].value = assets[trade.return_asset]
-						else:
-							trade_queue.append(path_dict)
+						return_amount = int(raw_return_amount)
+			if return_amount > 0:
+				var liquidity_origin_value = trade.get("liquidity_cycle_origin_id")
+				var liquidity_origin_id := 0
+				if liquidity_origin_value != null:
+					liquidity_origin_id = int(liquidity_origin_value)
+				var path_dict = {
+					"from_agent": self,
+					"to_agent": trade.start_agent,
+					"trade_path": [self, trade.start_agent],
+					"trade_asset": trade.return_asset,
+					"trade_amount": return_amount,
+					"trade_type": "send",
+					"return_res": null,
+					"return_amt": null,
+					"liquidity_cycle_trade": Global.to_bool(trade.get("liquidity_cycle_trade")),
+					"liquidity_cycle_origin_id": liquidity_origin_id,
+					"liquidity_cycle_origin_agent": trade.get("liquidity_cycle_origin_agent")
+				}
+				if (assets[trade.return_asset] >= return_amount):
+					if _emit_trade_with_budget(path_dict):
+						assets[trade.return_asset] -= return_amount
+						bars[trade.return_asset].value = assets[trade.return_asset]
 					else:
 						trade_queue.append(path_dict)
-				if trade.has_method("finish_trade"):
-					trade.call_deferred("finish_trade")
 				else:
-					trade.call_deferred("queue_free")
+					trade_queue.append(path_dict)
+		if trade.has_method("finish_trade"):
+			trade.call_deferred("finish_trade")
 		else:
-			print("Error myco without asset:", trade.asset, assets)
+			trade.call_deferred("queue_free")
 
 
 func _on_growth_timer_timeout() -> void:

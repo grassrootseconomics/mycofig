@@ -127,7 +127,7 @@ func process_dirty_queues(level_root: Node, agents_root: Node, lines_root: Node,
 	elif not dirty_lines.is_empty():
 		var line_agents = _take_dirty_agents(dirty_lines, line_cap, dirty_buddies)
 		if not line_agents.is_empty():
-			LevelHelpersRef.sync_myco_trade_lines(lines_root, agents_root, social_mode, line_agents)
+			LevelHelpers.sync_myco_trade_lines(lines_root, agents_root, social_mode, line_agents)
 
 
 func setup_perf_monitor(owner: Node, existing_monitor: Node, agents_root: Node, trades_root: Node, lines_root: Node, world_root: Node) -> Node:
@@ -220,6 +220,9 @@ func recycle_trade(trade_pool: Array, packet_store: Dictionary, trade: Node) -> 
 	if not is_instance_valid(trade):
 		return
 	unregister_trade_visual_packet(packet_store, trade)
+	var already_pooled = trade_pool.has(trade)
+	if trade.has_method("prepare_for_pool"):
+		trade.call("prepare_for_pool")
 	if trade.get_parent() != null:
 		trade.get_parent().remove_child(trade)
 	trade.visible = false
@@ -230,4 +233,5 @@ func recycle_trade(trade_pool: Array, packet_store: Dictionary, trade: Node) -> 
 	var shape = trade.get_node_or_null("CollisionShape2D")
 	if is_instance_valid(shape):
 		shape.set_deferred("disabled", true)
-	trade_pool.append(trade)
+	if not already_pooled:
+		trade_pool.append(trade)

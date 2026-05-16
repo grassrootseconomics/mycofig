@@ -26,7 +26,10 @@ const VILLAGER_FAMILY_RETRY_TICKS := 24
 const VILLAGER_CHILD_MATURITY_THRESHOLD := 10
 const VILLAGER_CHILD_FAILED_RETRY_TICKS := 4
 const VILLAGER_NUTRIENTS := ["N", "P", "K"]
-const DIRECT_PERSON_TRADE_TILE_REDUCTION := 1
+const DIRECT_PERSON_TRADE_TILE_REDUCTION := 0
+const VILLAGER_NUTRIENT_TRADE_RESERVE := 1.0
+const VILLAGER_LIQUIDITY_STALL_BACKOFF_MSEC := 800
+const BANK_BOOTSTRAP_MAX_INFLIGHT_SWAPS := 2
 const VILLAGER_VENDOR_MIN_MATURE_SCALE := 0.92
 const VILLAGER_ADULT_TEXTURE_PATHS := {
 	"farmer": "res://graphics/farmer.png",
@@ -56,6 +59,13 @@ var _story_farmer_walk_base_scale := Vector2.ONE
 var _story_farmer_walk_base_rotation := 0.0
 var _story_farmer_walk_last_global_position := Vector2.ZERO
 var _story_farmer_walk_last_global_position_set := false
+var _story_farmer_waiting_for_harvest_target := false
+var _liquidity_inflight_count := 0
+var _liquidity_source_cache: Dictionary = {}
+var _liquidity_direct_candidates_cache: Array = []
+var _liquidity_direct_candidates_cache_valid := false
+var _liquidity_backoff_until_msec := 0
+var _bank_bootstrap_pending_by_res: Dictionary = {}
 
 
 func _story_farmer_get_level_root() -> Node:
@@ -82,8 +92,28 @@ func _story_farmer_auto_harvest_enabled(level_root: Node) -> bool:
 	return Global.to_bool(level_root.call("story_farmer_auto_harvest_is_enabled", self))
 
 
+func _story_farmer_has_no_n() -> bool:
+	if not _is_story_farmer_actor():
+		return false
+	return float(assets.get("N", 0.0)) <= 0.0
+
+
+func _story_farmer_should_wait_for_harvest_target(level_root: Node) -> bool:
+	if not _story_farmer_has_no_n():
+		return false
+	if _story_farmer_harvest_state != STORY_FARMER_HARVEST_IDLE:
+		return false
+	if not _story_farmer_auto_harvest_enabled(level_root):
+		return false
+	return _story_farmer_waiting_for_harvest_target
+
+
 func _story_farmer_harvest_trip_active() -> bool:
 	return _is_story_farmer_actor() and _story_farmer_harvest_state != STORY_FARMER_HARVEST_IDLE
+
+
+func is_farmer_auto_harvesting() -> bool:
+	return _story_farmer_harvest_trip_active()
 
 
 func is_trade_locked_by_user_move() -> bool:
@@ -227,6 +257,8 @@ func _story_farmer_finalize_carried_harvest(level_root: Node) -> void:
 			delivered = Global.to_bool(_story_farmer_carried_harvest_source.call("try_harvest_to_farmer", self))
 	if delivered and is_instance_valid(level_root) and level_root.has_method("story_farmer_on_harvest_success"):
 		level_root.call("story_farmer_on_harvest_success", self, delivered_type)
+	if delivered:
+		Global.perf_count_farmer_harvest_completed()
 	_story_farmer_clear_carry_state()
 
 
@@ -316,6 +348,8 @@ func _story_farmer_refresh_trade_network(level_root: Node) -> void:
 
 
 func _story_farmer_cancel_trip_and_return_home(level_root: Node) -> void:
+	if _story_farmer_harvest_state != STORY_FARMER_HARVEST_IDLE:
+		Global.perf_count_farmer_harvest_cancelled()
 	_story_farmer_stop_harvest_tween()
 	_story_farmer_abort_carried_harvest()
 	_story_farmer_release_target(level_root)
@@ -355,6 +389,7 @@ func _on_story_farmer_arrived_at_crop() -> void:
 	if not harvested:
 		_story_farmer_cancel_trip_and_return_home(level_root)
 		return
+	Global.perf_count_farmer_harvest_picked_up()
 	_story_farmer_carried_harvest_type = harvest_type
 	_story_farmer_carried_harvest_source = harvest_source
 	_story_farmer_show_carry_visual(harvest_type)
@@ -369,13 +404,23 @@ func _story_farmer_begin_harvest_trip(level_root: Node) -> bool:
 		return false
 	var crop_target = level_root.call("story_farmer_try_assign_harvest_target", self)
 	if not _story_farmer_is_harvest_target_valid(crop_target):
+		var was_waiting = _story_farmer_waiting_for_harvest_target
+		_story_farmer_waiting_for_harvest_target = _story_farmer_has_no_n() and _story_farmer_auto_harvest_enabled(level_root)
+		if _story_farmer_waiting_for_harvest_target and not was_waiting:
+			Global.perf_count_farmer_harvest_waiting_no_target()
 		return false
+	_story_farmer_waiting_for_harvest_target = false
 	_story_farmer_resolve_home_pos()
 	_story_farmer_harvest_target = crop_target
 	_story_farmer_harvest_target_pos = crop_target.global_position
 	_story_farmer_harvest_state = STORY_FARMER_HARVEST_MOVING_TO_CROP
+	trade_queue.clear()
+	is_trading = false
 	_story_farmer_stop_harvest_tween()
+	if level_root.has_method("cancel_trades_for_harvesting_farmer"):
+		level_root.call("cancel_trades_for_harvesting_farmer", self)
 	_story_farmer_refresh_trade_network(level_root)
+	Global.perf_count_farmer_harvest_started()
 	var tween = get_tree().create_tween()
 	_story_farmer_harvest_move_tween = tween
 	tween.tween_property(self, "global_position", crop_target.global_position, STORY_FARMER_MOVE_TO_CROP_SECONDS)
@@ -403,7 +448,14 @@ func _story_farmer_tick_auto_harvest(level_root: Node) -> bool:
 	if not _story_farmer_auto_harvest_enabled(level_root):
 		if _story_farmer_harvest_state != STORY_FARMER_HARVEST_IDLE or is_instance_valid(_story_farmer_harvest_target):
 			_story_farmer_reset_harvest_state(level_root)
+		_story_farmer_waiting_for_harvest_target = false
 		return false
+	if not _story_farmer_has_no_n():
+		_story_farmer_waiting_for_harvest_target = false
+	if logistics_ready and _story_farmer_has_no_n():
+		if _story_farmer_begin_harvest_trip(level_root):
+			logistics_ready = false
+			return true
 	if is_instance_valid(level_root) and level_root.has_method("story_farmer_has_pending_inbound_trades"):
 		if Global.to_bool(level_root.call("story_farmer_has_pending_inbound_trades", self)):
 			return false
@@ -462,6 +514,12 @@ func _should_use_villager_r_liquidity_cycle() -> bool:
 	if not Global.to_bool(Global.villager_r_medium_only):
 		return false
 	return _is_story_village_person_actor()
+
+
+func _should_use_bank_liquidity_bootstrap() -> bool:
+	if not Global.to_bool(Global.villager_r_medium_only):
+		return false
+	return _is_village_bank_node(self)
 
 
 func _is_villager_nutrient(res: String) -> bool:
@@ -586,26 +644,51 @@ func _get_villager_max_liquidity_inflight_swaps() -> int:
 	return int(Global.villager_max_liquidity_inflight_swaps)
 
 
+func _get_bank_bootstrap_packet_nutrient(trade_packet: Variant) -> String:
+	if not _should_use_bank_liquidity_bootstrap():
+		return ""
+	if not is_instance_valid(trade_packet):
+		return ""
+	var trade_asset = str(trade_packet.get("asset"))
+	if trade_asset == "R":
+		var return_asset = str(trade_packet.get("return_asset"))
+		if _is_villager_nutrient(return_asset):
+			return return_asset
+		return ""
+	if _is_villager_nutrient(trade_asset):
+		return trade_asset
+	return ""
+
+
+func _track_bank_bootstrap_pending(trade_packet: Variant, delta: int) -> void:
+	var nutrient := _get_bank_bootstrap_packet_nutrient(trade_packet)
+	if nutrient == "":
+		return
+	var current = int(_bank_bootstrap_pending_by_res.get(nutrient, 0))
+	var next_value = maxi(current + delta, 0)
+	if next_value <= 0:
+		_bank_bootstrap_pending_by_res.erase(nutrient)
+	else:
+		_bank_bootstrap_pending_by_res[nutrient] = next_value
+
+
+func notify_liquidity_trade_spawned(trade_packet: Variant = null) -> void:
+	if not _should_use_villager_r_liquidity_cycle() and not _should_use_bank_liquidity_bootstrap():
+		return
+	_liquidity_inflight_count += 1
+	_track_bank_bootstrap_pending(trade_packet, 1)
+
+
+func notify_liquidity_trade_finished(trade_packet: Variant = null) -> void:
+	_track_bank_bootstrap_pending(trade_packet, -1)
+	if _liquidity_inflight_count <= 0:
+		_liquidity_inflight_count = 0
+		return
+	_liquidity_inflight_count -= 1
+
+
 func _count_inflight_liquidity_swaps_for_self() -> int:
-	var trades_root = get_node_or_null("../../Trades")
-	if not is_instance_valid(trades_root):
-		return 0
-	var self_id = int(get_instance_id())
-	var inflight_count := 0
-	for trade_packet in trades_root.get_children():
-		if not is_instance_valid(trade_packet):
-			continue
-		var liquidity_trade_value = trade_packet.get("liquidity_cycle_trade")
-		if not Global.to_bool(liquidity_trade_value):
-			continue
-		var liquidity_origin_value = trade_packet.get("liquidity_cycle_origin_id")
-		var liquidity_origin_id := 0
-		if liquidity_origin_value != null:
-			liquidity_origin_id = int(liquidity_origin_value)
-		if liquidity_origin_id != self_id:
-			continue
-		inflight_count += 1
-	return inflight_count
+	return maxi(_liquidity_inflight_count, 0)
 
 
 func _is_liquidity_swap_backpressure_blocked() -> bool:
@@ -613,6 +696,307 @@ func _is_liquidity_swap_backpressure_blocked() -> bool:
 	if max_inflight <= 0:
 		return false
 	return _count_inflight_liquidity_swaps_for_self() >= max_inflight
+
+
+func _is_bank_bootstrap_backpressure_blocked() -> bool:
+	if BANK_BOOTSTRAP_MAX_INFLIGHT_SWAPS <= 0:
+		return false
+	return _count_inflight_liquidity_swaps_for_self() >= BANK_BOOTSTRAP_MAX_INFLIGHT_SWAPS
+
+
+func _is_villager_liquidity_trade(path_dict: Dictionary) -> bool:
+	return Global.to_bool(path_dict.get("liquidity_cycle_trade", false))
+
+
+func _has_queued_liquidity_trade() -> bool:
+	for queued_trade in trade_queue:
+		if typeof(queued_trade) != TYPE_DICTIONARY:
+			continue
+		var path_dict: Dictionary = queued_trade
+		if _is_villager_liquidity_trade(path_dict):
+			return true
+	return false
+
+
+func _reset_liquidity_tick_cache() -> void:
+	_liquidity_source_cache.clear()
+	_liquidity_direct_candidates_cache.clear()
+	_liquidity_direct_candidates_cache_valid = false
+
+
+func _start_liquidity_backoff() -> void:
+	_liquidity_backoff_until_msec = Time.get_ticks_msec() + VILLAGER_LIQUIDITY_STALL_BACKOFF_MSEC
+
+
+func _liquidity_backoff_active() -> bool:
+	return Time.get_ticks_msec() < _liquidity_backoff_until_msec
+
+
+func _append_unique_direct_candidate(candidates: Array, seen: Dictionary, candidate: Variant) -> void:
+	if not _is_village_person_node(candidate):
+		return
+	if candidate == self:
+		return
+	if Global.to_bool(candidate.get("dead")):
+		return
+	var candidate_id = int(candidate.get_instance_id())
+	if seen.has(candidate_id):
+		return
+	seen[candidate_id] = true
+	candidates.append(candidate)
+
+
+func _get_direct_person_liquidity_candidates() -> Array:
+	if _liquidity_direct_candidates_cache_valid:
+		return _liquidity_direct_candidates_cache
+	_liquidity_direct_candidates_cache_valid = true
+	var candidates: Array = []
+	var seen: Dictionary = {}
+	for child in trade_buddies:
+		_append_unique_direct_candidate(candidates, seen, child)
+	var level_root = _story_farmer_get_level_root()
+	var world = null
+	if is_instance_valid(level_root):
+		world = level_root.get_node_or_null("WorldFoundation")
+	if is_instance_valid(world) and world.has_method("world_to_tile") and world.has_method("in_bounds") and world.has_method("get_trade_hub_occupants_cached"):
+		var center_coord = Vector2i(world.world_to_tile(global_position))
+		var radius_tiles = maxi(_get_direct_person_trade_reach_delta(self), 1) + 1
+		for y in range(center_coord.y - radius_tiles, center_coord.y + radius_tiles + 1):
+			for x in range(center_coord.x - radius_tiles, center_coord.x + radius_tiles + 1):
+				var coord = Vector2i(x, y)
+				if not world.in_bounds(coord):
+					continue
+				var occupants_variant = world.get_trade_hub_occupants_cached(coord, self)
+				if typeof(occupants_variant) != TYPE_ARRAY:
+					continue
+				for occupant in occupants_variant:
+					_append_unique_direct_candidate(candidates, seen, occupant)
+	var reachable: Array = []
+	for candidate in candidates:
+		Global.perf_count_village_liquidity_direct_candidate_scan()
+		if _can_reach_direct_person_trade(candidate):
+			reachable.append(candidate)
+	_liquidity_direct_candidates_cache = reachable
+	return _liquidity_direct_candidates_cache
+
+
+func _get_bank_bootstrap_nutrient_target() -> float:
+	return maxf(float(Global.village_bank_bootstrap_nutrient_target), 0.0)
+
+
+func _get_bank_bootstrap_effective_inventory(nutrient: String) -> float:
+	if not _is_villager_nutrient(nutrient):
+		return 0.0
+	return float(assets.get(nutrient, 0.0)) + float(_bank_bootstrap_pending_by_res.get(nutrient, 0))
+
+
+func _bank_needs_bootstrap_nutrient(nutrient: String) -> bool:
+	if not _is_villager_nutrient(nutrient):
+		return false
+	var target := _get_bank_bootstrap_nutrient_target()
+	if target <= 0.0:
+		return false
+	return _get_bank_bootstrap_effective_inventory(nutrient) < target
+
+
+func _get_bank_bootstrap_needed_order() -> Array[String]:
+	var needed: Array = []
+	var target := _get_bank_bootstrap_nutrient_target()
+	if target <= 0.0:
+		var empty: Array[String] = []
+		return empty
+	for nutrient in VILLAGER_NUTRIENTS:
+		var effective := _get_bank_bootstrap_effective_inventory(nutrient)
+		if effective < target:
+			needed.append({"res": nutrient, "deficit": target - effective})
+	needed.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return float(a["deficit"]) > float(b["deficit"])
+	)
+	var ordered: Array[String] = []
+	for pair in needed:
+		ordered.append(str(pair["res"]))
+	return ordered
+
+
+func _can_bank_reach_bootstrap_candidate(level_root: Node, candidate: Variant) -> bool:
+	if not is_instance_valid(candidate):
+		return false
+	if is_instance_valid(level_root) and SocialLevelHelpersRef.are_agents_in_shared_tile_reach(level_root, self, candidate):
+		return true
+	var candidate_radius := 0.0
+	if candidate.get("buddy_radius") != null:
+		candidate_radius = float(candidate.get("buddy_radius"))
+	var reach_px = maxf(float(buddy_radius), candidate_radius)
+	return global_position.distance_to(candidate.global_position) <= reach_px
+
+
+func _get_bank_bootstrap_candidates() -> Array:
+	var candidates: Array = []
+	var seen: Dictionary = {}
+	for child in trade_buddies:
+		_append_unique_direct_candidate(candidates, seen, child)
+	var level_root = _story_farmer_get_level_root()
+	var world = null
+	if is_instance_valid(level_root):
+		world = level_root.get_node_or_null("WorldFoundation")
+	if is_instance_valid(world) and world.has_method("world_to_tile") and world.has_method("in_bounds") and world.has_method("get_trade_hub_occupants_cached"):
+		var center_coord = Vector2i(world.world_to_tile(global_position))
+		var radius_tiles = maxi(LevelHelpers.get_agent_tile_reach_delta(level_root, self), 1) + 1
+		for y in range(center_coord.y - radius_tiles, center_coord.y + radius_tiles + 1):
+			for x in range(center_coord.x - radius_tiles, center_coord.x + radius_tiles + 1):
+				var coord = Vector2i(x, y)
+				if not world.in_bounds(coord):
+					continue
+				var occupants_variant = world.get_trade_hub_occupants_cached(coord, self)
+				if typeof(occupants_variant) != TYPE_ARRAY:
+					continue
+				for occupant in occupants_variant:
+					_append_unique_direct_candidate(candidates, seen, occupant)
+	elif is_instance_valid(level_root):
+		var agents = level_root.get_node_or_null("Agents")
+		if is_instance_valid(agents):
+			for child in agents.get_children():
+				_append_unique_direct_candidate(candidates, seen, child)
+	var reachable: Array = []
+	for candidate in candidates:
+		Global.perf_count_village_liquidity_direct_candidate_scan()
+		if _can_bank_reach_bootstrap_candidate(level_root, candidate):
+			reachable.append(candidate)
+	return reachable
+
+
+func _can_bank_bootstrap_buy_from_person(person: Variant, nutrient: String) -> bool:
+	if not _is_village_person_node(person):
+		return false
+	if person.has_method("is_farmer_auto_harvesting") and Global.to_bool(person.call("is_farmer_auto_harvesting")):
+		return false
+	if not _bank_needs_bootstrap_nutrient(nutrient):
+		return false
+	if not _person_can_accept_r_for_swap(person, 1):
+		return false
+	if not _is_person_specialty_nutrient(person, nutrient):
+		return false
+	return _person_can_trade_dominant_nutrient(person, nutrient, 1)
+
+
+func _run_bank_liquidity_bootstrap(debug_mode: bool = false) -> bool:
+	if not _should_use_bank_liquidity_bootstrap():
+		return false
+	if not logistics_ready or not is_raining:
+		return false
+	if _liquidity_backoff_active():
+		logistics_ready = false
+		is_trading = false
+		return false
+	if _has_queued_liquidity_trade():
+		return false
+	if _is_bank_bootstrap_backpressure_blocked():
+		return false
+	var needed_order := _get_bank_bootstrap_needed_order()
+	if needed_order.is_empty():
+		return false
+	var candidates := _get_bank_bootstrap_candidates()
+	candidates.shuffle()
+	var found_possible_source := false
+	for nutrient in needed_order:
+		if not _bank_needs_bootstrap_nutrient(nutrient):
+			continue
+		for person in candidates:
+			if not _can_bank_bootstrap_buy_from_person(person, nutrient):
+				continue
+			found_possible_source = true
+			var path_dict = {
+				"from_agent": self,
+				"to_agent": person,
+				"trade_path": [self, person],
+				"trade_asset": "R",
+				"trade_amount": 1,
+				"trade_type": "swap",
+				"return_res": nutrient,
+				"return_amt": 1,
+				"liquidity_cycle_trade": true,
+				"liquidity_cycle_origin_id": int(get_instance_id()),
+				"liquidity_cycle_origin_agent": self
+			}
+			if debug_mode:
+				print("bank bootstrap: R -> ", nutrient, " via ", person.name)
+			if _emit_or_queue_trade(path_dict):
+				logistics_ready = false
+				is_trading = true
+				return true
+			logistics_ready = false
+			is_trading = true
+			return true
+	if not found_possible_source:
+		_start_liquidity_backoff()
+		logistics_ready = false
+		is_trading = false
+	return false
+
+
+func _has_reachable_nutrient_source(requested_res: String) -> bool:
+	if not _is_villager_nutrient(requested_res):
+		return true
+	if _liquidity_source_cache.has(requested_res):
+		return Global.to_bool(_liquidity_source_cache[requested_res])
+	Global.perf_count_village_liquidity_source_check()
+	for child in trade_buddies:
+		if not is_instance_valid(child) or child == self:
+			continue
+		if Global.to_bool(child.get("dead")):
+			continue
+		if _is_village_bank_node(child):
+			if _can_bank_handle_liquidity_swap(child, "R", requested_res):
+				_liquidity_source_cache[requested_res] = true
+				return true
+			continue
+		if str(child.get("type")) == "myco":
+			if child.assets.get(requested_res) != null and float(child.assets[requested_res]) > 0.0:
+				_liquidity_source_cache[requested_res] = true
+				return true
+	for child in _get_direct_person_liquidity_candidates():
+		if not _person_can_accept_r_for_swap(child, 1):
+			continue
+		if _person_has_return_surplus(child, requested_res, 1):
+			_liquidity_source_cache[requested_res] = true
+			return true
+	_liquidity_source_cache[requested_res] = false
+	return false
+
+
+func _has_unreachable_core_deficit(deficit_order: Array[String]) -> bool:
+	return _get_unreachable_core_deficit(deficit_order) != ""
+
+
+func _get_unreachable_core_deficit(deficit_order: Array[String]) -> String:
+	for deficit_res in deficit_order:
+		if _is_villager_nutrient(deficit_res) and not _has_reachable_nutrient_source(deficit_res):
+			return deficit_res
+	return ""
+
+
+func _is_villager_liquidity_stalled() -> bool:
+	if not _should_use_villager_r_liquidity_cycle():
+		return false
+	return _liquidity_backoff_active()
+
+
+func _drop_stalled_liquidity_queue() -> void:
+	if trade_queue.is_empty():
+		return
+	var remaining_queue: Array = []
+	var dropped_count := 0
+	for queued_trade in trade_queue:
+		if typeof(queued_trade) != TYPE_DICTIONARY:
+			continue
+		var path_dict: Dictionary = queued_trade
+		if _is_villager_liquidity_trade(path_dict):
+			dropped_count += 1
+			continue
+		remaining_queue.append(path_dict)
+	trade_queue = remaining_queue
+	if dropped_count > 0:
+		Global.perf_count_village_liquidity_dropped_queue(dropped_count)
 
 
 func _get_liquidity_dominant_nutrient() -> String:
@@ -652,6 +1036,13 @@ func _get_liquidity_any_tradeable_nutrient() -> String:
 	if best_value <= 0.0:
 		return ""
 	return best_res
+
+
+func _get_liquidity_tradeable_nutrient() -> String:
+	var specialty_res := _get_village_person_specialty_nutrient(self)
+	if specialty_res != "" and _person_can_trade_dominant_nutrient(self, specialty_res, 1):
+		return specialty_res
+	return ""
 
 
 func _get_highest_nutrient_deficit() -> String:
@@ -730,12 +1121,33 @@ func _is_village_person_node(agent: Variant) -> bool:
 	return agent_type == "farmer" or agent_type == "vendor" or agent_type == "cook"
 
 
-func _can_bank_buy_for_r(bank: Variant, offered_res: String, requested_res: String) -> bool:
+func _get_village_person_specialty_nutrient(person: Variant) -> String:
+	if not _is_village_person_node(person):
+		return ""
+	match str(person.get("type")):
+		"farmer":
+			return "N"
+		"vendor":
+			return "P"
+		"cook":
+			return "K"
+	return ""
+
+
+func _is_person_specialty_nutrient(person: Variant, nutrient: String) -> bool:
+	return nutrient != "" and nutrient == _get_village_person_specialty_nutrient(person)
+
+
+func _can_bank_handle_liquidity_swap(bank: Variant, offered_res: String, requested_res: String) -> bool:
 	if not _is_village_bank_node(bank):
 		return false
-	if requested_res != "R":
-		return false
-	return _is_villager_nutrient(offered_res)
+	if requested_res == "R":
+		return _is_villager_nutrient(offered_res)
+	if offered_res == "R" and _is_villager_nutrient(requested_res):
+		if bank.assets.get(requested_res) == null:
+			return false
+		return float(bank.assets[requested_res]) > 0.0
+	return false
 
 
 func _set_agent_asset_bar(agent: Variant, asset_key: String, amount: float) -> void:
@@ -756,27 +1168,77 @@ func _person_can_accept_r_for_swap(person: Variant, amount: int) -> bool:
 	return float(person.assets["R"]) + float(amount) <= float(person.needs["R"]) * 2.0
 
 
-func _person_has_return_surplus(person: Variant, requested_res: String, amount: int) -> bool:
+func _is_agent_nutrient_dominant(agent: Variant, nutrient: String) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	if not _is_villager_nutrient(nutrient):
+		return false
+	if agent.assets.get(nutrient) == null:
+		return false
+	var requested_value = float(agent.assets.get(nutrient, 0.0))
+	var best_value := -INF
+	var min_value := INF
+	for res in VILLAGER_NUTRIENTS:
+		var value = float(agent.assets.get(res, 0.0))
+		if value > best_value:
+			best_value = value
+		if value < min_value:
+			min_value = value
+	if best_value <= 0.0 or min_value == INF:
+		return false
+	if requested_value + 0.001 < best_value:
+		return false
+	return (best_value - min_value) >= float(_get_villager_surplus_dominance_margin())
+
+
+func _person_can_trade_dominant_nutrient(person: Variant, nutrient: String, amount: int) -> bool:
+	if amount <= 0:
+		return false
 	if not _is_village_person_node(person):
 		return false
-	if not _is_villager_nutrient(requested_res):
+	if not _is_villager_nutrient(nutrient):
 		return false
-	if person.assets.get(requested_res) == null or person.needs.get(requested_res) == null:
+	if person.assets.get(nutrient) == null:
 		return false
-	return float(person.assets[requested_res]) - float(person.needs[requested_res]) >= float(amount)
+	var current_value = float(person.assets[nutrient])
+	if current_value - float(amount) < VILLAGER_NUTRIENT_TRADE_RESERVE:
+		return false
+	return _is_agent_nutrient_dominant(person, nutrient) or _is_person_specialty_nutrient(person, nutrient)
+
+
+func _person_has_return_surplus(person: Variant, requested_res: String, amount: int) -> bool:
+	if Global.to_bool(Global.villager_r_medium_only) and _is_village_person_node(person) and not _is_person_specialty_nutrient(person, requested_res):
+		return false
+	return _person_can_trade_dominant_nutrient(person, requested_res, amount)
+
+
+func _has_reachable_bank_stock_need(nutrient: String) -> bool:
+	if not _is_villager_nutrient(nutrient):
+		return false
+	var target := _get_bank_bootstrap_nutrient_target()
+	if target <= 0.0:
+		return false
+	for child in trade_buddies:
+		if not _is_village_bank_node(child):
+			continue
+		if child.assets.get(nutrient) == null:
+			continue
+		if float(child.assets[nutrient]) < target:
+			return true
+	return false
 
 
 func _get_direct_person_trade_reach_delta(target: Variant) -> int:
 	var level_root = _story_farmer_get_level_root()
-	var self_delta = SocialLevelHelpersRef.get_agent_tile_reach_delta(level_root, self)
-	var target_delta = SocialLevelHelpersRef.get_agent_tile_reach_delta(level_root, target)
+	var self_delta = LevelHelpers.get_agent_tile_reach_delta(level_root, self)
+	var target_delta = LevelHelpers.get_agent_tile_reach_delta(level_root, target)
 	return maxi(1, int(min(self_delta, target_delta)) - DIRECT_PERSON_TRADE_TILE_REDUCTION)
 
 
 func _can_reach_direct_person_trade(target: Variant) -> bool:
 	var level_root = _story_farmer_get_level_root()
-	if SocialLevelHelpersRef._supports_tile_world(level_root):
-		return SocialLevelHelpersRef.are_agents_in_neighboring_tiles(level_root, self, target, _get_direct_person_trade_reach_delta(target))
+	if LevelHelpers._supports_tile_world(level_root):
+		return LevelHelpers.are_agents_in_neighboring_tiles(level_root, self, target, _get_direct_person_trade_reach_delta(target))
 	var self_reach = float(buddy_radius)
 	var target_reach = self_reach
 	if is_instance_valid(target):
@@ -793,20 +1255,10 @@ func _try_send_direct_person_liquidity_swap(requested_res: String, debug_mode: b
 		return false
 	if assets.get("R") == null or float(assets["R"]) <= 0.0:
 		return false
-	var agents_root = get_node_or_null("../../Agents")
-	if not is_instance_valid(agents_root):
-		return false
-	var candidates: Array = agents_root.get_children()
+	var candidates: Array = _get_direct_person_liquidity_candidates().duplicate()
 	candidates.shuffle()
 	for child in candidates:
-		if child == self:
-			continue
-		if not _is_village_person_node(child):
-			continue
-		if Global.to_bool(child.get("dead")):
-			continue
-		if not _can_reach_direct_person_trade(child):
-			continue
+		Global.perf_count_village_liquidity_direct_candidate_scan()
 		if not _person_can_accept_r_for_swap(child, 1):
 			continue
 		if not _person_has_return_surplus(child, requested_res, 1):
@@ -821,10 +1273,11 @@ func _try_send_direct_person_liquidity_swap(requested_res: String, debug_mode: b
 			"return_res": requested_res,
 			"return_amt": 1,
 			"liquidity_cycle_trade": true,
-			"liquidity_cycle_origin_id": int(get_instance_id())
+			"liquidity_cycle_origin_id": int(get_instance_id()),
+			"liquidity_cycle_origin_agent": self
 		}
 		if debug_mode:
-			print("direct money swap: R -> ", requested_res, " with ", child.name)
+			print("buy: R -> ", requested_res, " via ", child.name)
 		if _emit_trade_with_budget(path_dict):
 			assets["R"] -= 1
 			bars["R"].value = assets["R"]
@@ -871,7 +1324,20 @@ func _try_send_liquidity_swap(offered_res: String, requested_res: String, debug_
 		return false
 	if assets.get(offered_res) == null or float(assets[offered_res]) <= 0.0:
 		return false
-	if offered_res == "R" and _is_villager_nutrient(requested_res):
+	var offered_is_nutrient = _is_villager_nutrient(offered_res)
+	var requested_is_nutrient = _is_villager_nutrient(requested_res)
+	if offered_res != "R" and not offered_is_nutrient:
+		return false
+	if requested_res != "R" and not requested_is_nutrient:
+		return false
+	if offered_is_nutrient:
+		if requested_is_nutrient and offered_res == requested_res:
+			return false
+		if _is_story_village_person_actor() and not _is_person_specialty_nutrient(self, offered_res):
+			return false
+		if not _person_can_trade_dominant_nutrient(self, offered_res, 1):
+			return false
+	if offered_res == "R" and requested_is_nutrient:
 		if _try_send_direct_person_liquidity_swap(requested_res, debug_mode):
 			return true
 	trade_buddies.shuffle()
@@ -885,9 +1351,13 @@ func _try_send_liquidity_swap(offered_res: String, requested_res: String, debug_
 		if not child_is_bank and not child_is_basket:
 			continue
 		if child_is_bank:
-			if not _can_bank_buy_for_r(child, offered_res, requested_res):
+			if not ((offered_res == "R" and requested_is_nutrient) or (offered_is_nutrient and requested_res == "R")):
+				continue
+			if not _can_bank_handle_liquidity_swap(child, offered_res, requested_res):
 				continue
 		else:
+			if not ((offered_res == "R" and requested_is_nutrient) or (offered_is_nutrient and requested_is_nutrient)):
+				continue
 			if child.assets.get(offered_res) == null or child.assets.get(requested_res) == null:
 				continue
 			if float(child.assets[requested_res]) <= 0.0:
@@ -904,10 +1374,16 @@ func _try_send_liquidity_swap(offered_res: String, requested_res: String, debug_
 			"return_res": requested_res,
 			"return_amt": 1,
 			"liquidity_cycle_trade": true,
-			"liquidity_cycle_origin_id": int(get_instance_id())
+			"liquidity_cycle_origin_id": int(get_instance_id()),
+			"liquidity_cycle_origin_agent": self
 		}
 		if debug_mode:
-			print("liquidity swap: ", offered_res, " -> ", requested_res, " via ", child.name)
+			var swap_label = "swap"
+			if offered_res == "R" and requested_is_nutrient:
+				swap_label = "buy"
+			elif offered_is_nutrient and requested_res == "R":
+				swap_label = "sell"
+			print(swap_label, ": ", offered_res, " -> ", requested_res, " via ", child.name)
 		if _emit_trade_with_budget(path_dict):
 			assets[offered_res] -= 1
 			bars[offered_res].value = assets[offered_res]
@@ -920,45 +1396,41 @@ func _try_send_liquidity_swap(offered_res: String, requested_res: String, debug_
 func _run_villager_r_liquidity_cycle(debug_mode: bool = false) -> void:
 	if not logistics_ready or not is_raining:
 		return
+	if _liquidity_backoff_active():
+		logistics_ready = false
+		is_trading = false
+		return
+	if _story_farmer_should_wait_for_harvest_target(_story_farmer_get_level_root()):
+		return
 	if _is_liquidity_swap_backpressure_blocked():
 		return
 	var deficit_order = _get_sorted_nutrient_deficits()
 	var has_deficit = not deficit_order.is_empty()
-	var dominant_res = _get_liquidity_dominant_nutrient()
-	var tradeable_res = dominant_res
-	if tradeable_res == "":
-		tradeable_res = _get_liquidity_any_tradeable_nutrient()
+	var tradeable_res = _get_liquidity_tradeable_nutrient()
 	var current_r = float(assets.get("R", 0.0))
-	var r_fill_target = _get_liquidity_r_fill_target()
-	if has_deficit:
-		# Phase 1: spend available liquidity on deficits first.
-		if current_r > 0.0:
-			for deficit_res in deficit_order:
-				if _try_send_liquidity_swap("R", deficit_res, debug_mode):
-					return
-		# Phase 2: use baskets for direct resource swaps before creating more R.
-		if tradeable_res != "":
-			for deficit_res in deficit_order:
-				if deficit_res == tradeable_res:
-					continue
-				if _try_send_liquidity_swap(tradeable_res, deficit_res, debug_mode):
-					return
-		# Phase 3: repay excess R only after available deficit-buying routes were tried.
-		if _try_send_excess_r_to_bank(debug_mode):
-			return
-		# Phase 4: build liquidity from tradeable nutrient up to target R.
-		if current_r < r_fill_target and tradeable_res != "":
-			if _try_send_liquidity_swap(tradeable_res, "R", debug_mode):
+	var r_fill_target = float(_get_liquidity_r_fill_target())
+	if has_deficit and current_r > 0.0:
+		for deficit_res in deficit_order:
+			if _try_send_liquidity_swap("R", deficit_res, debug_mode):
 				return
-		# Fallback: if buy routes are currently unavailable, keep selling any tradeable nutrient.
-		if tradeable_res != "":
-			_try_send_liquidity_swap(tradeable_res, "R", debug_mode)
-		return
-	var r_buffer_target = float(_get_villager_r_buffer_target())
 	if _try_send_excess_r_to_bank(debug_mode):
 		return
-	if current_r < r_buffer_target:
-		_try_send_liquidity_swap(dominant_res, "R", debug_mode)
+	if tradeable_res != "" and (current_r < r_fill_target or _has_reachable_bank_stock_need(tradeable_res)):
+		if _try_send_liquidity_swap(tradeable_res, "R", debug_mode):
+			return
+	if has_deficit and tradeable_res != "":
+		for deficit_res in deficit_order:
+			if deficit_res == tradeable_res:
+				continue
+			if _try_send_liquidity_swap(tradeable_res, deficit_res, debug_mode):
+				return
+	if has_deficit or (tradeable_res != "" and current_r < r_fill_target):
+		_drop_stalled_liquidity_queue()
+		_start_liquidity_backoff()
+		if debug_mode:
+			print("blocked: no available liquidity route for ", name)
+		logistics_ready = false
+		is_trading = false
 
 
 func _calculate_swap_return_amount(trade_packet: Area2D) -> int:
@@ -983,12 +1455,14 @@ func _can_return_swap_asset(trade_packet: Area2D, return_amount: int) -> bool:
 	var return_asset = str(trade_packet.return_asset)
 	if _is_village_bank_node(self):
 		if received_asset == "R":
-			return false
-		if return_asset != "R":
-			return false
-		if not _is_villager_nutrient(received_asset):
-			return false
-		return true
+			if not _is_villager_nutrient(return_asset):
+				return false
+			if assets.get(return_asset) == null:
+				return false
+			return float(assets[return_asset]) >= float(return_amount)
+		if return_asset == "R" and _is_villager_nutrient(received_asset):
+			return true
+		return false
 	if _is_story_village_person_actor():
 		if received_asset != "R":
 			return false
@@ -1029,11 +1503,20 @@ func _emit_or_queue_trade(path_dict: Dictionary) -> bool:
 func _flush_trade_queue() -> void:
 	if trade_queue.is_empty():
 		return
+	var liquidity_stalled := false
+	var checked_liquidity_stall := false
 	var remaining_queue: Array = []
 	for queued_trade in trade_queue:
 		if typeof(queued_trade) != TYPE_DICTIONARY:
 			continue
 		var path_dict: Dictionary = queued_trade
+		if _is_villager_liquidity_trade(path_dict):
+			if not checked_liquidity_stall:
+				liquidity_stalled = _is_villager_liquidity_stalled()
+				checked_liquidity_stall = true
+			if liquidity_stalled:
+				Global.perf_count_village_liquidity_dropped_queue()
+				continue
 		var asset_key = str(path_dict.get("trade_asset", ""))
 		var amount = maxi(int(path_dict.get("trade_amount", 1)), 1)
 		if asset_key == "":
@@ -1083,22 +1566,35 @@ func _refund_rejected_r_swap(trade_packet: Area2D) -> bool:
 		"return_res": null,
 		"return_amt": null,
 		"liquidity_cycle_trade": Global.to_bool(trade_packet.get("liquidity_cycle_trade")),
-		"liquidity_cycle_origin_id": int(trade_packet.get("liquidity_cycle_origin_id"))
+		"liquidity_cycle_origin_id": int(trade_packet.get("liquidity_cycle_origin_id")),
+		"liquidity_cycle_origin_agent": trade_packet.get("liquidity_cycle_origin_agent")
 	}
 	return _emit_or_queue_trade(refund_path)
 
 
 func logistics():
 	var level_root = _story_farmer_get_level_root()
+	var debug_mode = false
 	if _story_farmer_tick_auto_harvest(level_root):
 		return
 	if str(type) == "bank" and Global.to_bool(get_meta("bank_disabled", false)):
 		logistics_ready = false
 		is_trading = false
 		return
+	if _story_farmer_should_wait_for_harvest_target(level_root):
+		trade_queue.clear()
+		logistics_ready = false
+		is_trading = false
+		return
+	if _should_use_villager_r_liquidity_cycle():
+		_reset_liquidity_tick_cache()
 	_flush_trade_queue()
 	if str(type) == "bank":
-		is_trading = false
+		if _should_use_bank_liquidity_bootstrap():
+			if not _run_bank_liquidity_bootstrap(debug_mode):
+				is_trading = false
+		else:
+			is_trading = false
 		return
 	var farmer_trade_any_n := false
 	if _is_story_farmer_actor() and is_instance_valid(level_root) and level_root.has_method("story_farmer_should_trade_any_n"):
@@ -1108,8 +1604,6 @@ func logistics():
 	var high_amt_excess = 0
 	var needed_res = null
 	var high_amt_needed = 0
-	
-	var debug_mode = false
 	
 	if _should_use_villager_r_liquidity_cycle():
 		_run_villager_r_liquidity_cycle(debug_mode)
@@ -1277,7 +1771,8 @@ func _on_area_entered(ztrade: Area2D) -> void:
 		var was_missing_nutrient: bool = _is_story_village_person_actor() and received_nutrient and float(assets.get(received_asset, 0.0)) <= 0.0
 		assets[ztrade.asset]+=ztrade.amount
 		is_trading = false
-		if assets[ztrade.asset]> needs[ztrade.asset] *2:
+		var bank_receiving_r := _is_village_bank_node(self) and received_asset == "R"
+		if not bank_receiving_r and assets[ztrade.asset]> needs[ztrade.asset] *2:
 			assets[ztrade.asset] = needs[ztrade.asset] *2
 		else:
 			Global.add_score(ztrade.amount)
@@ -1298,7 +1793,8 @@ func _on_area_entered(ztrade: Area2D) -> void:
 				"return_res": null,
 				"return_amt": null,
 				"liquidity_cycle_trade": Global.to_bool(ztrade.get("liquidity_cycle_trade")),
-				"liquidity_cycle_origin_id": liquidity_origin_id
+				"liquidity_cycle_origin_id": liquidity_origin_id,
+				"liquidity_cycle_origin_agent": ztrade.get("liquidity_cycle_origin_agent")
 			}
 			_emit_or_queue_trade(return_path)
 		if _is_story_village_person_actor() and received_nutrient:
@@ -1319,6 +1815,8 @@ func _on_area_entered(ztrade: Area2D) -> void:
 
 func _bank_consume_nutrients_if_ready() -> void:
 	if not _is_village_bank_node(self):
+		return
+	if _should_use_bank_liquidity_bootstrap():
 		return
 	for res in VILLAGER_NUTRIENTS:
 		if float(assets.get(res, 0.0)) < 2.0:

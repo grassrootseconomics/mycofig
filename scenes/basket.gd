@@ -37,7 +37,7 @@ func set_variables(a_dict) -> void:
 func generate_buddies() -> void:
 	num_connectors = 0
 	var agents_root = get_node_or_null("../../Agents")
-	trade_buddies = LevelHelpersRef.query_trade_hubs_near_agent(_get_level_root(), agents_root, self, num_buddies, false)
+	trade_buddies = LevelHelpers.query_trade_hubs_near_agent(_get_level_root(), agents_root, self, num_buddies, false)
 
 func logistics():
 	var new_trade_queue = []
@@ -133,7 +133,7 @@ func logistics():
 								
 
 func draw_selected_box():
-	LevelHelpersRef.draw_agent_selection_box(_get_level_root(), self)
+	LevelHelpers.draw_agent_selection_box(_get_level_root(), self)
 
 
 		
@@ -274,6 +274,7 @@ func _on_area_entered(trade: Area2D) -> void:
 							"return_amt": null,
 							"liquidity_cycle_trade": Global.to_bool(trade.get("liquidity_cycle_trade")),
 							"liquidity_cycle_origin_id": liquidity_origin_id,
+							"liquidity_cycle_origin_agent": trade.get("liquidity_cycle_origin_agent"),
 							"bank_reserve_protected": bank_reserve_protected
 						}
 						if bank_reserve_protected and not _bank_trade_has_return_surplus(str(trade.return_asset), return_amount):
@@ -294,6 +295,10 @@ func _on_area_entered(trade: Area2D) -> void:
 				trade.call_deferred("queue_free")
 		else:
 			print("Error basket without asset:", trade.asset, assets)
+			if trade.has_method("finish_trade"):
+				trade.call_deferred("finish_trade")
+			else:
+				trade.call_deferred("queue_free")
 	#else:
 	#	print("not myself", body_entered)
 		#collision.emit(body)
@@ -308,11 +313,11 @@ func kill_it():
 	#self.queue_free()
 	self.dead = true
 	_hide_resource_bars()
-	LevelHelpersRef.unregister_agent_occupancy(get_node_or_null("../.."), self)
+	LevelHelpers.unregister_agent_occupancy(get_node_or_null("../.."), self)
 	self.call_deferred("queue_free")
 	if Global.active_agent != null:
 		if is_instance_valid(Global.active_agent) and Global.active_agent.name == self.name:
-			LevelHelpersRef.clear_focus_outline_if_owner(get_node_or_null("../.."), self)
+			LevelHelpers.clear_focus_outline_if_owner(get_node_or_null("../.."), self)
 			Global.active_agent = null
 			Global.prevent_auto_select = true
 			_refresh_all_agent_bar_visibility()

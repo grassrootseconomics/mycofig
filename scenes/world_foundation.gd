@@ -20,6 +20,9 @@ const SOIL_BASE_MOISTURE_DELTA := -0.01
 const SOIL_BASE_ORGANIC_DELTA := -0.004
 const SOIL_BASE_COMPACTION_DELTA := 0.003
 const SOIL_UNSUPPORTED_DECAY_MULTIPLIER := 2.0
+const CHALLENGE_UNSUPPORTED_DECAY_MULTIPLIER := 4.0
+const CHALLENGE_RESIDUE_LIFETIME_TICKS := 3
+const CHALLENGE_RESIDUE_INFLUENCE_RADIUS := 1
 const SOIL_MYCO_CORE_MOISTURE_DELTA := 0.045
 const SOIL_MYCO_CORE_COMPACTION_DELTA := -0.02
 const SOIL_MYCO_NEIGHBOR_MOISTURE_DELTA := 0.02
@@ -115,6 +118,7 @@ var _occupancy_by_tile: Dictionary = {}
 var _trade_hubs_by_tile: Dictionary = {}
 var _footprint_by_agent: Dictionary = {}
 var _influence_kernel: Array = []
+var _previous_active_soil_tiles: Dictionary = {}
 var _revealed_tiles: PackedByteArray = PackedByteArray()
 var _permanent_revealed_tiles: PackedByteArray = PackedByteArray()
 
@@ -261,7 +265,7 @@ func get_trade_hub_occupants_cached(coord: Vector2i, ignore_agent: Variant = nul
 			continue
 		if is_instance_valid(ignore_agent) and agent == ignore_agent:
 			continue
-		if not LevelHelpersRef.is_trade_hub_index_candidate(agent):
+		if not LevelHelpers.is_trade_hub_index_candidate(agent):
 			continue
 		cleaned.append(agent)
 	_trade_hubs_by_tile[coord] = cleaned
@@ -280,7 +284,7 @@ func register_agent_footprint(agent: Variant, coords: Array) -> void:
 			continue
 		normalized.append(coord)
 		_insert_tile_occupant(coord, agent)
-		if LevelHelpersRef.is_trade_hub_index_candidate(agent):
+		if LevelHelpers.is_trade_hub_index_candidate(agent):
 			_insert_tile_trade_hub(coord, agent)
 	_footprint_by_agent[key] = normalized
 
@@ -309,7 +313,7 @@ func update_agent_footprint(agent: Variant, old_coords: Array, new_coords: Array
 		if old_map.has(coord):
 			continue
 		_insert_tile_occupant(coord, agent)
-		if LevelHelpersRef.is_trade_hub_index_candidate(agent):
+		if LevelHelpers.is_trade_hub_index_candidate(agent):
 			_insert_tile_trade_hub(coord, agent)
 	var key = int(agent.get_instance_id())
 	_footprint_by_agent[key] = new_map.keys()
@@ -334,7 +338,7 @@ func unregister_agent_footprint(agent: Variant) -> void:
 func sync_agent_footprint(level_root: Node, agent: Variant) -> void:
 	if not is_instance_valid(agent):
 		return
-	var new_coords = LevelHelpersRef.get_agent_occupied_tiles(level_root, agent)
+	var new_coords = LevelHelpers.get_agent_occupied_tiles(level_root, agent)
 	var key = int(agent.get_instance_id())
 	var old_coords: Array = []
 	if _footprint_by_agent.has(key):
@@ -357,7 +361,7 @@ func rebuild_occupancy_cache(level_root: Node, agents_root: Node) -> void:
 			continue
 		if str(agent.get("type")) == "cloud":
 			continue
-		var coords = LevelHelpersRef.get_agent_occupied_tiles(level_root, agent)
+		var coords = LevelHelpers.get_agent_occupied_tiles(level_root, agent)
 		register_agent_footprint(agent, coords)
 
 
@@ -404,6 +408,8 @@ func register_residue(coord: Vector2i, biomass: float, lifetime_ticks: int = DEF
 		return
 	var safe_biomass = maxf(biomass, 0.0)
 	var safe_ticks = maxi(lifetime_ticks, 1)
+	if _uses_challenge_soil_decay():
+		safe_ticks = mini(safe_ticks, CHALLENGE_RESIDUE_LIFETIME_TICKS)
 	if safe_biomass <= 0.0:
 		return
 	_residue_records.append({
@@ -412,6 +418,26 @@ func register_residue(coord: Vector2i, biomass: float, lifetime_ticks: int = DEF
 		"ticks_remaining": safe_ticks,
 		"source_type": source_type
 	})
+
+
+func _uses_challenge_soil_decay() -> bool:
+	if str(Global.mode) == "challenge":
+		return true
+	if Global.has_method("is_challenge_dual_village_mode"):
+		return Global.to_bool(Global.is_challenge_dual_village_mode())
+	return false
+
+
+func _get_unsupported_decay_multiplier() -> float:
+	if _uses_challenge_soil_decay():
+		return CHALLENGE_UNSUPPORTED_DECAY_MULTIPLIER
+	return SOIL_UNSUPPORTED_DECAY_MULTIPLIER
+
+
+func _get_residue_influence_radius() -> int:
+	if _uses_challenge_soil_decay():
+		return CHALLENGE_RESIDUE_INFLUENCE_RADIUS
+	return SOIL_INFLUENCE_RADIUS
 
 
 func get_tile_health_score(coord: Vector2i) -> float:
@@ -539,6 +565,7 @@ func clear_permanent_reveal() -> void:
 
 func reset_to_baseline() -> void:
 	_residue_records.clear()
+	_previous_active_soil_tiles.clear()
 	if _permanent_revealed_tiles.size() != columns * rows:
 		_initialize_reveal_data()
 	for idx in range(_permanent_revealed_tiles.size()):
@@ -646,8 +673,8 @@ func _clear_selection_for_camera_move() -> void:
 	if not is_instance_valid(level_root):
 		return
 	var agents_root = level_root.get_node_or_null("Agents")
-	LevelHelpersRef.clear_selection_and_bars(level_root, agents_root)
-	LevelHelpersRef.suppress_hover_focus_until_pointer_moves(level_root)
+	LevelHelpers.clear_selection_and_bars(level_root, agents_root)
+	LevelHelpers.suppress_hover_focus_until_pointer_moves(level_root)
 
 
 func _clear_selection_once_for_camera_move() -> void:
@@ -891,67 +918,104 @@ func _draw_story_fog_overlay() -> void:
 			draw_rect(rect, STORY_FOG_COLOR, true)
 
 
+func _should_use_dirty_active_soil_tick() -> bool:
+	return Global.to_bool(Global.soil_dirty_active_tick_enabled) and _uses_challenge_soil_decay()
+
+
+func _add_active_soil_tiles_from_map(active_tiles: Dictionary, source_map: Dictionary) -> void:
+	for coord_variant in source_map.keys():
+		var coord = Vector2i(coord_variant)
+		if in_bounds(coord):
+			active_tiles[coord] = true
+
+
+func _update_soil_tile(coord: Vector2i, myco_influence: Dictionary, live_plants: Dictionary, residue_influence: Dictionary, unsupported_decay_factor: float, stage_changes: Dictionary) -> void:
+	if not in_bounds(coord):
+		return
+	var idx = _index_for(coord)
+	var tile: Dictionary = _tiles[idx]
+	var old_stage = int(tile["stage"])
+
+	var moisture = float(tile["moisture"]) + SOIL_BASE_MOISTURE_DELTA
+	var compaction = float(tile["compaction"]) + SOIL_BASE_COMPACTION_DELTA
+	var organic_matter = float(tile["organic_matter"]) + SOIL_BASE_ORGANIC_DELTA
+
+	var myco_strength = minf(float(myco_influence.get(coord, 0.0)), 2.0)
+	if myco_strength > 0.0:
+		moisture += SOIL_MYCO_CORE_MOISTURE_DELTA * myco_strength
+		compaction += SOIL_MYCO_CORE_COMPACTION_DELTA * myco_strength
+
+	if live_plants.has(coord):
+		moisture += SOIL_LIVE_PLANT_MOISTURE_DELTA
+		organic_matter += SOIL_LIVE_PLANT_ORGANIC_DELTA
+
+	var residue_strength = minf(float(residue_influence.get(coord, 0.0)), 3.0)
+	if residue_strength > 0.0:
+		moisture += SOIL_RESIDUE_MOISTURE_DELTA * residue_strength
+		organic_matter += SOIL_RESIDUE_ORGANIC_DELTA * residue_strength
+
+	var unsupported = myco_strength <= 0.0 and residue_strength <= 0.0
+	if unsupported and unsupported_decay_factor > 0.0:
+		moisture += SOIL_BASE_MOISTURE_DELTA * unsupported_decay_factor
+		compaction += SOIL_BASE_COMPACTION_DELTA * unsupported_decay_factor
+		organic_matter += SOIL_BASE_ORGANIC_DELTA * unsupported_decay_factor
+
+	moisture = _clamp01(moisture)
+	compaction = _clamp01(compaction)
+	organic_matter = _clamp01(organic_matter)
+
+	tile["moisture"] = moisture
+	tile["compaction"] = compaction
+	tile["organic_matter"] = organic_matter
+	_tiles[idx] = tile
+
+	var new_stage = _stage_from_score(_compute_health_score(moisture, organic_matter, compaction))
+	if new_stage != old_stage:
+		if not stage_changes.has(new_stage):
+			stage_changes[new_stage] = []
+		stage_changes[new_stage].append(coord)
+
+
 func _on_soil_tick_timeout() -> void:
 	var tick_start_us = Time.get_ticks_usec()
 	var residue_by_tile = _consume_residue_tick()
 	var residue_influence: Dictionary = {}
+	var residue_radius = _get_residue_influence_radius()
 	for coord_variant in residue_by_tile.keys():
 		var coord = Vector2i(coord_variant)
 		var biomass = float(residue_by_tile[coord_variant])
-		_add_radial_influence(residue_influence, coord, biomass, SOIL_INFLUENCE_RADIUS)
+		_add_radial_influence(residue_influence, coord, biomass, residue_radius)
 	var influences = _collect_soil_influences()
 	var myco_influence: Dictionary = influences["myco_influence"]
 	var live_plants: Dictionary = influences["live_plants"]
 	var stage_changes: Dictionary = {}
 	var touched_tiles := 0
-	var unsupported_decay_factor = maxf(SOIL_UNSUPPORTED_DECAY_MULTIPLIER - 1.0, 0.0)
+	var unsupported_decay_factor = maxf(_get_unsupported_decay_multiplier() - 1.0, 0.0)
+	var current_active_tiles: Dictionary = {}
+	_add_active_soil_tiles_from_map(current_active_tiles, myco_influence)
+	_add_active_soil_tiles_from_map(current_active_tiles, live_plants)
+	_add_active_soil_tiles_from_map(current_active_tiles, residue_influence)
 
-	for y in range(rows):
-		for x in range(columns):
+	if _should_use_dirty_active_soil_tick():
+		var tiles_to_update: Dictionary = current_active_tiles.duplicate()
+		for coord_variant in _previous_active_soil_tiles.keys():
+			var coord = Vector2i(coord_variant)
+			if in_bounds(coord):
+				tiles_to_update[coord] = true
+		for coord_variant in tiles_to_update.keys():
 			touched_tiles += 1
-			var coord = Vector2i(x, y)
-			var idx = _index_for(coord)
-			var tile: Dictionary = _tiles[idx]
-
-			var moisture = float(tile["moisture"]) + SOIL_BASE_MOISTURE_DELTA
-			var compaction = float(tile["compaction"]) + SOIL_BASE_COMPACTION_DELTA
-			var organic_matter = float(tile["organic_matter"]) + SOIL_BASE_ORGANIC_DELTA
-
-			var myco_strength = minf(float(myco_influence.get(coord, 0.0)), 2.0)
-			if myco_strength > 0.0:
-				moisture += SOIL_MYCO_CORE_MOISTURE_DELTA * myco_strength
-				compaction += SOIL_MYCO_CORE_COMPACTION_DELTA * myco_strength
-
-			if live_plants.has(coord):
-				moisture += SOIL_LIVE_PLANT_MOISTURE_DELTA
-				organic_matter += SOIL_LIVE_PLANT_ORGANIC_DELTA
-
-			var residue_strength = minf(float(residue_influence.get(coord, 0.0)), 3.0)
-			if residue_strength > 0.0:
-				moisture += SOIL_RESIDUE_MOISTURE_DELTA * residue_strength
-				organic_matter += SOIL_RESIDUE_ORGANIC_DELTA * residue_strength
-
-			var unsupported = myco_strength <= 0.0 and residue_strength <= 0.0
-			if unsupported and unsupported_decay_factor > 0.0:
-				moisture += SOIL_BASE_MOISTURE_DELTA * unsupported_decay_factor
-				compaction += SOIL_BASE_COMPACTION_DELTA * unsupported_decay_factor
-				organic_matter += SOIL_BASE_ORGANIC_DELTA * unsupported_decay_factor
-
-			moisture = _clamp01(moisture)
-			compaction = _clamp01(compaction)
-			organic_matter = _clamp01(organic_matter)
-
-			tile["moisture"] = moisture
-			tile["compaction"] = compaction
-			tile["organic_matter"] = organic_matter
-			_tiles[idx] = tile
-
-			var old_stage = int(tile["stage"])
-			var new_stage = _stage_from_score(_compute_health_score(moisture, organic_matter, compaction))
-			if new_stage != old_stage:
-				if not stage_changes.has(new_stage):
-					stage_changes[new_stage] = []
-				stage_changes[new_stage].append(coord)
+			_update_soil_tile(Vector2i(coord_variant), myco_influence, live_plants, residue_influence, unsupported_decay_factor, stage_changes)
+		_previous_active_soil_tiles = current_active_tiles
+		Global.perf_set_soil_active_tiles_touched(touched_tiles)
+		Global.perf_set_soil_full_map_fallback(false)
+	else:
+		for y in range(rows):
+			for x in range(columns):
+				touched_tiles += 1
+				_update_soil_tile(Vector2i(x, y), myco_influence, live_plants, residue_influence, unsupported_decay_factor, stage_changes)
+		_previous_active_soil_tiles.clear()
+		Global.perf_set_soil_active_tiles_touched(current_active_tiles.size())
+		Global.perf_set_soil_full_map_fallback(true)
 
 	_apply_stage_changes(stage_changes)
 	Global.perf_set_soil_tiles_touched(touched_tiles)

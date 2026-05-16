@@ -21,10 +21,45 @@ const VILLAGE_TRADE_VISUAL_CLOSE_SECONDS := 0.35
 const VILLAGE_TRADE_TRAIL_CAP := 80
 const VILLAGE_TRADE_TRAIL_WIDTH := 1.25
 const VILLAGE_TRADE_TRAIL_COLOR := Color(1.0, 1.0, 1.0, 0.82)
+const TRADE_LINE_META_KEYS := [
+	"endpoint_a",
+	"endpoint_b",
+	"base_color",
+	"pair_key",
+	"route_mode",
+	"village_ephemeral_line",
+	"village_line_pair_key",
+	"village_line_started_msec",
+	"village_line_duration_msec",
+	"village_trail_line",
+	"village_trail_active"
+]
+
+
 const TILE_REACH_NONE := 0
 const TILE_REACH_ADJACENT := 1
 const TILE_REACH_LOCAL_HUB := 2
 const TILE_REACH_BANK := 3
+
+
+static func _village_trade_fade_seconds(fade_seconds: float = -1.0) -> float:
+	if fade_seconds > 0.0:
+		return maxf(fade_seconds, 0.1)
+	if Global.has_method("get_village_trade_visual_fade_seconds"):
+		return maxf(float(Global.get_village_trade_visual_fade_seconds()), 0.1)
+	return maxf(VILLAGE_TRADE_VISUAL_FADE_SECONDS, 0.1)
+
+
+static func _village_trade_trail_cap() -> int:
+	if Global.has_method("get_village_trade_trail_cap"):
+		return maxi(int(Global.get_village_trade_trail_cap()), 0)
+	return maxi(VILLAGE_TRADE_TRAIL_CAP, 0)
+
+
+static func _village_trade_pair_cap() -> int:
+	if Global.has_method("get_village_trade_pair_cap"):
+		return maxi(int(Global.get_village_trade_pair_cap()), 0)
+	return maxi(VILLAGE_TRADE_TRAIL_CAP, 0)
 
 
 static func _is_pressed_key(event: InputEvent, keycodes: Array) -> bool:
@@ -1529,35 +1564,40 @@ static func _set_line_pool_store(lines_root: Node, pool: Array) -> void:
 
 
 static func _clear_trade_line_meta(line: Line2D) -> void:
-	for meta_name in [
-		"endpoint_a",
-		"endpoint_b",
-		"base_color",
-		"pair_key",
-		"route_mode",
-		"village_ephemeral_line",
-		"village_line_pair_key",
-		"village_line_started_msec",
-		"village_line_duration_msec",
-		"village_trail_line",
-		"village_trail_active"
-	]:
+	for meta_name in TRADE_LINE_META_KEYS:
 		if line.has_meta(meta_name):
 			line.remove_meta(meta_name)
+
+
+static func _is_reusable_trade_line(line: Variant) -> bool:
+	if not is_instance_valid(line) or not (line is Line2D):
+		return false
+	var line_node: Line2D = line
+	if line_node.is_queued_for_deletion() or line_node.visible:
+		return false
+	for meta_name in TRADE_LINE_META_KEYS:
+		if line_node.has_meta(meta_name):
+			return false
+	return true
 
 
 static func _acquire_trade_line(lines_root: Node) -> Line2D:
 	var pool = _get_line_pool_store(lines_root)
 	var line: Line2D = null
-	if not pool.is_empty():
-		line = pool.pop_back()
+	while not pool.is_empty():
+		var candidate = pool.pop_back()
+		if _is_reusable_trade_line(candidate):
+			line = candidate
+			break
 	_set_line_pool_store(lines_root, pool)
 	if not is_instance_valid(line):
 		line = Line2D.new()
 		line.z_as_relative = false
 	if line.get_parent() != lines_root:
+		if line.get_parent() != null:
+			line.get_parent().remove_child(line)
 		lines_root.add_child(line)
-	line.visible = true
+	line.visible = false
 	line.clear_points()
 	line.modulate = Color.WHITE
 	_clear_trade_line_meta(line)
@@ -1565,14 +1605,21 @@ static func _acquire_trade_line(lines_root: Node) -> Line2D:
 
 
 static func _release_trade_line(lines_root: Node, line: Variant) -> void:
-	if not is_instance_valid(lines_root) or not (line is Line2D):
+	if not is_instance_valid(lines_root) or not is_instance_valid(line) or not (line is Line2D):
 		return
 	var line_node: Line2D = line
-	line_node.clear_points()
+	if line_node.is_queued_for_deletion():
+		return
 	line_node.visible = false
+	_clear_trade_line_meta(line_node)
 	if line_node.get_parent() != lines_root:
+		if line_node.get_parent() != null:
+			line_node.get_parent().remove_child(line_node)
 		lines_root.add_child(line_node)
 	var pool = _get_line_pool_store(lines_root)
+	if pool.has(line_node):
+		_set_line_pool_store(lines_root, pool)
+		return
 	pool.append(line_node)
 	_set_line_pool_store(lines_root, pool)
 
@@ -1710,9 +1757,19 @@ static func _has_trade_buddy_link(agent: Variant, buddy: Variant) -> bool:
 static func _should_pair_exist(agent_a: Variant, agent_b: Variant) -> bool:
 	if not _is_trade_line_agent_valid(agent_a) or not _is_trade_line_agent_valid(agent_b):
 		return false
+	if _is_auto_harvesting_farmer(agent_a) or _is_auto_harvesting_farmer(agent_b):
+		return false
 	if not (_is_trade_hub_line_agent(agent_a) or _is_trade_hub_line_agent(agent_b)):
 		return false
 	return _has_trade_buddy_link(agent_a, agent_b) or _has_trade_buddy_link(agent_b, agent_a)
+
+
+static func _is_auto_harvesting_farmer(agent: Variant) -> bool:
+	if not is_instance_valid(agent):
+		return false
+	if not agent.has_method("is_farmer_auto_harvesting"):
+		return false
+	return Global.to_bool(agent.call("is_farmer_auto_harvesting"))
 
 
 static func _line_visual_cap_per_hub() -> int:
@@ -1903,10 +1960,11 @@ static func _set_l_line_points(line: Line2D, endpoint_a: Variant, endpoint_b: Va
 	var elbow = Vector2(to.x, from.y)
 	if route_mode == "y_then_x":
 		elbow = Vector2(from.x, to.y)
-	line.clear_points()
-	line.add_point(from)
-	line.add_point(elbow)
-	line.add_point(to)
+	var points := PackedVector2Array()
+	points.append(from)
+	points.append(elbow)
+	points.append(to)
+	line.points = points
 
 
 static func _configure_l_line(line: Line2D, endpoint_a: Node, endpoint_b: Node, route_mode: String, base_color: Color, pair_key: String) -> void:
@@ -1939,9 +1997,9 @@ static func _upsert_pair(lines_root: Node, pair_store: Dictionary, pair_meta: Di
 	var line1: Line2D = null
 	var line2: Line2D = null
 	if pair_lines.size() >= 2:
-		if pair_lines[0] is Line2D and is_instance_valid(pair_lines[0]):
+		if is_instance_valid(pair_lines[0]) and pair_lines[0] is Line2D:
 			line1 = pair_lines[0]
-		if pair_lines[1] is Line2D and is_instance_valid(pair_lines[1]):
+		if is_instance_valid(pair_lines[1]) and pair_lines[1] is Line2D:
 			line2 = pair_lines[1]
 	if not is_instance_valid(line1):
 		line1 = _acquire_trade_line(lines_root)
@@ -1959,7 +2017,7 @@ static func _upsert_pair(lines_root: Node, pair_store: Dictionary, pair_meta: Di
 	_add_pair_to_agent_index(agent_index, endpoint_b, pair_key)
 
 
-static func pulse_village_trade_pair_line(lines_root: Node, endpoint_a: Variant, endpoint_b: Variant, fade_seconds: float = VILLAGE_TRADE_VISUAL_FADE_SECONDS) -> void:
+static func pulse_village_trade_pair_line(lines_root: Node, endpoint_a: Variant, endpoint_b: Variant, fade_seconds: float = -1.0) -> void:
 	if not is_instance_valid(lines_root):
 		return
 	if not is_village_trade_visual_endpoint(endpoint_a) or not is_village_trade_visual_endpoint(endpoint_b):
@@ -1981,10 +2039,21 @@ static func pulse_village_trade_pair_line(lines_root: Node, endpoint_a: Variant,
 	var line1: Line2D = null
 	var line2: Line2D = null
 	if pair_lines.size() >= 2:
-		if pair_lines[0] is Line2D and is_instance_valid(pair_lines[0]):
+		if is_instance_valid(pair_lines[0]) and pair_lines[0] is Line2D:
 			line1 = pair_lines[0]
-		if pair_lines[1] is Line2D and is_instance_valid(pair_lines[1]):
+		if is_instance_valid(pair_lines[1]) and pair_lines[1] is Line2D:
 			line2 = pair_lines[1]
+	if is_instance_valid(line1) and is_instance_valid(line2) and pair_meta.has(pair_key):
+		var existing_meta_variant = pair_meta[pair_key]
+		if typeof(existing_meta_variant) == TYPE_DICTIONARY:
+			var existing_meta: Dictionary = existing_meta_variant
+			if not Global.to_bool(existing_meta.get("closing", false)):
+				return
+	var pair_cap = _village_trade_pair_cap()
+	if pair_cap <= 0:
+		return
+	if not pair_store.has(pair_key) and pair_store.size() >= pair_cap:
+		return
 	if not is_instance_valid(line1):
 		line1 = _acquire_trade_line(lines_root)
 	if not is_instance_valid(line2):
@@ -1992,7 +2061,7 @@ static func pulse_village_trade_pair_line(lines_root: Node, endpoint_a: Variant,
 	var base_color = _village_trade_line_color()
 	_configure_pair_lines(line1, line2, sorted_endpoints["a"], sorted_endpoints["b"], base_color, pair_key)
 	var now_ms = Time.get_ticks_msec()
-	var duration_ms = maxi(roundi(maxf(fade_seconds, 0.1) * 1000.0), 1)
+	var duration_ms = maxi(roundi(_village_trade_fade_seconds(fade_seconds) * 1000.0), 1)
 	for line in [line1, line2]:
 		line.set_meta("village_ephemeral_line", true)
 		line.set_meta("village_line_pair_key", pair_key)
@@ -2004,7 +2073,9 @@ static func pulse_village_trade_pair_line(lines_root: Node, endpoint_a: Variant,
 		"b": sorted_endpoints["b"],
 		"started_msec": now_ms,
 		"duration_msec": duration_ms,
-		"base_color": base_color
+		"base_color": base_color,
+		"last_a_pos": sorted_endpoints["a"].global_position,
+		"last_b_pos": sorted_endpoints["b"].global_position
 	}
 	_set_village_pair_store(lines_root, pair_store)
 	_set_village_pair_meta_store(lines_root, pair_meta)
@@ -2019,25 +2090,88 @@ static func _release_village_pair(lines_root: Node, pair_store: Dictionary, pair
 	pair_meta.erase(pair_key)
 
 
+static func _line_pair_meta_has_agent(meta_variant: Variant, agent: Variant) -> bool:
+	if typeof(meta_variant) != TYPE_DICTIONARY:
+		return false
+	var meta: Dictionary = meta_variant
+	return meta.get("a", null) == agent or meta.get("b", null) == agent
+
+
+static func _line_pair_lines_have_agent(pair_variant: Variant, agent: Variant) -> bool:
+	if typeof(pair_variant) != TYPE_ARRAY:
+		return false
+	var pair_lines: Array = pair_variant
+	for line_variant in pair_lines:
+		if not is_instance_valid(line_variant) or not (line_variant is Line2D):
+			continue
+		var line: Line2D = line_variant
+		if line.get_meta("endpoint_a", null) == agent or line.get_meta("endpoint_b", null) == agent:
+			return true
+	return false
+
+
+static func clear_trade_lines_for_agent(lines_root: Node, agent: Variant) -> void:
+	if not is_instance_valid(lines_root) or not is_instance_valid(agent):
+		return
+	var pair_store = _get_line_pairs_store(lines_root)
+	var pair_meta = _get_line_meta_store(lines_root)
+	var agent_index = _get_line_agent_index_store(lines_root)
+	var persistent_keys: Dictionary = {}
+	for pair_key_variant in _pair_keys_for_agent(agent_index, agent):
+		persistent_keys[str(pair_key_variant)] = true
+	for pair_key_variant in pair_meta.keys():
+		var pair_key = str(pair_key_variant)
+		if _line_pair_meta_has_agent(pair_meta[pair_key_variant], agent):
+			persistent_keys[pair_key] = true
+	for pair_key_variant in pair_store.keys():
+		var pair_key = str(pair_key_variant)
+		if _line_pair_lines_have_agent(pair_store[pair_key_variant], agent):
+			persistent_keys[pair_key] = true
+	for pair_key_variant in persistent_keys.keys():
+		_release_pair_from_stores(lines_root, pair_store, pair_meta, agent_index, str(pair_key_variant))
+	_set_line_pairs_store(lines_root, pair_store)
+	_set_line_meta_store(lines_root, pair_meta)
+	_set_line_agent_index_store(lines_root, agent_index)
+
+	var village_pair_store = _get_village_pair_store(lines_root)
+	var village_pair_meta = _get_village_pair_meta_store(lines_root)
+	var village_keys: Dictionary = {}
+	for pair_key_variant in village_pair_meta.keys():
+		var pair_key = str(pair_key_variant)
+		if _line_pair_meta_has_agent(village_pair_meta[pair_key_variant], agent):
+			village_keys[pair_key] = true
+	for pair_key_variant in village_pair_store.keys():
+		var pair_key = str(pair_key_variant)
+		if _line_pair_lines_have_agent(village_pair_store[pair_key_variant], agent):
+			village_keys[pair_key] = true
+	for pair_key_variant in village_keys.keys():
+		_release_village_pair(lines_root, village_pair_store, village_pair_meta, str(pair_key_variant))
+	_set_village_pair_store(lines_root, village_pair_store)
+	_set_village_pair_meta_store(lines_root, village_pair_meta)
+
+
 static func create_village_trade_trail_line(lines_root: Node) -> Line2D:
 	if not is_instance_valid(lines_root):
+		return null
+	var trail_cap = _village_trade_trail_cap()
+	if trail_cap <= 0:
 		return null
 	var trails = _get_village_trail_store(lines_root)
 	var cleaned: Array = []
 	for trail_variant in trails:
-		if trail_variant is Line2D and is_instance_valid(trail_variant):
+		if is_instance_valid(trail_variant) and trail_variant is Line2D:
 			cleaned.append(trail_variant)
-	if cleaned.size() >= VILLAGE_TRADE_TRAIL_CAP:
+	if cleaned.size() >= trail_cap:
 		for i in range(cleaned.size()):
 			var candidate_variant = cleaned[i]
-			if not (candidate_variant is Line2D) or not is_instance_valid(candidate_variant):
+			if not is_instance_valid(candidate_variant) or not (candidate_variant is Line2D):
 				continue
 			var candidate: Line2D = candidate_variant
 			if not Global.to_bool(candidate.get_meta("village_trail_active", false)):
 				_release_trade_line(lines_root, candidate)
 				cleaned.remove_at(i)
 				break
-	if cleaned.size() >= VILLAGE_TRADE_TRAIL_CAP:
+	if cleaned.size() >= trail_cap:
 		_set_village_trail_store(lines_root, cleaned)
 		return null
 	var line = _acquire_trade_line(lines_root)
@@ -2045,7 +2179,7 @@ static func create_village_trade_trail_line(lines_root: Node) -> Line2D:
 	line.antialiased = Global.get_effective_perf_tier() <= 1
 	line.z_as_relative = false
 	line.global_rotation = 0.0
-	line.visible = true
+	line.visible = false
 	line.modulate = VILLAGE_TRADE_TRAIL_COLOR
 	line.set_meta("base_color", VILLAGE_TRADE_TRAIL_COLOR)
 	line.set_meta("village_trail_line", true)
@@ -2055,18 +2189,28 @@ static func create_village_trade_trail_line(lines_root: Node) -> Line2D:
 	return line
 
 
-static func start_village_trade_trail_fade(lines_root: Node, line: Variant, fade_seconds: float = VILLAGE_TRADE_VISUAL_FADE_SECONDS) -> void:
-	if not is_instance_valid(lines_root) or not (line is Line2D) or not is_instance_valid(line):
+static func start_village_trade_trail_fade(lines_root: Node, line: Variant, fade_seconds: float = -1.0) -> void:
+	if not is_instance_valid(lines_root) or not is_instance_valid(line) or not (line is Line2D):
 		return
 	var line_node: Line2D = line
 	line_node.set_meta("village_trail_line", true)
 	line_node.set_meta("village_trail_active", false)
 	line_node.set_meta("village_line_started_msec", Time.get_ticks_msec())
-	line_node.set_meta("village_line_duration_msec", maxi(roundi(maxf(fade_seconds, 0.1) * 1000.0), 1))
+	line_node.set_meta("village_line_duration_msec", maxi(roundi(_village_trade_fade_seconds(fade_seconds) * 1000.0), 1))
 	var trails = _get_village_trail_store(lines_root)
 	if not trails.has(line_node):
 		trails.append(line_node)
 		_set_village_trail_store(lines_root, trails)
+
+
+static func discard_village_trade_trail_line(lines_root: Node, line: Variant) -> void:
+	if not is_instance_valid(lines_root) or not is_instance_valid(line) or not (line is Line2D):
+		return
+	var line_node: Line2D = line
+	var trails = _get_village_trail_store(lines_root)
+	trails.erase(line_node)
+	_set_village_trail_store(lines_root, trails)
+	_release_trade_line(lines_root, line_node)
 
 
 static func _prune_invalid_pair_cache(lines_root: Node, pair_store: Dictionary, pair_meta: Dictionary, agent_index: Dictionary) -> void:
@@ -2224,13 +2368,24 @@ static func _refresh_village_pair_lines(lines_root: Node, now_ms: int) -> void:
 		if typeof(pair_variant) != TYPE_ARRAY:
 			keys_to_remove.append(pair_key)
 			continue
+		var endpoint_a_pos = endpoint_a.global_position
+		var endpoint_b_pos = endpoint_b.global_position
+		var last_a_variant = meta.get("last_a_pos", null)
+		var last_b_variant = meta.get("last_b_pos", null)
+		var endpoints_moved := true
+		if typeof(last_a_variant) == TYPE_VECTOR2 and typeof(last_b_variant) == TYPE_VECTOR2:
+			endpoints_moved = endpoint_a_pos.distance_squared_to(last_a_variant) > 1.0 or endpoint_b_pos.distance_squared_to(last_b_variant) > 1.0
+		if endpoints_moved:
+			meta["last_a_pos"] = endpoint_a_pos
+			meta["last_b_pos"] = endpoint_b_pos
+			pair_meta[pair_key] = meta
 		var pair_lines: Array = pair_variant
 		for line_variant in pair_lines:
-			if not (line_variant is Line2D) or not is_instance_valid(line_variant):
+			if not is_instance_valid(line_variant) or not (line_variant is Line2D):
 				continue
 			var line: Line2D = line_variant
 			var route_mode = str(line.get_meta("route_mode", "x_then_y"))
-			if not locked:
+			if not locked and endpoints_moved:
 				_set_l_line_points(line, endpoint_a, endpoint_b, route_mode)
 			line.modulate = faded_color
 	for pair_key_variant in keys_to_remove:
@@ -2243,7 +2398,7 @@ static func _refresh_village_trails(lines_root: Node, now_ms: int) -> void:
 	var trails = _get_village_trail_store(lines_root)
 	var remaining: Array = []
 	for trail_variant in trails:
-		if not (trail_variant is Line2D) or not is_instance_valid(trail_variant):
+		if not is_instance_valid(trail_variant) or not (trail_variant is Line2D):
 			continue
 		var line: Line2D = trail_variant
 		if Global.to_bool(line.get_meta("village_trail_active", false)):
@@ -2273,14 +2428,41 @@ static func _set_village_trade_visuals_visible(lines_root: Node, next_visible: b
 			continue
 		var pair_lines: Array = pair_variant
 		for line_variant in pair_lines:
-			if line_variant is Line2D and is_instance_valid(line_variant):
+			if is_instance_valid(line_variant) and line_variant is Line2D:
 				var line: Line2D = line_variant
 				line.visible = next_visible
 	var trails = _get_village_trail_store(lines_root)
 	for trail_variant in trails:
-		if trail_variant is Line2D and is_instance_valid(trail_variant):
+		if is_instance_valid(trail_variant) and trail_variant is Line2D:
 			var trail: Line2D = trail_variant
 			trail.visible = next_visible
+
+
+static func _refresh_persistent_trade_line_visuals(lines_root: Node) -> void:
+	var pair_store = _get_line_pairs_store(lines_root)
+	for pair_variant in pair_store.values():
+		if typeof(pair_variant) != TYPE_ARRAY:
+			continue
+		var pair_lines: Array = pair_variant
+		for line_variant in pair_lines:
+			if not is_instance_valid(line_variant) or not (line_variant is Line2D):
+				continue
+			var line: Line2D = line_variant
+			if not line.visible:
+				continue
+			var base_color = line.modulate
+			if line.has_meta("base_color"):
+				var base_color_meta = line.get_meta("base_color")
+				if typeof(base_color_meta) == TYPE_COLOR:
+					base_color = base_color_meta
+			var endpoint_a = line.get_meta("endpoint_a", null)
+			var endpoint_b = line.get_meta("endpoint_b", null)
+			var locked = _is_agent_trade_locked(endpoint_a) or _is_agent_trade_locked(endpoint_b)
+			var target_color = base_color
+			if locked:
+				target_color.a = base_color.a * 0.25
+			if line.modulate != target_color:
+				line.modulate = target_color
 
 
 static func refresh_trade_line_visuals(lines_root: Node) -> void:
@@ -2290,34 +2472,10 @@ static func refresh_trade_line_visuals(lines_root: Node) -> void:
 	if Global.should_suppress_trade_visuals():
 		_set_village_trade_visuals_visible(lines_root, false)
 	else:
+		_set_village_trade_visuals_visible(lines_root, true)
 		_refresh_village_pair_lines(lines_root, now_ms)
 		_refresh_village_trails(lines_root, now_ms)
-	for line in lines_root.get_children():
-		if not (line is Line2D):
-			continue
-		if not line.visible:
-			continue
-		if Global.to_bool(line.get_meta("village_ephemeral_line", false)) or Global.to_bool(line.get_meta("village_trail_line", false)):
-			continue
-		var base_color = line.modulate
-		if line.has_meta("base_color"):
-			var base_color_meta = line.get_meta("base_color")
-			if typeof(base_color_meta) == TYPE_COLOR:
-				base_color = base_color_meta
-
-		var endpoint_a = null
-		if line.has_meta("endpoint_a"):
-			endpoint_a = line.get_meta("endpoint_a")
-		var endpoint_b = null
-		if line.has_meta("endpoint_b"):
-			endpoint_b = line.get_meta("endpoint_b")
-		var locked = _is_agent_trade_locked(endpoint_a) or _is_agent_trade_locked(endpoint_b)
-
-		var target_color = base_color
-		if locked:
-			target_color.a = base_color.a * 0.25
-		if line.modulate != target_color:
-			line.modulate = target_color
+	_refresh_persistent_trade_line_visuals(lines_root)
 
 
 static func clear_trade_line_cache(lines_root: Node, immediate: bool = false) -> void:
@@ -2331,11 +2489,9 @@ static func clear_trade_line_cache(lines_root: Node, immediate: bool = false) ->
 			continue
 		var pair_lines: Array = pair_variant
 		for line_variant in pair_lines:
-			if not (line_variant is Line2D):
+			if not is_instance_valid(line_variant) or not (line_variant is Line2D):
 				continue
 			var line: Line2D = line_variant
-			if not is_instance_valid(line):
-				continue
 			var line_id = int(line.get_instance_id())
 			if seen.has(line_id):
 				continue
@@ -2348,11 +2504,9 @@ static func clear_trade_line_cache(lines_root: Node, immediate: bool = false) ->
 				line.queue_free()
 	var pool = _get_line_pool_store(lines_root)
 	for line_variant in pool:
-		if not (line_variant is Line2D):
+		if not is_instance_valid(line_variant) or not (line_variant is Line2D):
 			continue
 		var line: Line2D = line_variant
-		if not is_instance_valid(line):
-			continue
 		var line_id = int(line.get_instance_id())
 		if seen.has(line_id):
 			continue
@@ -2364,7 +2518,7 @@ static func clear_trade_line_cache(lines_root: Node, immediate: bool = false) ->
 		else:
 			line.queue_free()
 	for child in lines_root.get_children():
-		if child is Line2D and is_instance_valid(child):
+		if is_instance_valid(child) and child is Line2D:
 			var line_id = int(child.get_instance_id())
 			if seen.has(line_id):
 				continue

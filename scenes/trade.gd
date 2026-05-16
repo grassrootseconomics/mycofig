@@ -22,16 +22,21 @@ var _dropping := false
 var _drop_elapsed := 0.0
 var _pool_owner: Node = null
 var _visual_key := ""
+var _visual_amount := 1
 var _count_label: Label = null
 var created_at_msec := 0
 var liquidity_cycle_trade := false
 var liquidity_cycle_origin_id := 0
+var liquidity_cycle_origin_agent = null
 var village_ephemeral_trade_visual := false
 var suppress_trade_visuals := false
+var _local_trade_visual_suppressed := false
 var _village_trail_line: Line2D = null
 var _village_trail_finalized := false
 var _village_trail_start := Vector2.ZERO
 var _delivered := false
+var _despawn_pending := false
+var _liquidity_origin_notified := false
 
 const DROP_FADE_SECONDS := 0.12
 const TRADE_REFERENCE_FPS := 60.0
@@ -64,12 +69,15 @@ func set_variables(path_dict) -> void:
 	return_asset = path_dict.get("return_res")
 	return_amt = path_dict.get("return_amt")
 	_visual_key = str(path_dict.get("visual_key", ""))
+	_visual_amount = amount
 	created_at_msec = int(path_dict.get("created_at_msec", 0))
 	if created_at_msec <= 0:
 		created_at_msec = Time.get_ticks_msec()
 	liquidity_cycle_trade = Global.to_bool(path_dict.get("liquidity_cycle_trade", false))
 	liquidity_cycle_origin_id = int(path_dict.get("liquidity_cycle_origin_id", 0))
-	suppress_trade_visuals = Global.to_bool(path_dict.get("suppress_trade_visuals", false)) or Global.should_suppress_trade_visuals()
+	liquidity_cycle_origin_agent = path_dict.get("liquidity_cycle_origin_agent", null)
+	_local_trade_visual_suppressed = Global.to_bool(path_dict.get("suppress_trade_visuals", false))
+	suppress_trade_visuals = _local_trade_visual_suppressed or Global.should_suppress_trade_visuals()
 	village_ephemeral_trade_visual = Global.to_bool(path_dict.get("village_ephemeral_trade_visual", false)) and not suppress_trade_visuals
 	position = start_agent.global_position
 	_village_trail_start = global_position
@@ -86,6 +94,8 @@ func activate_trade(path_dict: Dictionary) -> void:
 	set_process(true)
 	visible = true
 	_delivered = false
+	_despawn_pending = false
+	_liquidity_origin_notified = false
 	_dropping = false
 	_drop_elapsed = 0.0
 	_reset_village_trail_state()
@@ -108,13 +118,14 @@ func _apply_visual_suppression_state() -> void:
 		var sprite_item := sprite as CanvasItem
 		sprite_item.visible = not suppress_trade_visuals
 	if is_instance_valid(_count_label):
-		_count_label.visible = not suppress_trade_visuals and int(amount) >= AGGREGATE_LABEL_MIN_AMOUNT
+		var display_amount = maxi(_visual_amount, maxi(int(amount), 1))
+		_count_label.visible = not suppress_trade_visuals and display_amount >= AGGREGATE_LABEL_MIN_AMOUNT
 	if is_instance_valid(_village_trail_line):
 		_village_trail_line.visible = not suppress_trade_visuals
 
 
 func _sync_visual_suppression_from_global() -> void:
-	var next_suppressed := Global.should_suppress_trade_visuals()
+	var next_suppressed := _local_trade_visual_suppressed or Global.should_suppress_trade_visuals()
 	if suppress_trade_visuals == next_suppressed:
 		return
 	suppress_trade_visuals = next_suppressed
@@ -135,7 +146,7 @@ func _ensure_village_trail_line() -> void:
 	var lines_root = _get_village_lines_root()
 	if not is_instance_valid(lines_root):
 		return
-	_village_trail_line = LevelHelpersRef.create_village_trade_trail_line(lines_root)
+	_village_trail_line = LevelHelpers.create_village_trade_trail_line(lines_root)
 
 
 func _set_village_trail_points_to(point: Vector2) -> void:
@@ -144,12 +155,14 @@ func _set_village_trail_points_to(point: Vector2) -> void:
 		return
 	var start = _village_trail_start
 	var elbow = Vector2(point.x, start.y)
-	_village_trail_line.clear_points()
-	_village_trail_line.add_point(start)
+	var points := PackedVector2Array()
+	points.append(start)
 	if start.distance_to(elbow) > VILLAGE_TRAIL_POINT_EPSILON and elbow.distance_to(point) > VILLAGE_TRAIL_POINT_EPSILON:
-		_village_trail_line.add_point(elbow)
+		points.append(elbow)
 	if start.distance_to(point) > VILLAGE_TRAIL_POINT_EPSILON:
-		_village_trail_line.add_point(point)
+		points.append(point)
+	_village_trail_line.points = points
+	_village_trail_line.visible = not suppress_trade_visuals and points.size() >= 2
 
 
 func _update_village_trade_trail() -> void:
@@ -166,14 +179,35 @@ func _finalize_village_trade_trail() -> void:
 		return
 	var lines_root = _get_village_lines_root()
 	if is_instance_valid(lines_root):
-		LevelHelpersRef.start_village_trade_trail_fade(lines_root, _village_trail_line)
+		LevelHelpers.start_village_trade_trail_fade(lines_root, _village_trail_line)
 	else:
 		_village_trail_line.queue_free()
 	_village_trail_line = null
 
 
-func _despawn() -> void:
-	_finalize_village_trade_trail()
+func _discard_village_trade_trail() -> void:
+	if not is_instance_valid(_village_trail_line):
+		_village_trail_line = null
+		return
+	var lines_root = _get_village_lines_root()
+	if is_instance_valid(lines_root):
+		LevelHelpers.discard_village_trade_trail_line(lines_root, _village_trail_line)
+	else:
+		_village_trail_line.queue_free()
+	_village_trail_line = null
+	_village_trail_finalized = true
+
+
+func _despawn(finalize_trail := true) -> void:
+	if _despawn_pending:
+		return
+	_despawn_pending = true
+	_notify_liquidity_origin_finished()
+	hide_trade_visuals_for_cancel(not finalize_trail)
+	if finalize_trail:
+		_finalize_village_trade_trail()
+	else:
+		_discard_village_trade_trail()
 	if is_instance_valid(_pool_owner) and _pool_owner.has_method("_recycle_trade"):
 		_pool_owner._recycle_trade(self)
 	else:
@@ -182,6 +216,51 @@ func _despawn() -> void:
 
 func finish_trade() -> void:
 	_despawn()
+
+
+func _notify_liquidity_origin_finished() -> void:
+	if _liquidity_origin_notified:
+		return
+	_liquidity_origin_notified = true
+	if not Global.to_bool(liquidity_cycle_trade):
+		return
+	if not is_instance_valid(liquidity_cycle_origin_agent):
+		return
+	if not liquidity_cycle_origin_agent.has_method("notify_liquidity_trade_finished"):
+		return
+	liquidity_cycle_origin_agent.call("notify_liquidity_trade_finished", self)
+
+
+func hide_trade_visuals_for_cancel(clear_trail := true) -> void:
+	visible = false
+	var sprite: Node = get_node_or_null("Sprite2D")
+	if sprite is CanvasItem:
+		var sprite_item := sprite as CanvasItem
+		sprite_item.visible = false
+	if is_instance_valid(_count_label):
+		_count_label.visible = false
+		_count_label.text = ""
+	if clear_trail and is_instance_valid(_village_trail_line):
+		_village_trail_line.visible = false
+
+
+func prepare_for_pool() -> void:
+	_notify_liquidity_origin_finished()
+	hide_trade_visuals_for_cancel()
+	liquidity_cycle_origin_agent = null
+	liquidity_cycle_origin_id = 0
+	liquidity_cycle_trade = false
+	set_process(false)
+	_set_physics_delivery_enabled(false)
+
+
+func cancel_trade() -> void:
+	if _delivered:
+		return
+	_delivered = true
+	hide_trade_visuals_for_cancel()
+	_set_physics_delivery_enabled(false)
+	_despawn(false)
 
 
 func _set_physics_delivery_enabled(enabled: bool) -> void:
@@ -199,8 +278,17 @@ func _deliver_to_endpoint() -> void:
 	_update_village_trade_trail()
 	if is_instance_valid(end_agent) and end_agent.has_method("_on_area_entered"):
 		end_agent.call("_on_area_entered", self)
+		call_deferred("_finish_delivered_if_still_active")
 	else:
 		finish_trade()
+
+
+func _finish_delivered_if_still_active() -> void:
+	if not _delivered or _despawn_pending:
+		return
+	if get_parent() == null:
+		return
+	finish_trade()
 
 
 func _is_endpoint_locked(agent: Variant) -> bool:
@@ -258,12 +346,24 @@ func accumulate_trade_amount(extra_amount: int) -> bool:
 	if safe_extra <= 0:
 		return false
 	amount = maxi(int(amount), 1) + safe_extra
+	_visual_amount = amount
+	_refresh_trade_amount_visual()
+	return true
+
+
+func accumulate_visual_amount(extra_amount: int) -> bool:
+	_sync_visual_suppression_from_global()
+	var safe_extra = maxi(extra_amount, 0)
+	if safe_extra <= 0:
+		return false
+	_visual_amount = maxi(_visual_amount, maxi(int(amount), 1)) + safe_extra
 	_refresh_trade_amount_visual()
 	return true
 
 
 func _refresh_trade_amount_visual() -> void:
-	if suppress_trade_visuals or int(amount) < AGGREGATE_LABEL_MIN_AMOUNT:
+	var display_amount = maxi(_visual_amount, maxi(int(amount), 1))
+	if suppress_trade_visuals or display_amount < AGGREGATE_LABEL_MIN_AMOUNT:
 		if is_instance_valid(_count_label):
 			_count_label.visible = false
 		return
@@ -271,7 +371,7 @@ func _refresh_trade_amount_visual() -> void:
 	if not is_instance_valid(_count_label):
 		return
 	_count_label.visible = true
-	_count_label.text = str("x", int(amount))
+	_count_label.text = str("x", display_amount)
 
 
 func _ensure_count_label() -> void:
@@ -309,6 +409,7 @@ func _step_axis_toward(current: float, target: float, max_step: float) -> float:
 func _process(delta: float) -> void:
 	_sync_visual_suppression_from_global()
 	if _delivered:
+		_finish_delivered_if_still_active()
 		return
 	if not is_instance_valid(end_agent):
 		_despawn()

@@ -80,7 +80,7 @@ func _is_headless_runtime() -> bool:
 func _mute_runtime_audio_if_headless() -> void:
 	if not _is_headless_runtime():
 		return
-	LevelHelpersRef.stop_audio_players([
+	LevelHelpers.stop_audio_players([
 		$BirdSound,
 		$BirdLong,
 		_predator_bird_sound_player,
@@ -119,7 +119,7 @@ func play_inventory_harvest_sound(item_type: String, world_pos: Vector2 = Vector
 func _ensure_tuktuk_engine_sound_player() -> AudioStreamPlayer:
 	if is_instance_valid(_tuktuk_engine_sound_player):
 		return _tuktuk_engine_sound_player
-	var stream: AudioStream = LevelHelpersRef.load_tuktuk_engine_stream(TUKTUK_ENGINE_SOUND_PATH)
+	var stream: AudioStream = LevelHelpers.load_tuktuk_engine_stream(TUKTUK_ENGINE_SOUND_PATH)
 	if stream == null:
 		return null
 	var player := AudioStreamPlayer.new()
@@ -268,7 +268,7 @@ func play_tuktuk_entry_sound() -> void:
 func _ensure_predator_bird_sound_player() -> AudioStreamPlayer:
 	if is_instance_valid(_predator_bird_sound_player):
 		return _predator_bird_sound_player
-	var stream: AudioStream = LevelHelpersRef.load_looping_audio_stream(PREDATOR_BIRD_SOUND_PATH)
+	var stream: AudioStream = LevelHelpers.load_looping_audio_stream(PREDATOR_BIRD_SOUND_PATH)
 	if stream == null:
 		return null
 	var player := AudioStreamPlayer.new()
@@ -429,7 +429,7 @@ func _set_tutorial_panel_color(color: Color) -> void:
 
 
 func _resolve_tile_spawn_pos(pos: Vector2) -> Vector2:
-	return LevelHelpersRef.resolve_snapped_spawn_position(self, $Agents, pos)
+	return LevelHelpers.resolve_snapped_spawn_position(self, $Agents, pos)
 
 
 func _resolve_exact_tile_spawn_pos(pos: Vector2, ignore_agent: Variant = null) -> Dictionary:
@@ -446,7 +446,7 @@ func _resolve_exact_tile_spawn_pos(pos: Vector2, ignore_agent: Variant = null) -
 	if not world.in_bounds(coord):
 		result["ok"] = false
 		return result
-	if LevelHelpersRef.is_tile_occupied(self, $Agents, coord, ignore_agent, true):
+	if LevelHelpers.is_tile_occupied(self, $Agents, coord, ignore_agent, true):
 		result["ok"] = false
 		return result
 	result["pos"] = world.tile_to_world_center(coord)
@@ -526,7 +526,7 @@ func _find_replaceable_agent_at_world_pos(pos: Vector2, ignore_agent: Variant = 
 			continue
 		if not Global.to_bool(agent.get("killable")):
 			continue
-		var occupied_tiles = LevelHelpersRef.get_agent_occupied_tiles(self, agent)
+		var occupied_tiles = LevelHelpers.get_agent_occupied_tiles(self, agent)
 		if occupied_tiles.has(coord):
 			return agent
 	return null
@@ -546,8 +546,8 @@ func request_all_agents_dirty() -> void:
 
 
 func mark_agent_moved(agent: Variant, old_pos: Vector2, new_pos: Vector2) -> void:
-	LevelHelpersRef.mark_agents_dirty_for_movement(self, $Agents, agent, old_pos, new_pos)
-	LevelHelpersRef.sync_agent_occupancy(self, agent)
+	LevelHelpers.mark_agents_dirty_for_movement(self, $Agents, agent, old_pos, new_pos)
+	LevelHelpers.sync_agent_occupancy(self, agent)
 
 
 func _process_dirty_queues() -> void:
@@ -651,21 +651,21 @@ func _ready():
 
 	var bi_k_myco = make_bi_k_myco(bi_myco_k_position)
 
-	LevelHelpersRef.rebuild_world_occupancy_cache(self, $Agents)
+	LevelHelpers.rebuild_world_occupancy_cache(self, $Agents)
 	request_all_agents_dirty()
 	_process_dirty_queues()
 	
 			
 func _is_android_back_input(event: InputEvent) -> bool:
-	return LevelHelpersRef.is_android_back_input(event)
+	return LevelHelpers.is_android_back_input(event)
 
 
 func _handle_android_back_request(event: InputEvent) -> bool:
-	return LevelHelpersRef.handle_android_back_request(self, event)
+	return LevelHelpers.handle_android_back_request(self, event)
 
 
 func _is_keyboard_escape_input(event: InputEvent) -> bool:
-	return LevelHelpersRef.is_keyboard_escape_input(event)
+	return LevelHelpers.is_keyboard_escape_input(event)
 
 
 func _on_ui_request_back_to_menu() -> void:
@@ -686,9 +686,9 @@ func toggle_bank_hotkey() -> void:
 
 
 func _input(event):
-	if LevelHelpersRef.handle_level_back_or_escape_input(self, event):
+	if LevelHelpers.handle_level_back_or_escape_input(self, event):
 		return
-	if LevelHelpersRef.handle_gameplay_hotkeys(event, self, $Agents, true):
+	if LevelHelpers.handle_gameplay_hotkeys(event, self, $Agents, true):
 		return
 
 
@@ -698,7 +698,7 @@ func _process(_delta: float) -> void:
 	var world_node: Node = _get_world_foundation()
 	var camera_user_panning := is_instance_valid(world_node) and world_node.has_method("is_camera_user_panning") and Global.to_bool(world_node.call("is_camera_user_panning"))
 	if not Global.is_mobile_platform and not camera_user_panning:
-		LevelHelpersRef.update_agent_hover_focus(self, $Agents)
+		LevelHelpers.update_agent_hover_focus(self, $Agents)
 	_dirty_refresh_accum += _delta
 	if _dirty_refresh_accum >= Global.get_dirty_refresh_interval():
 		_dirty_refresh_accum = 0.0
@@ -706,11 +706,11 @@ func _process(_delta: float) -> void:
 	_line_visual_refresh_accum += _delta
 	if _line_visual_refresh_accum >= Global.get_line_visual_refresh_interval():
 		_line_visual_refresh_accum = 0.0
-		LevelHelpersRef.refresh_trade_line_visuals($Lines)
+		LevelHelpers.refresh_trade_line_visuals($Lines)
 
 
 func _on_inventory_drag_preview(agent_name: String, world_pos: Vector2, active: bool) -> void:
-	LevelHelpersRef.update_inventory_connection_preview(self, $Agents, $Lines, inventory_preview_lines, agent_name, world_pos, active)
+	LevelHelpers.update_inventory_connection_preview(self, $Agents, $Lines, inventory_preview_lines, agent_name, world_pos, active)
 				
 				
 				
@@ -786,7 +786,11 @@ func _spawn_trade(path_dict) -> void:
 	else:
 		trade.set_variables(trade_dict)
 	$Trades.add_child(trade)
+	Global.perf_count_trade_spawn_category(trade_dict.get("from_agent", null), trade_dict.get("to_agent", null))
 	_register_trade_visual_packet(trade)
+	var liquidity_origin = trade_dict.get("liquidity_cycle_origin_agent", null)
+	if Global.to_bool(trade_dict.get("liquidity_cycle_trade", false)) and is_instance_valid(liquidity_origin) and liquidity_origin.has_method("notify_liquidity_trade_spawned"):
+		liquidity_origin.call("notify_liquidity_trade_spawned", trade)
 	
 func update_bars(path_dict)  -> void:
 	if is_instance_valid(Global.active_agent) and is_instance_valid(path_dict["from_agent"]) and is_instance_valid(path_dict["to_agent"]):  
@@ -856,7 +860,7 @@ func _on_new_agent(agent_dict) -> void:
 			if replace_target.has_method("kill_it"):
 				replace_target.kill_it()
 			else:
-				LevelHelpersRef.unregister_agent_occupancy(self, replace_target)
+				LevelHelpers.unregister_agent_occupancy(self, replace_target)
 				replace_target.call_deferred("queue_free")
 			require_exact_tile = true
 	if require_exact_tile:
@@ -888,21 +892,21 @@ func _on_new_agent(agent_dict) -> void:
 	
 	if is_instance_valid(new_agent):
 		if agent_dict.has("spawn_anchor"):
-			LevelHelpersRef.ensure_spawn_buddy_link(new_agent, agent_dict["spawn_anchor"])
-		LevelHelpersRef.sync_agent_occupancy(self, new_agent)
+			LevelHelpers.ensure_spawn_buddy_link(new_agent, agent_dict["spawn_anchor"])
+		LevelHelpers.sync_agent_occupancy(self, new_agent)
 		Global.apply_perf_density_gate($Agents.get_child_count())
 		request_all_agents_dirty()
 		new_agent.peak_maturity = 4
 	if(Global.active_agent == null and not Global.prevent_auto_select):
 		Global.active_agent = new_agent
-		LevelHelpersRef.refresh_agent_bar_visibility($Agents)
+		LevelHelpers.refresh_agent_bar_visibility($Agents)
 func make_squash(pos):
 	#print("Clicked On Squash. making")
 	
 	var squash_position = _resolve_tile_spawn_pos(pos)
 	
-	var named = LevelHelpersRef.make_agent_name("Squash", $Agents)
-	var squash_dict = LevelHelpersRef.build_agent_setup_dict(named, "squash", squash_position, ["P"], TEX_SQUASH)
+	var named = LevelHelpers.make_agent_name("Squash", $Agents)
+	var squash_dict = LevelHelpers.build_agent_setup_dict(named, "squash", squash_position, ["P"], TEX_SQUASH)
 	
 	var squash = socialagent_scene.instantiate()
 	
@@ -910,8 +914,8 @@ func make_squash(pos):
 	#squash.needs["R"]=0
 	$Agents.add_child(squash)
 	squash.buddy_radius = Global.social_buddy_radius
-	LevelHelpersRef.connect_core_agent_signals(squash, _on_agent_trade, _on_new_agent, _on_update_score)
-	LevelHelpersRef.sync_agent_occupancy(self, squash)
+	LevelHelpers.connect_core_agent_signals(squash, _on_agent_trade, _on_new_agent, _on_update_score)
+	LevelHelpers.sync_agent_occupancy(self, squash)
 	request_all_agents_dirty()
 	
 	return squash
@@ -921,19 +925,19 @@ func make_tree(pos):
 	
 	var tree_position = _resolve_tile_spawn_pos(pos)
 	
-	var named = LevelHelpersRef.make_agent_name("Tree", $Agents)
-	var tree_dict = LevelHelpersRef.build_agent_setup_dict(named, "tree", tree_position, ["R"], TEX_TREE)
+	var named = LevelHelpers.make_agent_name("Tree", $Agents)
+	var tree_dict = LevelHelpers.build_agent_setup_dict(named, "tree", tree_position, ["R"], TEX_TREE)
 	var tree = socialagent_scene.instantiate()
 	#tree.needs["R"] = 40
 	tree.set_variables(tree_dict)
 	#tree.needs["R"]=20
 	$Agents.add_child(tree)
-	tree.position = LevelHelpersRef.resolve_snapped_position_for_agent(self, $Agents, tree, tree_position)
+	tree.position = LevelHelpers.resolve_snapped_position_for_agent(self, $Agents, tree, tree_position)
 	tree.buddy_radius = Global.social_buddy_radius
 	tree.draggable = false
 	tree.killable = false
-	LevelHelpersRef.connect_core_agent_signals(tree, _on_agent_trade, _on_new_agent, _on_update_score)
-	LevelHelpersRef.sync_agent_occupancy(self, tree)
+	LevelHelpers.connect_core_agent_signals(tree, _on_agent_trade, _on_new_agent, _on_update_score)
+	LevelHelpers.sync_agent_occupancy(self, tree)
 	request_all_agents_dirty()
 	return tree
 	
@@ -955,14 +959,14 @@ func _spawn_bird():
 func make_maize(pos):
 	var maize_position = _resolve_tile_spawn_pos(pos)
 	
-	var named = LevelHelpersRef.make_agent_name("Maize", $Agents)
-	var maize_dict = LevelHelpersRef.build_agent_setup_dict(named, "maize", maize_position, ["K"], TEX_MAIZE)
+	var named = LevelHelpers.make_agent_name("Maize", $Agents)
+	var maize_dict = LevelHelpers.build_agent_setup_dict(named, "maize", maize_position, ["K"], TEX_MAIZE)
 	var maize = socialagent_scene.instantiate()
 	maize.set_variables(maize_dict)
 	$Agents.add_child(maize)
 	maize.buddy_radius = Global.social_buddy_radius
-	LevelHelpersRef.connect_core_agent_signals(maize, _on_agent_trade, _on_new_agent, _on_update_score)
-	LevelHelpersRef.sync_agent_occupancy(self, maize)
+	LevelHelpers.connect_core_agent_signals(maize, _on_agent_trade, _on_new_agent, _on_update_score)
+	LevelHelpers.sync_agent_occupancy(self, maize)
 	request_all_agents_dirty()
 	
 	return maize
@@ -971,16 +975,16 @@ func make_bean(pos):
 	
 	var bean_position = _resolve_tile_spawn_pos(pos)
 	
-	var named = LevelHelpersRef.make_agent_name("Bean", $Agents)
-	var bean_dict = LevelHelpersRef.build_agent_setup_dict(named, "bean", bean_position, ["N"], TEX_BEAN)
+	var named = LevelHelpers.make_agent_name("Bean", $Agents)
+	var bean_dict = LevelHelpers.build_agent_setup_dict(named, "bean", bean_position, ["N"], TEX_BEAN)
 	var bean = socialagent_scene.instantiate()
 	
 	bean.set_variables(bean_dict)
 	#bean.needs["R"]=0
 	$Agents.add_child(bean)
 	bean.buddy_radius = Global.social_buddy_radius
-	LevelHelpersRef.connect_core_agent_signals(bean, _on_agent_trade, _on_new_agent, _on_update_score)
-	LevelHelpersRef.sync_agent_occupancy(self, bean)
+	LevelHelpers.connect_core_agent_signals(bean, _on_agent_trade, _on_new_agent, _on_update_score)
+	LevelHelpers.sync_agent_occupancy(self, bean)
 	request_all_agents_dirty()
 	
 	return bean
@@ -989,8 +993,8 @@ func make_bean(pos):
 func make_myco(pos):
 	var myco_position = _resolve_tile_spawn_pos(pos)
 	
-	var named = LevelHelpersRef.make_agent_name("Myco_Basket", $Agents, "")
-	var myco_dict = LevelHelpersRef.build_agent_setup_dict(named, "myco", myco_position, [null], TEX_BASKET)
+	var named = LevelHelpers.make_agent_name("Myco_Basket", $Agents, "")
+	var myco_dict = LevelHelpers.build_agent_setup_dict(named, "myco", myco_position, [null], TEX_BASKET)
 	
 	var basket = basket_scene.instantiate()
 	basket.set_variables(myco_dict)
@@ -1000,7 +1004,7 @@ func make_myco(pos):
 	
 	if basket.has_signal("trade"):
 		basket.connect("trade", _on_agent_trade)
-	LevelHelpersRef.sync_agent_occupancy(self, basket)
+	LevelHelpers.sync_agent_occupancy(self, basket)
 	request_all_agents_dirty()
 	
 	return basket
@@ -1021,8 +1025,8 @@ func make_bi_k_myco(pos):
 func _make_bi_myco(pos: Vector2, asset_key: String):
 	var myco_position = _resolve_tile_spawn_pos(pos)
 	
-	var named = LevelHelpersRef.make_agent_name(str("Bi-", asset_key, "-Mycorrhizal"), $Agents)
-	var myco_dict = LevelHelpersRef.build_agent_setup_dict(named, "myco", myco_position, [null], TEX_BASKET)
+	var named = LevelHelpers.make_agent_name(str("Bi-", asset_key, "-Mycorrhizal"), $Agents)
+	var myco_dict = LevelHelpers.build_agent_setup_dict(named, "myco", myco_position, [null], TEX_BASKET)
 	
 	var basket = basket_scene.instantiate()
 	basket.assets = {
@@ -1042,7 +1046,7 @@ func _make_bi_myco(pos: Vector2, asset_key: String):
 	
 	if basket.has_signal("trade"):
 		basket.connect("trade", _on_agent_trade)
-	LevelHelpersRef.sync_agent_occupancy(self, basket)
+	LevelHelpers.sync_agent_occupancy(self, basket)
 	request_all_agents_dirty()
 	
 	return basket
@@ -1199,9 +1203,9 @@ func _release_audio() -> void:
 	if is_instance_valid(_predator_bird_fade_tween):
 		_predator_bird_fade_tween.kill()
 		_predator_bird_fade_tween = null
-	LevelHelpersRef.clear_trade_line_cache($Lines, true)
-	LevelHelpersRef.clear_inventory_connection_preview_lines(inventory_preview_lines, true)
-	LevelHelpersRef.stop_audio_players([
+	LevelHelpers.clear_trade_line_cache($Lines, true)
+	LevelHelpers.clear_inventory_connection_preview_lines(inventory_preview_lines, true)
+	LevelHelpers.stop_audio_players([
 		$BirdSound,
 		$BirdLong,
 		_predator_bird_sound_player,

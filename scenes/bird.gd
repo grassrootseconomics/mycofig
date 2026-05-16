@@ -121,16 +121,19 @@ func _try_switch_to_preferred_acorn() -> bool:
 	return true
 
 
-func _release_reserved_harvest_target(release_target: Node = null) -> void:
-	var target_to_release = release_target
+func _release_reserved_harvest_target(release_target: Variant = null) -> void:
+	var target_to_release: Variant = release_target
 	if not is_instance_valid(target_to_release):
 		target_to_release = _reserved_harvest_target
 	if not is_instance_valid(target_to_release):
+		_reserved_harvest_target = null
 		return
 	var level_root = _get_level_root()
 	if is_instance_valid(level_root) and level_root.has_method("bird_release_harvest_target"):
 		level_root.call("bird_release_harvest_target", self, target_to_release)
-	if target_to_release == _reserved_harvest_target:
+	if not is_instance_valid(_reserved_harvest_target):
+		_reserved_harvest_target = null
+	elif target_to_release == _reserved_harvest_target:
 		_reserved_harvest_target = null
 
 

@@ -43,8 +43,8 @@ Add `--bars` to profile worst-case resource bars, or `--no-lines` to isolate sim
 - Stable Android package/application ID:
   - `org.grassecon.socialsoil`
 - Version contract:
-  - `versionName`: `1.2.3` (from `project.godot` + preset override)
-  - `versionCode`: `13` (must be incremented before each Play upload)
+  - `versionName`: `1.2.4` (from `project.godot` + preset override)
+  - `versionCode`: `16` (must be incremented before each Play upload)
 
 Local test export:
 
@@ -79,7 +79,7 @@ Choose mode from title screen:
 - `Challenge`
 
 `Story` uses one continuous map flow (farm to village) with fog-of-war.  
-`Challenge` stays plants-only survival without story fog gating.
+`Challenge` includes the plant survival loop plus a revealed village economy without story fog gating. In the village economy, `R` is money: farmers sell harvested `N`, vendors sell produced `P`, cooks sell produced `K`, and the bank targets a fixed `6` each of `N/P/K` as bridge stock.
 
 ## Controls
 - `Left Click`: drag entities and place inventory items.

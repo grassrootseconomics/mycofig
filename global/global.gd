@@ -44,8 +44,28 @@ var perf_quality_override = -1
 var perf_metrics_enabled = false
 var perf_tier = 0
 var perf_soil_tiles_touched_last_tick = 0
+var perf_soil_active_tiles_touched_last_tick = 0
 var perf_soil_tick_ms_last = 0.0
+var perf_soil_full_map_fallback_last = false
 var perf_tile_occupancy_queries = 0
+var perf_village_liquidity_source_checks = 0
+var perf_village_liquidity_direct_candidate_scans = 0
+var perf_village_liquidity_inflight_scans = 0
+var perf_village_liquidity_emitted_trades = 0
+var perf_village_liquidity_dropped_queues = 0
+const PERF_VILLAGE_TRADE_CATEGORIES := [
+	"villager_to_villager",
+	"villager_to_bank",
+	"bank_to_villager",
+	"villager_to_basket",
+	"basket_to_villager"
+]
+var perf_trade_spawn_category_counts := {}
+var perf_farmer_harvest_started = 0
+var perf_farmer_harvest_picked_up = 0
+var perf_farmer_harvest_completed = 0
+var perf_farmer_harvest_waiting_no_target = 0
+var perf_farmer_harvest_cancelled = 0
 var perf_last_sample = {}
 var perf_run_metadata = {}
 const PERF_DENSITY_TIER1_AGENT_COUNT := 260
@@ -144,6 +164,19 @@ var trade_visual_suppression_min_tier := 2
 var trade_visual_per_link_cap_t0 := 4
 var trade_visual_per_link_cap_t1 := 3
 var trade_visual_per_link_cap_t2 := 2
+var village_trade_visual_fade_seconds_t0 := 3.0
+var village_trade_visual_fade_seconds_t1 := 1.5
+var village_trade_visual_fade_seconds_t2 := 0.5
+var village_trade_trail_cap_t0 := 36
+var village_trade_trail_cap_t1 := 16
+var village_trade_trail_cap_t2 := 0
+var village_trade_pair_cap_t0 := 36
+var village_trade_pair_cap_t1 := 12
+var village_trade_pair_cap_t2 := 0
+var village_trade_visual_per_link_cap_t0 := 1
+var village_trade_visual_per_link_cap_t1 := 1
+var village_trade_visual_per_link_cap_t2 := 1
+var soil_dirty_active_tick_enabled := true
 var _trade_sender_buckets: Dictionary = {}
 var _trade_link_buckets: Dictionary = {}
 
@@ -163,7 +196,8 @@ var is_birding = true
 var is_killing = true
 var is_max_babies = true
 var challenge_dual_village_enabled = true
-var villager_r_buffer_target := 1
+var villager_r_buffer_target := 10
+var village_bank_bootstrap_nutrient_target := 6
 var villager_surplus_dominance_margin := 1
 var villager_r_medium_only := true
 var story_farmer_inbound_wait_timeout_sec := 1.8
@@ -727,6 +761,46 @@ func get_trade_visual_link_packet_cap() -> int:
 			return maxi(trade_visual_per_link_cap_t0, 1)
 
 
+func get_village_trade_visual_fade_seconds() -> float:
+	match get_effective_perf_tier():
+		1:
+			return maxf(village_trade_visual_fade_seconds_t1, 0.1)
+		2:
+			return maxf(village_trade_visual_fade_seconds_t2, 0.1)
+		_:
+			return maxf(village_trade_visual_fade_seconds_t0, 0.1)
+
+
+func get_village_trade_trail_cap() -> int:
+	match get_effective_perf_tier():
+		1:
+			return maxi(village_trade_trail_cap_t1, 0)
+		2:
+			return maxi(village_trade_trail_cap_t2, 0)
+		_:
+			return maxi(village_trade_trail_cap_t0, 0)
+
+
+func get_village_trade_pair_cap() -> int:
+	match get_effective_perf_tier():
+		1:
+			return maxi(village_trade_pair_cap_t1, 0)
+		2:
+			return maxi(village_trade_pair_cap_t2, 0)
+		_:
+			return maxi(village_trade_pair_cap_t0, 0)
+
+
+func get_village_trade_visual_link_packet_cap() -> int:
+	match get_effective_perf_tier():
+		1:
+			return maxi(village_trade_visual_per_link_cap_t1, 1)
+		2:
+			return maxi(village_trade_visual_per_link_cap_t2, 1)
+		_:
+			return maxi(village_trade_visual_per_link_cap_t0, 1)
+
+
 func should_suppress_trade_visuals() -> bool:
 	if not trade_visual_suppression_enabled:
 		return false
@@ -869,6 +943,121 @@ func perf_consume_tile_occupancy_queries() -> int:
 	return consumed
 
 
+func perf_count_village_liquidity_source_check(count: int = 1) -> void:
+	perf_village_liquidity_source_checks += maxi(count, 0)
+
+
+func perf_count_village_liquidity_direct_candidate_scan(count: int = 1) -> void:
+	perf_village_liquidity_direct_candidate_scans += maxi(count, 0)
+
+
+func perf_count_village_liquidity_inflight_scan(count: int = 1) -> void:
+	perf_village_liquidity_inflight_scans += maxi(count, 0)
+
+
+func perf_count_village_liquidity_emitted_trade(count: int = 1) -> void:
+	perf_village_liquidity_emitted_trades += maxi(count, 0)
+
+
+func perf_count_village_liquidity_dropped_queue(count: int = 1) -> void:
+	perf_village_liquidity_dropped_queues += maxi(count, 0)
+
+
+func perf_make_trade_category_counts() -> Dictionary:
+	var counts := {}
+	for category in PERF_VILLAGE_TRADE_CATEGORIES:
+		counts[category] = 0
+	return counts
+
+
+func perf_get_agent_trade_role(agent: Variant) -> String:
+	if not is_instance_valid(agent):
+		return "none"
+	var script = agent.get_script()
+	if script != null and str(script.resource_path).ends_with("/basket.gd"):
+		return "basket"
+	var agent_type = str(agent.get("type"))
+	if agent_type == "farmer" or agent_type == "vendor" or agent_type == "cook":
+		return "villager"
+	if agent_type == "bank":
+		return "bank"
+	return agent_type
+
+
+func perf_get_trade_endpoint_category(from_agent: Variant, to_agent: Variant) -> String:
+	var category = str(perf_get_agent_trade_role(from_agent), "_to_", perf_get_agent_trade_role(to_agent))
+	if PERF_VILLAGE_TRADE_CATEGORIES.has(category):
+		return category
+	return ""
+
+
+func perf_count_trade_spawn_category(from_agent: Variant, to_agent: Variant, count: int = 1) -> void:
+	var category = perf_get_trade_endpoint_category(from_agent, to_agent)
+	if category == "":
+		return
+	perf_trade_spawn_category_counts[category] = int(perf_trade_spawn_category_counts.get(category, 0)) + maxi(count, 0)
+
+
+func perf_consume_trade_spawn_category_counts() -> Dictionary:
+	var consumed = perf_make_trade_category_counts()
+	for category in PERF_VILLAGE_TRADE_CATEGORIES:
+		consumed[category] = int(perf_trade_spawn_category_counts.get(category, 0))
+	perf_trade_spawn_category_counts.clear()
+	return consumed
+
+
+func perf_count_farmer_harvest_started(count: int = 1) -> void:
+	perf_farmer_harvest_started += maxi(count, 0)
+
+
+func perf_count_farmer_harvest_picked_up(count: int = 1) -> void:
+	perf_farmer_harvest_picked_up += maxi(count, 0)
+
+
+func perf_count_farmer_harvest_completed(count: int = 1) -> void:
+	perf_farmer_harvest_completed += maxi(count, 0)
+
+
+func perf_count_farmer_harvest_waiting_no_target(count: int = 1) -> void:
+	perf_farmer_harvest_waiting_no_target += maxi(count, 0)
+
+
+func perf_count_farmer_harvest_cancelled(count: int = 1) -> void:
+	perf_farmer_harvest_cancelled += maxi(count, 0)
+
+
+func perf_consume_farmer_harvest_counters() -> Dictionary:
+	var consumed = {
+		"farmer_harvest_started": perf_farmer_harvest_started,
+		"farmer_harvest_picked_up": perf_farmer_harvest_picked_up,
+		"farmer_harvest_completed": perf_farmer_harvest_completed,
+		"farmer_harvest_waiting_no_target": perf_farmer_harvest_waiting_no_target,
+		"farmer_harvest_cancelled": perf_farmer_harvest_cancelled
+	}
+	perf_farmer_harvest_started = 0
+	perf_farmer_harvest_picked_up = 0
+	perf_farmer_harvest_completed = 0
+	perf_farmer_harvest_waiting_no_target = 0
+	perf_farmer_harvest_cancelled = 0
+	return consumed
+
+
+func perf_consume_village_liquidity_counters() -> Dictionary:
+	var consumed = {
+		"village_liquidity_source_checks": perf_village_liquidity_source_checks,
+		"village_liquidity_direct_candidate_scans": perf_village_liquidity_direct_candidate_scans,
+		"village_liquidity_inflight_scans": perf_village_liquidity_inflight_scans,
+		"village_liquidity_emitted_trades": perf_village_liquidity_emitted_trades,
+		"village_liquidity_dropped_queues": perf_village_liquidity_dropped_queues
+	}
+	perf_village_liquidity_source_checks = 0
+	perf_village_liquidity_direct_candidate_scans = 0
+	perf_village_liquidity_inflight_scans = 0
+	perf_village_liquidity_emitted_trades = 0
+	perf_village_liquidity_dropped_queues = 0
+	return consumed
+
+
 func perf_set_soil_tiles_touched(count: int) -> void:
 	perf_soil_tiles_touched_last_tick = maxi(count, 0)
 
@@ -879,6 +1068,16 @@ func perf_consume_soil_tiles_touched() -> int:
 	return consumed
 
 
+func perf_set_soil_active_tiles_touched(count: int) -> void:
+	perf_soil_active_tiles_touched_last_tick = maxi(count, 0)
+
+
+func perf_consume_soil_active_tiles_touched() -> int:
+	var consumed = perf_soil_active_tiles_touched_last_tick
+	perf_soil_active_tiles_touched_last_tick = 0
+	return consumed
+
+
 func perf_set_soil_tick_ms(ms: float) -> void:
 	perf_soil_tick_ms_last = maxf(ms, 0.0)
 
@@ -886,6 +1085,16 @@ func perf_set_soil_tick_ms(ms: float) -> void:
 func perf_consume_soil_tick_ms() -> float:
 	var consumed = perf_soil_tick_ms_last
 	perf_soil_tick_ms_last = 0.0
+	return consumed
+
+
+func perf_set_soil_full_map_fallback(enabled: bool) -> void:
+	perf_soil_full_map_fallback_last = enabled
+
+
+func perf_consume_soil_full_map_fallback() -> bool:
+	var consumed = perf_soil_full_map_fallback_last
+	perf_soil_full_map_fallback_last = false
 	return consumed
 
 

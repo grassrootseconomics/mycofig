@@ -647,7 +647,7 @@ func _is_tile_occupied_focus_hit(world_pos: Vector2) -> bool:
 	var coord = Vector2i(world.world_to_tile(_clamp_position_to_world_rect(world_pos)))
 	if not world.in_bounds(coord):
 		return false
-	var occupied_tiles = LevelHelpersRef.get_agent_occupied_tiles(level_root, self)
+	var occupied_tiles = LevelHelpers.get_agent_occupied_tiles(level_root, self)
 	return occupied_tiles.has(coord)
 
 
@@ -668,7 +668,7 @@ func _get_focus_distance_squared(world_pos: Vector2) -> float:
 	if not (world.has_method("world_to_tile") and world.has_method("tile_to_world_center")):
 		return global_position.distance_squared_to(world_pos)
 	var best_dist = global_position.distance_squared_to(world_pos)
-	for coord in LevelHelpersRef.get_agent_occupied_tiles(level_root, self):
+	for coord in LevelHelpers.get_agent_occupied_tiles(level_root, self):
 		var center = world.tile_to_world_center(coord)
 		best_dist = minf(best_dist, center.distance_squared_to(world_pos))
 	return best_dist
@@ -715,7 +715,7 @@ func _is_preferred_pointer_focus(screen_pos: Vector2) -> bool:
 	var agents_root = get_parent()
 	if not is_instance_valid(level_root) or not is_instance_valid(agents_root):
 		return true
-	var focus_agent = LevelHelpersRef.resolve_focus_agent_at_screen_pos(level_root, agents_root, screen_pos)
+	var focus_agent = LevelHelpers.resolve_focus_agent_at_screen_pos(level_root, agents_root, screen_pos)
 	return not is_instance_valid(focus_agent) or focus_agent == self
 
 
@@ -747,7 +747,7 @@ func _activate_resource_bars_for_interaction() -> void:
 	Global.prevent_auto_select = false
 	var level_root = _get_level_root()
 	if is_instance_valid(level_root):
-		LevelHelpersRef.set_hover_focus_agent(level_root, self)
+		LevelHelpers.set_hover_focus_agent(level_root, self)
 	else:
 		set_hover_focus(true)
 	_refresh_all_agent_bar_visibility()
@@ -875,7 +875,7 @@ func _get_agents_root() -> Node:
 func _refresh_all_agent_bar_visibility() -> void:
 	var agents_root = _get_agents_root()
 	if is_instance_valid(agents_root):
-		LevelHelpersRef.refresh_agent_bar_visibility(agents_root)
+		LevelHelpers.refresh_agent_bar_visibility(agents_root)
 
 
 func _queue_dirty_update(buddies: bool = true, lines: bool = true, tile_hint: bool = false) -> void:
@@ -894,7 +894,7 @@ func _sync_occupancy_cache() -> void:
 	var level_root = _get_level_root()
 	if not is_instance_valid(level_root):
 		return
-	LevelHelpersRef.sync_agent_occupancy(level_root, self)
+	LevelHelpers.sync_agent_occupancy(level_root, self)
 
 
 func _uses_tile_snap() -> bool:
@@ -930,7 +930,7 @@ func _is_tile_occupied(_world: Node, coord: Vector2i) -> bool:
 	var agents_root = _get_agents_root()
 	if not is_instance_valid(level_root) or not is_instance_valid(agents_root):
 		return false
-	return LevelHelpersRef.is_tile_occupied(level_root, agents_root, coord, self)
+	return LevelHelpers.is_tile_occupied(level_root, agents_root, coord, self)
 
 
 func _can_place_on_tile(coord: Vector2i, sprite_scale_override: Variant = null) -> bool:
@@ -942,7 +942,7 @@ func _can_place_on_tile(coord: Vector2i, sprite_scale_override: Variant = null) 
 	if not is_instance_valid(world) or not is_instance_valid(level_root) or not is_instance_valid(agents_root):
 		return true
 	var clamped_coord = _clamp_tile_coord(world, coord)
-	return LevelHelpersRef.can_place_agent_on_tile(level_root, agents_root, self, clamped_coord, self, sprite_scale_override)
+	return LevelHelpers.can_place_agent_on_tile(level_root, agents_root, self, clamped_coord, self, sprite_scale_override)
 
 
 func _can_lifecycle_spawn_on_soil(world: Node, coord: Vector2i) -> bool:
@@ -1221,7 +1221,7 @@ func _clear_active_selection_if_self() -> void:
 		return
 	var level_root = _get_level_root()
 	if is_instance_valid(level_root):
-		LevelHelpersRef.clear_focus_outline_if_owner(level_root, self)
+		LevelHelpers.clear_focus_outline_if_owner(level_root, self)
 	Global.active_agent = null
 	Global.prevent_auto_select = true
 	_refresh_all_agent_bar_visibility()
@@ -1351,8 +1351,8 @@ func _get_lifecycle_spawn_anchor() -> Variant:
 	if not _can_share_story_trade_network(anchor):
 		return null
 	var level_root = _get_level_root()
-	if LevelHelpersRef._supports_tile_world(level_root):
-		if not LevelHelpersRef.are_agents_in_tile_reach(level_root, self, anchor, true):
+	if LevelHelpers._supports_tile_world(level_root):
+		if not LevelHelpers.are_agents_in_tile_reach(level_root, self, anchor, true):
 			return null
 	else:
 		var reach = anchor.get("buddy_radius")
@@ -1425,8 +1425,8 @@ func _restore_in_reach_village_hub_buddies() -> void:
 		if not _can_share_story_trade_network(candidate):
 			continue
 		var in_reach := false
-		if LevelHelpersRef._supports_tile_world(level_root):
-			in_reach = LevelHelpersRef.are_agents_in_shared_tile_reach(level_root, self, candidate)
+		if LevelHelpers._supports_tile_world(level_root):
+			in_reach = LevelHelpers.are_agents_in_shared_tile_reach(level_root, self, candidate)
 		else:
 			var candidate_radius = candidate.get("buddy_radius")
 			var candidate_reach = float(candidate_radius) if (typeof(candidate_radius) == TYPE_FLOAT or typeof(candidate_radius) == TYPE_INT) else float(Global.social_buddy_radius)
@@ -1455,8 +1455,8 @@ func _restore_all_in_reach_ecology_myco_buddies() -> void:
 		if not _can_share_story_trade_network(candidate):
 			continue
 		var in_reach := false
-		if LevelHelpersRef._supports_tile_world(level_root):
-			in_reach = LevelHelpersRef.are_agents_in_tile_reach(level_root, self, candidate, true)
+		if LevelHelpers._supports_tile_world(level_root):
+			in_reach = LevelHelpers.are_agents_in_tile_reach(level_root, self, candidate, true)
 		else:
 			var reach = candidate.get("buddy_radius")
 			var max_dist := 0.0
@@ -2300,7 +2300,7 @@ func sort_decending(a, b):
 
 
 func draw_selected_box():
-	LevelHelpersRef.draw_agent_selection_box(_get_level_root(), self)
+	LevelHelpers.draw_agent_selection_box(_get_level_root(), self)
 
 
 
@@ -2463,13 +2463,13 @@ func kill_it():
 	if is_dragging:
 		is_dragging = false
 		Global.is_dragging = false
-	LevelHelpersRef.unregister_agent_occupancy(_get_level_root(), self)
+	LevelHelpers.unregister_agent_occupancy(_get_level_root(), self)
 	self.call_deferred("queue_free")
 	_refresh_tree_harvest_acorn_visual()
 	set_hover_focus(false)
 	var level_root = _get_level_root()
 	if is_instance_valid(level_root):
-		LevelHelpersRef.clear_focus_outline_if_owner(level_root, self)
+		LevelHelpers.clear_focus_outline_if_owner(level_root, self)
 	_clear_active_selection_if_self()
 
 
@@ -2504,7 +2504,7 @@ func _exit_tree() -> void:
 	_hide_resource_bars()
 	_clear_drag_tile_hint()
 	_end_harvest_drag_proxy()
-	LevelHelpersRef.unregister_agent_occupancy(_get_level_root(), self)
+	LevelHelpers.unregister_agent_occupancy(_get_level_root(), self)
 
 
 func _is_trade_dispatch_endpoint_locked(agent: Variant) -> bool:
@@ -2531,6 +2531,8 @@ func _emit_trade_with_budget(path_dict: Dictionary) -> bool:
 		return false
 	if not Global.allow_trade_dispatch(from_agent, to_agent):
 		return false
+	if Global.to_bool(path_dict.get("liquidity_cycle_trade", false)):
+		Global.perf_count_village_liquidity_emitted_trade()
 	emit_signal("trade", path_dict)
 	return true
 
@@ -2692,7 +2694,7 @@ func _process(delta: float) -> void:
 		story_predator_disrupt_timer = maxf(story_predator_disrupt_timer - delta, 0.0)
 	var level_root = _get_level_root()
 	if is_instance_valid(level_root):
-		LevelHelpersRef.clear_focus_outline_if_owner(level_root, self)
+		LevelHelpers.clear_focus_outline_if_owner(level_root, self)
 	if(is_active):
 		var direction = Input.get_vector("left","right","up","down")
 		if direction != Vector2.ZERO and _can_user_reposition():
@@ -2762,7 +2764,7 @@ func _process(delta: float) -> void:
 # Search for things to trade with in tile reach
 func generate_buddies() -> void:
 	var agents_root = get_node_or_null("../../Agents")
-	trade_buddies = LevelHelpersRef.query_trade_hubs_near_agent(_get_level_root(), agents_root, self, num_buddies, true)
+	trade_buddies = LevelHelpers.query_trade_hubs_near_agent(_get_level_root(), agents_root, self, num_buddies, true)
 	_restore_in_reach_village_hub_buddies()
 	_restore_all_in_reach_ecology_myco_buddies()
 	_restore_lifecycle_spawn_anchor_buddy()
@@ -2773,7 +2775,7 @@ func new_draw_line():
 	var agents_root = _get_agents_root()
 	if not is_instance_valid(level_root) or not is_instance_valid(lines_root) or not is_instance_valid(agents_root):
 		return
-	LevelHelpersRef.sync_myco_trade_lines(lines_root, agents_root, Global.social_mode)
+	LevelHelpers.sync_myco_trade_lines(lines_root, agents_root, Global.social_mode)
 
 
 
@@ -3087,7 +3089,7 @@ func _on_body_entered(body: Node2D) -> void:
 
 
 			body.set("going", Vector2(1,randi_range(-1,1)))
-			LevelHelpersRef.unregister_agent_occupancy(_get_level_root(), self)
+			LevelHelpers.unregister_agent_occupancy(_get_level_root(), self)
 			var level_root = _get_level_root()
 			for child in trade_buddies:
 				if not is_instance_valid(child):

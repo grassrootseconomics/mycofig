@@ -94,8 +94,8 @@ func _is_input_suppressed() -> bool:
 
 
 func _clear_mobile_selection_for_pan() -> void:
-	LevelHelpersRef.clear_selection_and_bars(_level_root, _agents_root)
-	LevelHelpersRef.suppress_hover_focus_until_pointer_moves(_level_root)
+	LevelHelpers.clear_selection_and_bars(_level_root, _agents_root)
+	LevelHelpers.suppress_hover_focus_until_pointer_moves(_level_root)
 
 
 func _notification(what: int) -> void:

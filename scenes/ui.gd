@@ -2308,7 +2308,7 @@ func _update_minimap_input_lock() -> void:
 func _refresh_agent_bar_visibility() -> void:
 	var agents_root = _get_agents_root()
 	if is_instance_valid(agents_root):
-		LevelHelpersRef.refresh_agent_bar_visibility(agents_root)
+		LevelHelpers.refresh_agent_bar_visibility(agents_root)
 
 
 func _sync_story_instruction_bar_demo_state() -> void:
@@ -2320,7 +2320,7 @@ func _sync_story_instruction_bar_demo_state() -> void:
 	if not should_show:
 		var agents_root = _get_agents_root()
 		if is_instance_valid(agents_root):
-			LevelHelpersRef.clear_selection_and_bars(get_parent(), agents_root)
+			LevelHelpers.clear_selection_and_bars(get_parent(), agents_root)
 			return
 		Global.bars_on = false
 	_refresh_agent_bar_visibility()
@@ -3685,16 +3685,16 @@ func _set_paused_resource_bar_focus_at(screen_pos: Vector2, persistent: bool = f
 	if not is_instance_valid(level_root) or not is_instance_valid(agents_root):
 		return false
 	if _is_paused_resource_bar_inspect_blocked_at(screen_pos):
-		LevelHelpersRef.set_hover_focus_agent(level_root, null)
+		LevelHelpers.set_hover_focus_agent(level_root, null)
 		return false
-	var focus_agent = LevelHelpersRef.resolve_focus_agent_at_screen_pos(level_root, agents_root, screen_pos)
+	var focus_agent = LevelHelpers.resolve_focus_agent_at_screen_pos(level_root, agents_root, screen_pos)
 	if not is_instance_valid(focus_agent):
-		LevelHelpersRef.set_hover_focus_agent(level_root, null)
+		LevelHelpers.set_hover_focus_agent(level_root, null)
 		return false
 	if persistent and focus_agent.has_method("activate_resource_bars_for_inspection"):
 		focus_agent.call("activate_resource_bars_for_inspection")
 	else:
-		LevelHelpersRef.set_hover_focus_agent(level_root, focus_agent)
+		LevelHelpers.set_hover_focus_agent(level_root, focus_agent)
 	return true
 
 

@@ -1,6 +1,5 @@
 extends Control
 
-const LevelHelpersRef = preload("res://scenes/level_helpers.gd")
 const TITLE_COMPACT_SHORT_EDGE := 640.0
 const TITLE_TINY_SHORT_EDGE := 500.0
 const GE_LOGO_PATH := "res://graphics/ge-logo-horizontal-text.png"
@@ -434,11 +433,44 @@ func _make_title_bird_frames() -> SpriteFrames:
 	return frames
 
 
+func _load_title_looping_audio_stream(asset_path: String) -> AudioStream:
+	if not ResourceLoader.exists(asset_path):
+		push_warning("Missing title looping audio stream: %s" % asset_path)
+		return null
+	var stream: AudioStream = load(asset_path) as AudioStream
+	if stream == null:
+		push_warning("Could not load title looping audio stream: %s" % asset_path)
+		return null
+	if stream is AudioStreamWAV:
+		var wav_stream := stream as AudioStreamWAV
+		wav_stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		wav_stream.loop_begin = 0
+		var loop_end := int(round(wav_stream.get_length() * float(wav_stream.mix_rate)))
+		if loop_end > 0:
+			wav_stream.loop_end = loop_end
+	elif stream is AudioStreamMP3:
+		var mp3_stream := stream as AudioStreamMP3
+		mp3_stream.loop = true
+	return stream
+
+
+func _stop_title_audio_players(players: Array, free_players: bool = false) -> void:
+	for player in players:
+		if not is_instance_valid(player):
+			continue
+		player.stop()
+		player.stream = null
+		if free_players:
+			if player.get_parent() != null:
+				player.get_parent().remove_child(player)
+			player.free()
+
+
 func _ensure_title_loop_player(player_name: String, asset_path: String, silent_volume_db: float) -> AudioStreamPlayer:
 	var existing := get_node_or_null(player_name) as AudioStreamPlayer
 	if is_instance_valid(existing):
 		return existing
-	var stream: AudioStream = LevelHelpersRef.load_looping_audio_stream(asset_path)
+	var stream: AudioStream = _load_title_looping_audio_stream(asset_path)
 	if stream == null:
 		return null
 	var player := AudioStreamPlayer.new()
@@ -972,7 +1004,7 @@ func _reset_title_flyby_visuals() -> void:
 
 
 func _release_title_audio() -> void:
-	LevelHelpersRef.stop_audio_players([
+	_stop_title_audio_players([
 		_title_predator_bird_sound_player,
 		_title_tuktuk_engine_sound_player,
 		_title_basket_land_sound_player

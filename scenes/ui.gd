@@ -53,9 +53,6 @@ const TUTORIAL_PANEL_COLLAPSED_SIZE := Vector2(44, 44)
 const INVENTORY_ICON_PAD_DEFAULT := 4.0
 const INVENTORY_ICON_PAD_BASKET := 7.0
 const INVENTORY_SIDE_BUTTON_BUFFER := 5.0
-const TUTORIAL_LABEL_HORIZONTAL_PADDING := 34.0
-const TUTORIAL_PANEL_TEXT_VERTICAL_PADDING := 44.0
-const TUTORIAL_PANEL_STORY_TEXT_VERTICAL_PADDING := 96.0
 const TUTORIAL_PANEL_MAX_HEIGHT_FRACTION := 0.62
 const TUTORIAL_PANEL_INVENTORY_GAP := 18.0
 const STORY_TUTORIAL_PANEL_EXPANDED_SIZE := Vector2(560, 280)
@@ -65,7 +62,7 @@ const STORY_TUTORIAL_CONTINUE_TEXT := "Let's go!"
 const STORY_TUTORIAL_CHALLENGE_TEXT := "Give me a Challenge!"
 const STORY_TUTORIAL_CONTINUE_GARDENING_TEXT := "Continue Gardening"
 const CHALLENGE_LOSS_CONTINUE_TEXT := "View My Score"
-const STORY_FACTS_BUTTON_SIZE := Vector2(196, 42)
+const STORY_FACTS_BUTTON_SIZE := Vector2(220, 42)
 const STORY_FACTS_PANEL_SIZE := Vector2(640, 430)
 const STORY_FACTS_PANEL_COLOR := Color(0.96, 0.42, 0.08, 0.82)
 const STORY_FACTS_PANEL_BORDER := Color(1.0, 0.86, 0.44, 0.72)
@@ -1758,6 +1755,17 @@ func _get_control_layout_size(control: Control, fallback: Vector2) -> Vector2:
 	return result
 
 
+func _set_control_rect(control: Control, pos: Vector2, size: Vector2) -> void:
+	if not is_instance_valid(control):
+		return
+	control.anchor_left = 0.0
+	control.anchor_top = 0.0
+	control.anchor_right = 0.0
+	control.anchor_bottom = 0.0
+	control.position = Vector2(round(pos.x), round(pos.y))
+	control.size = Vector2(round(maxf(size.x, 1.0)), round(maxf(size.y, 1.0)))
+
+
 func _get_safe_edge_margin() -> float:
 	if _is_tiny_ui():
 		return UI_SAFE_EDGE_MARGIN_TINY
@@ -1974,15 +1982,14 @@ func _estimate_text_height_for_font(text_value: String, font_size: int, width_px
 
 
 func _get_story_facts_adaptive_font_size(text_value: String, area_size: Vector2) -> int:
-	var min_font: int = 15
+	var min_font: int = 12
 	var max_font: int = 28
 	if _is_mobile_landscape_ui():
-		min_font = 20
-		max_font = 26
+		max_font = 22
 	elif _is_tiny_ui():
-		max_font = 24
+		max_font = 21
 	elif _is_compact_ui():
-		max_font = 26
+		max_font = 24
 	var font_size: int = max_font
 	while font_size >= min_font:
 		if _estimate_text_height_for_font(text_value, font_size, area_size.x) <= area_size.y * 0.94:
@@ -1992,21 +1999,148 @@ func _get_story_facts_adaptive_font_size(text_value: String, area_size: Vector2)
 
 
 func _get_tutorial_adaptive_font_size(text_value: String, area_size: Vector2) -> int:
-	var min_font: int = 17
+	var min_font: int = 13
 	var max_font: int = 22
 	if _is_mobile_landscape_ui():
-		min_font = 20
-		max_font = 25
+		min_font = 12
+		max_font = 22
 	elif _is_tiny_ui():
-		max_font = 23
+		min_font = 12
+		max_font = 20
 	elif _is_compact_ui():
-		max_font = 25
+		max_font = 21
 	var font_size: int = max_font
 	while font_size >= min_font:
 		if _estimate_text_height_for_font(text_value, font_size, area_size.x) <= area_size.y * 0.94:
 			return font_size
 		font_size -= 1
 	return min_font
+
+
+func _get_tutorial_content_margin() -> float:
+	if _is_mobile_landscape_ui():
+		return 18.0
+	if _is_tiny_ui():
+		return 16.0
+	if _is_compact_ui():
+		return 18.0
+	return 20.0
+
+
+func _get_tutorial_button_gap() -> float:
+	return 14.0 if _is_mobile_landscape_ui() else 12.0
+
+
+func _get_tutorial_toggle_pad() -> float:
+	return 8.0 if _is_compact_ui() else 6.0
+
+
+func _get_tutorial_toggle_button_size() -> Vector2:
+	if _is_mobile_landscape_ui():
+		return Vector2(42, 42)
+	if _is_tiny_ui():
+		return Vector2(38, 38)
+	if _is_compact_ui():
+		return Vector2(34, 34)
+	return Vector2(28, 28)
+
+
+func _get_tutorial_continue_button_size() -> Vector2:
+	var mobile_landscape := _is_mobile_landscape_ui()
+	var compact := _is_compact_ui()
+	var tiny := _is_tiny_ui()
+	var result: Vector2 = STORY_TUTORIAL_CONTINUE_BUTTON_SIZE
+	if mobile_landscape:
+		result = Vector2(170, 52)
+	elif compact:
+		result = Vector2(150, 44)
+	if tiny and not mobile_landscape:
+		result = Vector2(154, 46)
+	if _story_instruction_phase_id == 6:
+		result = STORY_TUTORIAL_CHALLENGE_BUTTON_SIZE
+		if mobile_landscape:
+			result = Vector2(248, 54)
+		elif compact:
+			result = Vector2(226, 48)
+		if tiny and not mobile_landscape:
+			result = Vector2(232, 50)
+	if _challenge_loss_instruction_active:
+		result = Vector2(164, 42)
+		if mobile_landscape:
+			result = Vector2(204, 52)
+		elif compact:
+			result = Vector2(174, 46)
+		if tiny and not mobile_landscape:
+			result = Vector2(188, 48)
+	return result
+
+
+func _get_tutorial_continue_gardening_button_size() -> Vector2:
+	var mobile_landscape := _is_mobile_landscape_ui()
+	var compact := _is_compact_ui()
+	var tiny := _is_tiny_ui()
+	var result := Vector2(196, 44)
+	if mobile_landscape:
+		result = Vector2(242, 54)
+	elif compact:
+		result = Vector2(214, 48)
+	if tiny and not mobile_landscape:
+		result = Vector2(232, 50)
+	return result
+
+
+func _get_tutorial_button_stack_height(panel_width: float) -> float:
+	if not _is_guidance_instruction_mode():
+		return 0.0
+	var margin := _get_tutorial_content_margin()
+	var gap := _get_tutorial_button_gap()
+	var continue_size := _get_tutorial_continue_button_size()
+	if not _should_show_continue_gardening_button():
+		return continue_size.y
+	var garden_size := _get_tutorial_continue_gardening_button_size()
+	var available_width: float = maxf(panel_width - margin * 2.0, 1.0)
+	if garden_size.x + continue_size.x + gap <= available_width:
+		return maxf(garden_size.y, continue_size.y)
+	return garden_size.y + gap + continue_size.y
+
+
+func _get_tutorial_vertical_padding(panel_width: float) -> float:
+	var margin := _get_tutorial_content_margin()
+	var gap := _get_tutorial_button_gap()
+	var toggle_size := _get_tutorial_toggle_button_size()
+	var button_stack_height := _get_tutorial_button_stack_height(panel_width)
+	var bottom_padding := margin
+	if button_stack_height > 0.0:
+		bottom_padding += gap + button_stack_height
+	return margin + toggle_size.y + gap + bottom_padding
+
+
+func _get_story_facts_panel_margin() -> float:
+	if _is_mobile_landscape_ui():
+		return 18.0
+	if _is_tiny_ui():
+		return 16.0
+	if _is_compact_ui():
+		return 20.0
+	return 24.0
+
+
+func _get_story_facts_button_gap() -> float:
+	return 18.0 if _is_mobile_landscape_ui() else 14.0
+
+
+func _get_story_facts_bottom_button_size() -> Vector2:
+	var mobile_landscape := _is_mobile_landscape_ui()
+	var compact := _is_compact_ui()
+	var tiny := _is_tiny_ui()
+	var result := Vector2(190, 44)
+	if mobile_landscape:
+		result = Vector2(228, 54)
+	elif compact:
+		result = Vector2(204, 46)
+	if tiny and not mobile_landscape:
+		result = Vector2(212, 48)
+	return result
 
 
 func _get_tutorial_expanded_top_y(safe_rect: Rect2) -> float:
@@ -2052,14 +2186,14 @@ func _update_tutorial_expanded_size_for_text() -> void:
 		var measured_height = float(label.call("get_line_height"))
 		if measured_height > 0.0:
 			line_height = measured_height
-	var width_for_text = maxf(_tutorial_expanded_size_base.x - TUTORIAL_LABEL_HORIZONTAL_PADDING, 120.0)
-	var vertical_padding = TUTORIAL_PANEL_STORY_TEXT_VERTICAL_PADDING if _is_guidance_instruction_mode() else TUTORIAL_PANEL_TEXT_VERTICAL_PADDING
+	var margin := _get_tutorial_content_margin()
+	var width_for_text = maxf(_tutorial_expanded_size_base.x - margin * 2.0, 120.0)
+	var vertical_padding := _get_tutorial_vertical_padding(_tutorial_expanded_size_base.x)
 	var max_height: float = _get_tutorial_expanded_max_height(_tutorial_expanded_size_base.y)
-	if _is_guidance_instruction_mode():
-		var text_area_size: Vector2 = Vector2(width_for_text, maxf(max_height - vertical_padding, 48.0))
-		font_size = _get_tutorial_adaptive_font_size(text_value, text_area_size)
-		label.add_theme_font_size_override("font_size", font_size)
-		line_height = float(font_size) * 1.25
+	var text_area_size: Vector2 = Vector2(width_for_text, maxf(max_height - vertical_padding, 48.0))
+	font_size = _get_tutorial_adaptive_font_size(text_value, text_area_size)
+	label.add_theme_font_size_override("font_size", font_size)
+	line_height = float(font_size) * 1.25
 	var approx_chars_per_line = maxi(int(floor(width_for_text / maxf(float(font_size) * 0.58, 6.0))), 8)
 	var explicit_lines = maxi(text_value.count("\n") + 1, 1)
 	var measured_lines = 0
@@ -2136,19 +2270,14 @@ func _apply_responsive_layout() -> void:
 		minimap_row.add_theme_constant_override("separation", 14 if mobile_landscape else (12 if compact else 8))
 	var tutorial_label: Label = _tutorial_label
 	if is_instance_valid(tutorial_label):
-		var label_bottom_padding := 22.0 if mobile_landscape else 18.0
-		if story_instructions:
-			label_bottom_padding = 138.0 if show_continue_gardening else 82.0
 		tutorial_label.add_theme_font_size_override("font_size", 20 if mobile_landscape else (19 if tiny else (18 if compact else 17)))
 		tutorial_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		tutorial_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		tutorial_label.offset_left = 24.0 if story_instructions else 16.0
-		tutorial_label.offset_top = 20.0 if story_instructions else 14.0
-		tutorial_label.offset_right = -24.0 if story_instructions else -18.0
-		tutorial_label.offset_bottom = -label_bottom_padding
 	var max_expanded_width = STORY_TUTORIAL_PANEL_EXPANDED_SIZE.x if story_instructions else TUTORIAL_PANEL_EXPANDED_SIZE.x
 	var min_expanded_width = 300.0 if story_instructions else 248.0
 	var expanded_width = minf(max_expanded_width, maxf(safe_rect.size.x - _get_safe_edge_margin() * 2.0, min_expanded_width))
+	expanded_width = minf(expanded_width, safe_rect.size.x)
+	expanded_width = maxf(expanded_width, minf(min_expanded_width, safe_rect.size.x))
 	var expanded_height = 206.0 if mobile_landscape else (188.0 if tiny else (182.0 if compact else TUTORIAL_PANEL_EXPANDED_SIZE.y))
 	if story_instructions:
 		expanded_height = 286.0 if mobile_landscape else (246.0 if tiny else (262.0 if compact else STORY_TUTORIAL_PANEL_EXPANDED_SIZE.y))
@@ -2158,63 +2287,20 @@ func _apply_responsive_layout() -> void:
 	_tutorial_expanded_size = _tutorial_expanded_size_base
 	_tutorial_collapsed_size = Vector2(52, 52) if compact else TUTORIAL_PANEL_COLLAPSED_SIZE
 	if is_instance_valid(_tutorial_toggle_button):
-		_tutorial_toggle_button.custom_minimum_size = Vector2(42, 42) if mobile_landscape else (Vector2(38, 38) if tiny else (Vector2(34, 34) if compact else Vector2(28, 28)))
+		_tutorial_toggle_button.custom_minimum_size = _get_tutorial_toggle_button_size()
 		_tutorial_toggle_button.add_theme_font_size_override("font_size", 20 if mobile_landscape else (18 if compact else 14))
 	if is_instance_valid(_tutorial_continue_button):
-		var continue_size = Vector2(170, 52) if mobile_landscape else (Vector2(150, 44) if compact else STORY_TUTORIAL_CONTINUE_BUTTON_SIZE)
-		if tiny and not mobile_landscape:
-			continue_size = Vector2(154, 46)
-		if _story_instruction_phase_id == 6:
-			continue_size = Vector2(248, 54) if mobile_landscape else (Vector2(226, 48) if compact else STORY_TUTORIAL_CHALLENGE_BUTTON_SIZE)
-			if tiny and not mobile_landscape:
-				continue_size = Vector2(232, 50)
-		if _challenge_loss_instruction_active:
-			continue_size = Vector2(204, 52) if mobile_landscape else (Vector2(174, 46) if compact else Vector2(164, 42))
-			if tiny and not mobile_landscape:
-				continue_size = Vector2(188, 48)
+		var continue_size := _get_tutorial_continue_button_size()
 		_tutorial_continue_button.custom_minimum_size = continue_size
 		_tutorial_continue_button.size = continue_size
-		_tutorial_continue_button.anchor_left = 0.5
-		_tutorial_continue_button.anchor_right = 0.5
-		_tutorial_continue_button.anchor_top = 1.0
-		_tutorial_continue_button.anchor_bottom = 1.0
 		_tutorial_continue_button.add_theme_font_size_override("font_size", 20 if mobile_landscape else (18 if compact else 16))
-		var garden_size = Vector2(242, 54) if mobile_landscape else (Vector2(214, 48) if compact else Vector2(196, 44))
-		if tiny and not mobile_landscape:
-			garden_size = Vector2(232, 50)
+		var garden_size := _get_tutorial_continue_gardening_button_size()
 		if is_instance_valid(_tutorial_continue_gardening_button):
 			_tutorial_continue_gardening_button.custom_minimum_size = garden_size
 			_tutorial_continue_gardening_button.size = garden_size
-			_tutorial_continue_gardening_button.anchor_left = 0.5
-			_tutorial_continue_gardening_button.anchor_right = 0.5
-			_tutorial_continue_gardening_button.anchor_top = 1.0
-			_tutorial_continue_gardening_button.anchor_bottom = 1.0
 			_tutorial_continue_gardening_button.add_theme_font_size_override("font_size", 20 if mobile_landscape else (18 if compact else 16))
-		var button_gap := 16.0 if mobile_landscape else 12.0
-		var buttons_fit_width: bool = garden_size.x + continue_size.x + button_gap + 32.0 <= expanded_width
-		if show_continue_gardening and is_instance_valid(_tutorial_continue_gardening_button) and buttons_fit_width:
-			var total_width = garden_size.x + continue_size.x + button_gap
-			var start_x = -total_width * 0.5
-			_tutorial_continue_gardening_button.offset_left = start_x
-			_tutorial_continue_gardening_button.offset_right = start_x + garden_size.x
-			_tutorial_continue_gardening_button.offset_top = -garden_size.y - (18.0 if mobile_landscape else 12.0)
-			_tutorial_continue_gardening_button.offset_bottom = -(18.0 if mobile_landscape else 12.0)
-			_tutorial_continue_button.offset_left = start_x + garden_size.x + button_gap
-			_tutorial_continue_button.offset_right = start_x + total_width
-			_tutorial_continue_button.offset_top = -continue_size.y - (18.0 if mobile_landscape else 12.0)
-			_tutorial_continue_button.offset_bottom = -(18.0 if mobile_landscape else 12.0)
-		else:
-			_tutorial_continue_button.offset_left = -continue_size.x * 0.5
-			_tutorial_continue_button.offset_right = continue_size.x * 0.5
-			_tutorial_continue_button.offset_top = -continue_size.y - (18.0 if mobile_landscape else 12.0)
-			_tutorial_continue_button.offset_bottom = -(18.0 if mobile_landscape else 12.0)
-			if is_instance_valid(_tutorial_continue_gardening_button):
-				_tutorial_continue_gardening_button.offset_left = -garden_size.x * 0.5
-				_tutorial_continue_gardening_button.offset_right = garden_size.x * 0.5
-				_tutorial_continue_gardening_button.offset_top = -garden_size.y - continue_size.y - button_gap - (18.0 if mobile_landscape else 12.0)
-				_tutorial_continue_gardening_button.offset_bottom = -continue_size.y - button_gap - (18.0 if mobile_landscape else 12.0)
 	if is_instance_valid(_story_facts_button):
-		_story_facts_button.custom_minimum_size = Vector2(236, 54) if mobile_landscape else (Vector2(214, 48) if compact else STORY_FACTS_BUTTON_SIZE)
+		_story_facts_button.custom_minimum_size = Vector2(284, 54) if mobile_landscape else (Vector2(254, 48) if compact else STORY_FACTS_BUTTON_SIZE)
 		_story_facts_button.add_theme_font_size_override("font_size", 20 if mobile_landscape else (18 if compact else 16))
 	var high_title: Label = get_node_or_null("HighScoreContainer/VBoxContainer/TitleLabel") as Label
 	if is_instance_valid(high_title):
@@ -2412,6 +2498,65 @@ func _should_show_continue_gardening_button() -> bool:
 	return _is_story_instruction_mode() and _story_instruction_phase_id == 6 and not _challenge_loss_instruction_active
 
 
+func _layout_tutorial_panel_contents() -> void:
+	var tutorial: Control = _tutorial_panel
+	if not is_instance_valid(tutorial) or _tutorial_collapsed:
+		return
+	var panel_size: Vector2 = tutorial.size
+	if panel_size.x <= 0.0 or panel_size.y <= 0.0:
+		panel_size = _tutorial_expanded_size
+	var margin := _get_tutorial_content_margin()
+	var gap := _get_tutorial_button_gap()
+	var toggle_size := _get_tutorial_toggle_button_size()
+	var button_stack_height := _get_tutorial_button_stack_height(panel_size.x)
+	var bottom_reserved := margin
+	if button_stack_height > 0.0:
+		bottom_reserved += gap + button_stack_height
+
+	var label_top: float = margin + toggle_size.y + gap
+	var label_height: float = panel_size.y - label_top - bottom_reserved
+	var label_right_margin := margin
+	if label_height < 48.0:
+		label_top = margin
+		label_right_margin += toggle_size.x + gap
+		label_height = panel_size.y - label_top - bottom_reserved
+	label_height = maxf(label_height, 1.0)
+	var label_size := Vector2(maxf(panel_size.x - margin - label_right_margin, 80.0), label_height)
+	if is_instance_valid(_tutorial_label):
+		_tutorial_label.custom_minimum_size = Vector2.ZERO
+		_tutorial_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_tutorial_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		_tutorial_label.add_theme_font_size_override("font_size", _get_tutorial_adaptive_font_size(str(_tutorial_label.text), label_size))
+		_set_control_rect(_tutorial_label, Vector2(margin, label_top), label_size)
+
+	if not _is_guidance_instruction_mode() or not is_instance_valid(_tutorial_continue_button):
+		return
+	var available_width: float = maxf(panel_size.x - margin * 2.0, 80.0)
+	var continue_size := _get_tutorial_continue_button_size()
+	continue_size.x = minf(continue_size.x, available_width)
+	var button_block_top: float = panel_size.y - margin - button_stack_height
+	if _should_show_continue_gardening_button() and is_instance_valid(_tutorial_continue_gardening_button):
+		var garden_size := _get_tutorial_continue_gardening_button_size()
+		garden_size.x = minf(garden_size.x, available_width)
+		if garden_size.x + continue_size.x + gap <= available_width:
+			var row_height = maxf(garden_size.y, continue_size.y)
+			var row_width = garden_size.x + continue_size.x + gap
+			var row_x = margin + (available_width - row_width) * 0.5
+			var row_y = panel_size.y - margin - row_height
+			_set_control_rect(_tutorial_continue_gardening_button, Vector2(row_x, row_y + (row_height - garden_size.y) * 0.5), garden_size)
+			_set_control_rect(_tutorial_continue_button, Vector2(row_x + garden_size.x + gap, row_y + (row_height - continue_size.y) * 0.5), continue_size)
+			return
+		var stacked_width = minf(maxf(garden_size.x, continue_size.x), available_width)
+		garden_size.x = stacked_width
+		continue_size.x = stacked_width
+		var stack_x = margin + (available_width - stacked_width) * 0.5
+		_set_control_rect(_tutorial_continue_gardening_button, Vector2(stack_x, button_block_top), garden_size)
+		_set_control_rect(_tutorial_continue_button, Vector2(stack_x, button_block_top + garden_size.y + gap), continue_size)
+		return
+	var button_x = margin + (available_width - continue_size.x) * 0.5
+	_set_control_rect(_tutorial_continue_button, Vector2(button_x, button_block_top), continue_size)
+
+
 func _set_tutorial_collapsed(collapsed: bool) -> void:
 	if _tutorial_collapsed == collapsed:
 		return
@@ -2440,6 +2585,8 @@ func _apply_tutorial_panel_state() -> void:
 	var target_size = _tutorial_collapsed_size if _tutorial_collapsed else _tutorial_expanded_size
 	tutorial.custom_minimum_size = target_size
 	tutorial.size = target_size
+	if not _tutorial_collapsed:
+		_layout_tutorial_panel_contents()
 	if is_instance_valid(_tutorial_toggle_button):
 		_tutorial_toggle_button.text = "i" if _tutorial_collapsed else "X"
 		_tutorial_toggle_button.visible = tutorial.visible
@@ -2459,10 +2606,10 @@ func _position_tutorial_toggle() -> void:
 	_tutorial_toggle_button.visible = true
 	var rect = tutorial.get_global_rect()
 	var btn_size = _tutorial_toggle_button.custom_minimum_size
-	var pad := 2.0
+	var pad := _get_tutorial_toggle_pad()
 	_tutorial_toggle_button.global_position = Vector2(
 		rect.position.x + rect.size.x - btn_size.x - pad,
-		rect.position.y + rect.size.y - btn_size.y - pad
+		rect.position.y + pad
 	)
 
 
@@ -2520,6 +2667,8 @@ func _layout_tutorial_container() -> void:
 	size.x = minf(size.x, safe_rect.size.x)
 	size.y = minf(size.y, safe_rect.size.y)
 	tutorial.size = size
+	if not _tutorial_collapsed:
+		_layout_tutorial_panel_contents()
 	if _tutorial_collapsed:
 		if is_instance_valid(_high_score_container) and _high_score_container.visible:
 			var high_score_rect = _high_score_container.get_global_rect()
@@ -2548,13 +2697,12 @@ func _layout_story_facts_panel() -> void:
 		return
 	var safe_rect = _get_padded_safe_view_rect()
 	var compact = _is_compact_ui()
-	var tiny = _is_tiny_ui()
 	var mobile_landscape := _is_mobile_landscape_ui()
 	var panel_size = STORY_FACTS_PANEL_SIZE
-	panel_size.x = minf(panel_size.x, maxf(safe_rect.size.x, 300.0))
-	panel_size.y = minf(panel_size.y, maxf(safe_rect.size.y, 260.0))
-	if compact:
-		panel_size = Vector2(minf(panel_size.x, safe_rect.size.x), minf(panel_size.y, safe_rect.size.y))
+	panel_size.x = minf(panel_size.x, safe_rect.size.x)
+	panel_size.y = minf(panel_size.y, safe_rect.size.y)
+	panel_size.x = maxf(panel_size.x, minf(300.0, safe_rect.size.x))
+	panel_size.y = maxf(panel_size.y, minf(220.0, safe_rect.size.y))
 	_story_facts_panel.custom_minimum_size = panel_size
 	_story_facts_panel.size = panel_size
 	_story_facts_panel.global_position = Vector2(
@@ -2562,16 +2710,18 @@ func _layout_story_facts_panel() -> void:
 		round(safe_rect.position.y + (safe_rect.size.y - panel_size.y) * 0.5)
 	)
 
+	var margin := _get_story_facts_panel_margin()
+	var gap := _get_story_facts_button_gap()
 	if is_instance_valid(_story_facts_close_button):
 		var close_size = Vector2(44, 44) if mobile_landscape else (Vector2(38, 38) if compact else Vector2(34, 34))
 		_story_facts_close_button.custom_minimum_size = close_size
 		_story_facts_close_button.size = close_size
-		_story_facts_close_button.position = Vector2(panel_size.x - close_size.x - 10.0, 10.0)
+		_set_control_rect(_story_facts_close_button, Vector2(panel_size.x - close_size.x - margin, margin), close_size)
 		_story_facts_close_button.add_theme_font_size_override("font_size", 20 if mobile_landscape else (18 if compact else 16))
 
-	var bottom_button_size = Vector2(228, 54) if mobile_landscape else (Vector2(204, 46) if compact else Vector2(190, 44))
-	if tiny and not mobile_landscape:
-		bottom_button_size = Vector2(212, 48)
+	var bottom_button_size := _get_story_facts_bottom_button_size()
+	var available_width: float = maxf(panel_size.x - margin * 2.0, 80.0)
+	bottom_button_size.x = minf(bottom_button_size.x, available_width)
 	var show_challenge = _story_facts_current_phase == 6
 	if is_instance_valid(_story_facts_challenge_button):
 		_story_facts_challenge_button.visible = show_challenge
@@ -2581,25 +2731,38 @@ func _layout_story_facts_panel() -> void:
 		_story_facts_back_button.custom_minimum_size = bottom_button_size
 		_story_facts_back_button.size = bottom_button_size
 
-	var gap := 18.0 if mobile_landscape else 14.0
 	var buttons_width = bottom_button_size.x
+	var button_block_height = bottom_button_size.y
+	var stack_buttons := false
 	if show_challenge:
 		buttons_width = bottom_button_size.x * 2.0 + gap
-	var start_x = (panel_size.x - buttons_width) * 0.5
-	var button_y = panel_size.y - bottom_button_size.y - (24.0 if mobile_landscape else 18.0)
+		stack_buttons = buttons_width > available_width
+		if stack_buttons:
+			buttons_width = bottom_button_size.x
+			button_block_height = bottom_button_size.y * 2.0 + gap
+	var start_x = margin + (available_width - buttons_width) * 0.5
+	var button_y = panel_size.y - margin - button_block_height
 	if is_instance_valid(_story_facts_back_button):
-		_story_facts_back_button.position = Vector2(start_x, button_y)
+		_set_control_rect(_story_facts_back_button, Vector2(start_x, button_y), bottom_button_size)
 	if show_challenge and is_instance_valid(_story_facts_challenge_button):
-		_story_facts_challenge_button.position = Vector2(start_x + bottom_button_size.x + gap, button_y)
+		if stack_buttons:
+			_set_control_rect(_story_facts_challenge_button, Vector2(start_x, button_y + bottom_button_size.y + gap), bottom_button_size)
+		else:
+			_set_control_rect(_story_facts_challenge_button, Vector2(start_x + bottom_button_size.x + gap, button_y), bottom_button_size)
 
 	if is_instance_valid(_story_facts_label):
-		var label_area_size: Vector2 = Vector2(maxf(panel_size.x - 60.0, 80.0), maxf(button_y - (76.0 if mobile_landscape else 64.0), 80.0))
+		_story_facts_label.custom_minimum_size = Vector2.ZERO
+		var close_height := _story_facts_close_button.size.y if is_instance_valid(_story_facts_close_button) else 0.0
+		var close_width := _story_facts_close_button.size.x if is_instance_valid(_story_facts_close_button) else 0.0
+		var label_top = margin + close_height + gap
+		var label_right_margin := margin
+		if label_top > button_y - gap - 1.0:
+			label_top = margin
+			label_right_margin += close_width + gap
+		var label_area_size: Vector2 = Vector2(maxf(panel_size.x - margin - label_right_margin, 80.0), maxf(button_y - gap - label_top, 1.0))
 		var label_font_size: int = _get_story_facts_adaptive_font_size(str(_story_facts_label.text), label_area_size)
-		if mobile_landscape:
-			label_font_size = maxi(label_font_size, 20)
 		_story_facts_label.add_theme_font_size_override("font_size", label_font_size)
-		_story_facts_label.position = Vector2(30.0, 54.0)
-		_story_facts_label.size = label_area_size
+		_set_control_rect(_story_facts_label, Vector2(margin, label_top), label_area_size)
 
 
 func _layout_back_confirm_panel() -> void:

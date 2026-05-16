@@ -57,6 +57,7 @@ const DEFAULT_CAMERA_SMOOTHING_SPEED := 8.0
 const WORLD_ZOOM_NORMAL := Vector2(0.5, 0.5)
 const WORLD_ZOOM_LARGE := Vector2(2.0, 2.0)
 const WORLD_ZOOM_ENABLED_EPSILON := 0.01
+const WORLD_ZOOM_FIT_MARGIN := 1.001
 const TOUCH_PINCH_MIN_DISTANCE := 24.0
 const TOUCH_PINCH_ZOOM_EPSILON := 0.004
 
@@ -739,6 +740,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event is InputEventScreenDrag and _handle_pinch_drag_event(event):
 			get_viewport().set_input_as_handled()
 			return
+		if event is InputEventMagnifyGesture and not Global.is_dragging:
+			var magnify_event := event as InputEventMagnifyGesture
+			var pointer_pos = get_viewport().get_mouse_position()
+			if not _is_pointer_over_ui(pointer_pos):
+				_clear_selection_once_for_camera_move()
+				_set_world_zoom_scalar(_get_world_zoom_scalar() * maxf(magnify_event.factor, 0.001), pointer_pos, true)
+				get_viewport().set_input_as_handled()
+				return
 
 	if enable_touch_pan:
 		if event is InputEventScreenTouch:
@@ -1510,13 +1519,40 @@ func _setup_camera() -> void:
 
 
 func _get_target_world_zoom() -> Vector2:
-	return WORLD_ZOOM_LARGE if Global.world_zoom_enabled else WORLD_ZOOM_NORMAL
+	var target := WORLD_ZOOM_LARGE if Global.world_zoom_enabled else WORLD_ZOOM_NORMAL
+	var target_scalar: float = clampf(target.x, _get_min_world_zoom_scalar(), _get_max_world_zoom_scalar())
+	return Vector2(target_scalar, target_scalar)
 
 
 func _get_safe_camera_zoom() -> Vector2:
 	if not is_instance_valid(camera):
 		return WORLD_ZOOM_NORMAL
 	return Vector2(maxf(absf(camera.zoom.x), 0.001), maxf(absf(camera.zoom.y), 0.001))
+
+
+func _get_min_world_zoom_scalar() -> float:
+	var base_min: float = minf(WORLD_ZOOM_NORMAL.x, WORLD_ZOOM_LARGE.x)
+	var rect := get_world_rect()
+	var view_size := get_viewport().get_visible_rect().size
+	if rect.size.x <= 0.0 or rect.size.y <= 0.0 or view_size.x <= 0.0 or view_size.y <= 0.0:
+		return base_min
+	var fit_zoom: float = maxf(view_size.x / rect.size.x, view_size.y / rect.size.y) * WORLD_ZOOM_FIT_MARGIN
+	return maxf(base_min, fit_zoom)
+
+
+func _get_max_world_zoom_scalar() -> float:
+	return maxf(maxf(WORLD_ZOOM_NORMAL.x, WORLD_ZOOM_LARGE.x), _get_min_world_zoom_scalar())
+
+
+func _clamp_world_zoom_to_limits() -> bool:
+	if not is_instance_valid(camera):
+		return false
+	var previous_zoom := camera.zoom
+	var min_zoom: float = _get_min_world_zoom_scalar()
+	var target_scalar: float = clampf(_get_world_zoom_scalar(), min_zoom, _get_max_world_zoom_scalar())
+	camera.zoom = Vector2(target_scalar, target_scalar)
+	Global.world_zoom_enabled = target_scalar > min_zoom + WORLD_ZOOM_ENABLED_EPSILON
+	return previous_zoom != camera.zoom
 
 
 func _get_world_zoom_scalar() -> float:
@@ -1572,8 +1608,8 @@ func _get_visible_world_size() -> Vector2:
 func _set_world_zoom_scalar(zoom_scalar: float, focal_screen_pos: Vector2, preserve_focal: bool, immediate: bool = false) -> void:
 	if not is_instance_valid(camera):
 		return
-	var min_zoom: float = minf(WORLD_ZOOM_NORMAL.x, WORLD_ZOOM_LARGE.x)
-	var max_zoom: float = maxf(WORLD_ZOOM_NORMAL.x, WORLD_ZOOM_LARGE.x)
+	var min_zoom: float = _get_min_world_zoom_scalar()
+	var max_zoom: float = _get_max_world_zoom_scalar()
 	var target_scalar: float = clampf(zoom_scalar, min_zoom, max_zoom)
 	var previous_enabled: bool = Global.world_zoom_enabled
 	var previous_zoom := camera.zoom
@@ -1597,14 +1633,17 @@ func set_world_zoom_enabled(enabled: bool, immediate: bool = true) -> void:
 	Global.world_zoom_enabled = enabled
 	if not is_instance_valid(camera):
 		return
+	var min_zoom: float = _get_min_world_zoom_scalar()
 	var target_zoom := _get_target_world_zoom()
+	var actual_enabled: bool = target_zoom.x > min_zoom + WORLD_ZOOM_ENABLED_EPSILON
 	var previous_zoom := camera.zoom
 	camera.zoom = target_zoom
+	Global.world_zoom_enabled = actual_enabled
 	_clamp_camera()
 	if immediate:
 		camera.reset_smoothing()
-	if previous_enabled != enabled or previous_zoom != target_zoom:
-		emit_signal("world_zoom_changed", enabled, target_zoom)
+	if previous_enabled != actual_enabled or previous_zoom != target_zoom:
+		emit_signal("world_zoom_changed", actual_enabled, target_zoom)
 
 
 func toggle_world_zoom() -> bool:
@@ -1640,7 +1679,12 @@ func set_camera_world_center(world_pos: Vector2, immediate: bool = false) -> voi
 
 
 func _on_viewport_size_changed() -> void:
+	var previous_enabled: bool = Global.world_zoom_enabled
+	var previous_zoom := camera.zoom if is_instance_valid(camera) else Vector2.ZERO
+	_clamp_world_zoom_to_limits()
 	_clamp_camera()
+	if is_instance_valid(camera) and (previous_enabled != Global.world_zoom_enabled or previous_zoom != camera.zoom):
+		emit_signal("world_zoom_changed", Global.world_zoom_enabled, camera.zoom)
 
 
 func _get_clamped_camera_position(candidate: Vector2) -> Vector2:
@@ -1891,7 +1935,7 @@ func _is_camera_pan_input_suppressed() -> bool:
 
 
 func _is_camera_pan_pointer_event(event: InputEvent) -> bool:
-	return event is InputEventMouseButton or event is InputEventMouseMotion or event is InputEventScreenTouch or event is InputEventScreenDrag or event is InputEventPanGesture
+	return event is InputEventMouseButton or event is InputEventMouseMotion or event is InputEventScreenTouch or event is InputEventScreenDrag or event is InputEventPanGesture or event is InputEventMagnifyGesture
 
 
 func _sync_global_world_context() -> void:

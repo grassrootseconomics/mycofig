@@ -43,8 +43,8 @@ Add `--bars` to profile worst-case resource bars, or `--no-lines` to isolate sim
 - Stable Android package/application ID:
   - `org.grassecon.socialsoil`
 - Version contract:
-  - `versionName`: `1.2.4` (from `project.godot` + preset override)
-  - `versionCode`: `16` (must be incremented before each Play upload)
+  - `versionName`: `1.2.5` (from `project.godot` + preset override)
+  - `versionCode`: `17` (must be incremented before each Play upload)
 
 Local test export:
 
